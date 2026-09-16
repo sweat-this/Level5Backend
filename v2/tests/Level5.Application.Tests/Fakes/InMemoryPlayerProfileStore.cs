@@ -28,4 +28,10 @@ public sealed class InMemoryPlayerProfileStore : IPlayerProfileStore
         _profiles[profile.Id.Value] = profile;
         return Task.CompletedTask;
     }
+
+    public Task UpdateAsync(PlayerProfile profile, CancellationToken cancellationToken)
+    {
+        _profiles[profile.Id.Value] = profile;
+        return Task.CompletedTask;
+    }
 }
