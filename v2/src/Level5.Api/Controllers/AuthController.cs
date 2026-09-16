@@ -13,6 +13,9 @@ public sealed record AccessTokenResponseDto(string AccessToken, DateTimeOffset E
 [ApiController]
 [Route("api/v2/auth")]
 [EnableRateLimiting("AuthPolicy")]
+// Register/Login are the two halves of one resource (account authentication), sharing this
+// route prefix and rate-limit policy - splitting them would fragment that, not simplify it.
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Major Code Smell", "S6960", Justification = "Register/Login are one cohesive auth resource, consistent with the thin-controller/one-use-case-per-action pattern used throughout this API.")]
 public sealed class AuthController(RegisterAccountUseCase registerAccount, LoginUseCase login) : ControllerBase
 {
     [HttpPost("register")]
