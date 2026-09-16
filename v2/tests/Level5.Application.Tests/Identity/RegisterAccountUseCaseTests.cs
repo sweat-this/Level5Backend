@@ -1,0 +1,47 @@
+using Level5.Application.Common;
+using Level5.Application.Identity;
+using Level5.Application.Tests.Fakes;
+using Xunit;
+
+namespace Level5.Application.Tests.Identity;
+
+public class RegisterAccountUseCaseTests
+{
+    private readonly InMemoryAccountStore _accounts = new();
+    private readonly InMemoryPlayerProfileStore _profiles = new();
+    private readonly RegisterAccountUseCase _useCase;
+
+    public RegisterAccountUseCaseTests()
+    {
+        _useCase = new RegisterAccountUseCase(
+            _accounts, _profiles, new FakePasswordHasher(), new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock());
+    }
+
+    [Fact]
+    public async Task Registering_creates_an_account_and_a_matching_player_profile()
+    {
+        var result = await _useCase.ExecuteAsync(new RegisterAccountRequest("patrick", "P@ssw0rd!", "Patrick"), CancellationToken.None);
+
+        Assert.StartsWith("PATRICK#", result.PlayerTag);
+        var profile = await _profiles.FindByIdAsync(result.PlayerId, CancellationToken.None);
+        Assert.NotNull(profile);
+        Assert.Equal(result.AccountId, profile!.AccountId);
+    }
+
+    [Fact]
+    public async Task Registering_a_taken_username_is_rejected()
+    {
+        await _useCase.ExecuteAsync(new RegisterAccountRequest("patrick", "P@ssw0rd!", "Patrick"), CancellationToken.None);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            _useCase.ExecuteAsync(new RegisterAccountRequest("Patrick", "OtherPassword!", "Someone"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Issues_an_access_token_on_success()
+    {
+        var result = await _useCase.ExecuteAsync(new RegisterAccountRequest("bob", "P@ssw0rd!", "Bob"), CancellationToken.None);
+
+        Assert.Contains(result.AccountId.Value.ToString(), result.AccessToken.Value);
+    }
+}
