@@ -8,8 +8,10 @@ record for the foundation slice, plus everything needed to run it locally.
 ## Status
 
 Domain: player identity/tags (exact case-insensitive lookup, self-scoped display-name update -
-see [Public player identity and self-update](#public-player-identity-and-self-update)),
-friendships, a full correspondence `VersusSeries` lifecycle (challenge → accept → play best-of-N
+see [Public player identity and self-update](#public-player-identity-and-self-update)), a
+database-enforced, concurrency-safe friend request/friendship lifecycle (see
+[Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle)), a full
+correspondence `VersusSeries` lifecycle (challenge → accept → play best-of-N
 → complete, server-authoritative, concurrency-safe, sealed results), and a complete
 authentication/session vertical (register, login, persistent rotating refresh sessions,
 logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy -
@@ -82,9 +84,10 @@ assembly.
   (`PlayerProfile.ChangeDisplayName`, validated with the same trim/length rules as creation - see
   [Public player identity and self-update](#public-player-identity-and-self-update) below);
   `PlayerId`, `AccountId`, `PlayerTag`, and `CreatedAt` never change after creation.
-- **Social** (`Level5.Domain.Social`): `FriendRequest` (Pending/Accepted/Declined/Cancelled) and
-  `Friendship` (a canonically-ordered pair, so a unique DB index prevents a duplicate in either
-  direction).
+- **Social** (`Level5.Domain.Social`): `FriendRequest` (Pending/Accepted/Declined/Cancelled, with a
+  `Revision` optimistic-concurrency token) and `Friendship` (a canonically-ordered pair, so a
+  unique DB index prevents a duplicate in either direction). See
+  [Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle).
 - **Competition** (`Level5.Domain.Competition`): `VersusSeries`, the aggregate root for a
   correspondence match. See [Competition domain](#competition-domain-versusseries) below.
 
@@ -241,6 +244,68 @@ The public in-game identity surface, behind `PlayersController` (`/api/v2/player
   `GET /api/v2/me` contract (`AccountController`) and is never merged into a players response.
   Asserted directly against the serialized JSON (not just DTO shape) in `PlayersFlowTests`.
 
+## Friends: requests and friendship lifecycle
+
+The social graph behind correspondence challenges, behind `FriendsController`
+(`/api/v2/friends/...`, `[Authorize]`). Modeled entirely by `FriendRequest` and `Friendship`
+(`Level5.Domain.Social`).
+
+- **Lifecycle**: a `FriendRequest` is created `Pending` (`SendFriendRequestUseCase`) and can only
+  leave that state once - `Pending -> Accepted/Declined/Cancelled`. Only the recipient may accept
+  or decline; only the sender may cancel; a request cannot friend a player to themselves
+  (`InvalidFriendRequestException`). There is deliberately no expiration or additional state -
+  a resolved request simply never transitions again
+  (`IllegalFriendRequestTransitionException`). Accepting produces a `Friendship`
+  (`FriendRequest.Accept` returns it), written in the same `SaveChanges` call as the request's own
+  `Accepted` status - see Atomicity below.
+- **Authorization is always the authenticated player**: every use case takes an `ActingPlayerId`
+  resolved from `ICurrentPlayerProvider`, never a request-body field - a caller cannot accept,
+  decline, or cancel on another player's behalf, and gets the same `403`/`FriendRequestAuthorizationException`
+  a stranger to the request would (`FriendsFlowTests`).
+- **Duplicate/conflicting requests - two layers of defense**: `SendFriendRequestUseCase` checks for
+  an existing pending request between the pair (either direction) and for an existing friendship
+  before inserting, returning a friendly `409`/`ConflictException`. That check alone cannot close a
+  race between two concurrent sends, so the database enforces the same invariant independently: two
+  unique partial indexes on `friend_requests` (`WHERE "Status" = 'Pending'`), one on
+  `(FromPlayerId, ToPlayerId)` for a same-direction duplicate and a second on the canonical
+  `(LowerPlayerId, UpperPlayerId)` pair (mirroring `Friendship`'s own canonical ordering) so a
+  crossed `A->B` / `B->A` race is blocked too - a unique index on the directional columns alone
+  cannot express that. A unique-violation from either index is translated to `ConflictException`
+  by `ConflictTranslatingSave`, never leaked as raw SQL. Covered against real Postgres in
+  `FriendshipStoreConstraintTests` (including a genuinely concurrent crossed-send race across two
+  separate `DbContext`s/connections).
+- **Optimistic concurrency on `FriendRequest`**: `Revision` (`long`) starts at `0` and increments by
+  exactly one on a successful `Accept`/`Decline`/`Cancel`; a rejected transition (bad actor, wrong
+  status) leaves it untouched. It is configured as an EF Core concurrency token
+  (`FriendRequestRow.Revision`, `IsConcurrencyToken()`), so `SaveChanges` conditions the `UPDATE` on
+  the revision that was originally loaded and throws `DbUpdateConcurrencyException` if another
+  transition already committed first - translated to the same `409`/`ConflictException` as a unique
+  violation (`ConflictTranslatingSave`). There is no automatic reload-and-retry: the losing request
+  simply surfaces the conflict, exactly like `VersusSeries.Revision` /
+  `IVersusSeriesStore.TrySaveAsync` for competition state. Covered against real Postgres in
+  `FriendRequestConcurrencyTests` - a stale transition loaded before a winner committed, and the
+  `Accept vs Decline` / `Accept vs Cancel` / `Accept vs Accept` races, each asserting the final
+  persisted state has no mixed outcome (e.g. never `Declined` *and* a `Friendship`).
+- **Atomicity of Accept**: `AcceptFriendRequestUseCase` stages the request's `Accepted`
+  status/`Revision` update and the new `Friendship` insert on the same tracked `DbContext`, then
+  commits both in one `SaveChangesAsync` call - a single implicit transaction. If the concurrency
+  check on the request fails, EF Core rolls back the whole batch, so the `Friendship` insert never
+  survives a losing `Accept`; there is no intermediate state where the request is `Accepted` but no
+  `Friendship` exists, or vice versa.
+- **List isolation**: `ListIncomingFriendRequestsUseCase`/`ListOutgoingFriendRequestsUseCase`/`ListFriendsUseCase`
+  each scope their query to the authenticated player only (`ToPlayerId`/`FromPlayerId`/participant
+  respectively) - a third player never sees another pair's requests or friendship through any of
+  these endpoints (`FriendsFlowTests`).
+- **Remove-friend**: `RemoveFriendUseCase` deletes the `Friendship` row; removing a pair that isn't
+  actually friends is `404`/`NotFoundException` (not idempotent) - either participant may initiate
+  a removal. After removal, the pair disappears from both players' `GET /api/v2/friends` and no
+  longer satisfies the accepted-friend prerequisite for a *new* `CreateChallengeUseCase` call -
+  already-created `VersusSeries` from before the removal are untouched (`FriendsFlowTests`).
+- **Friend-required challenges unchanged**: `CreateChallengeUseCase` still requires an accepted
+  `Friendship` (`IFriendshipStore.AreFriendsAsync`) before creating a `VersusSeries`, returning
+  `403`/`FriendshipRequiredException` otherwise - this slice hardens the friends system underneath
+  that check without changing its contract.
+
 ## Persistence
 
 `competitive_series` is a deliberate relational/JSONB hybrid, chosen after considering (and
@@ -301,6 +366,18 @@ forward, once V2 is actually deployed anywhere, migrations must be additive, not
 
 A second migration, `AddAuthSessions`, adds the `auth_sessions` table for the authentication/session
 slice. This one **is** additive on top of `InitialCreate`, per the rule above.
+
+A third migration, `HardenFriendshipInvariants`, adds `friend_requests.Revision` (the
+optimistic-concurrency token) and the canonical `LowerPlayerId`/`UpperPlayerId` columns plus their
+unique partial index (`WHERE "Status" = 'Pending'`) that blocks a crossed-direction duplicate
+pending request - see [Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle).
+Also additive; any pre-existing row's canonical pair is backfilled from its real
+`FromPlayerId`/`ToPlayerId` in the same migration rather than left at the column's default, so the
+new unique index can't spuriously collide two unrelated pairs. That backfill orders by Postgres's
+native `uuid` comparison (`LEAST`/`GREATEST`), which is not guaranteed to agree with
+`Friendship.Order`'s `.NET` `Guid.CompareTo` ordering that the application itself uses for new
+rows - safe today only because no V2 environment has ever run with real data (see the migration's
+own comment for what to do before ever applying it against a populated database).
 
 ## Shared competition domain
 

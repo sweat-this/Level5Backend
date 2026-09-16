@@ -8,6 +8,16 @@ namespace Level5.Infrastructure.Persistence.Repositories;
 
 public sealed class FriendshipStore(Level5V2DbContext db) : IFriendshipStore
 {
+    // Deliberately tracked (no AsNoTracking), unlike VersusSeriesStore.FindByIdAsync /
+    // AuthSessionStore.FindByIdAsync: those stores enforce their Revision concurrency token
+    // explicitly via ExecuteUpdateAsync(...).Where(r => r.Revision == expectedRevision), so their
+    // reads can safely be untracked. This store instead relies on FriendRequestRow.Revision being
+    // configured as an EF concurrency token (Level5V2DbContext) plus EF's identity map: because
+    // this query stays tracked, UpdateRequestAsync's re-query below returns the SAME tracked
+    // instance rather than refreshing it, so SaveChanges compares against the Revision that was
+    // current when THIS call ran, not whatever is in the database by the time of the write. Adding
+    // AsNoTracking here would make that comparison silently vacuous (current DB value vs. itself),
+    // defeating Accept/Decline/Cancel's race protection with no exception - see IFriendshipStore.
     public async Task<FriendRequest?> FindRequestByIdAsync(FriendRequestId id, CancellationToken cancellationToken)
     {
         var row = await db.FriendRequests.SingleOrDefaultAsync(r => r.Id == id.Value, cancellationToken);
@@ -41,14 +51,18 @@ public sealed class FriendshipStore(Level5V2DbContext db) : IFriendshipStore
 
     public async Task AddRequestAsync(FriendRequest request, CancellationToken cancellationToken)
     {
+        var (lower, upper) = Friendship.Order(request.FromPlayerId, request.ToPlayerId);
         await db.FriendRequests.AddAsync(new FriendRequestRow
         {
             Id = request.Id.Value,
             FromPlayerId = request.FromPlayerId.Value,
             ToPlayerId = request.ToPlayerId.Value,
+            LowerPlayerId = lower.Value,
+            UpperPlayerId = upper.Value,
             Status = request.Status.ToString(),
             CreatedAt = request.CreatedAt,
-            RespondedAt = request.RespondedAt
+            RespondedAt = request.RespondedAt,
+            Revision = request.Revision
         }, cancellationToken);
     }
 
@@ -57,6 +71,7 @@ public sealed class FriendshipStore(Level5V2DbContext db) : IFriendshipStore
         var row = await db.FriendRequests.SingleAsync(r => r.Id == request.Id.Value, cancellationToken);
         row.Status = request.Status.ToString();
         row.RespondedAt = request.RespondedAt;
+        row.Revision = request.Revision;
     }
 
     public Task<bool> AreFriendsAsync(PlayerId a, PlayerId b, CancellationToken cancellationToken)
@@ -99,7 +114,7 @@ public sealed class FriendshipStore(Level5V2DbContext db) : IFriendshipStore
 
     private static FriendRequest ToDomain(FriendRequestRow row) => FriendRequest.Rehydrate(
         new FriendRequestId(row.Id), new PlayerId(row.FromPlayerId), new PlayerId(row.ToPlayerId),
-        Enum.Parse<FriendRequestStatus>(row.Status), row.CreatedAt, row.RespondedAt);
+        Enum.Parse<FriendRequestStatus>(row.Status), row.CreatedAt, row.RespondedAt, row.Revision);
 
     private static Friendship ToDomain(FriendshipRow row) => Friendship.Rehydrate(
         new FriendshipId(row.Id), new PlayerId(row.LowerPlayerId), new PlayerId(row.UpperPlayerId), row.CreatedAt);

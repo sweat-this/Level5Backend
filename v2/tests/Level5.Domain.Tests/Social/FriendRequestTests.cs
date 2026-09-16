@@ -70,4 +70,68 @@ public class FriendRequestTests
 
         Assert.Throws<IllegalFriendRequestTransitionException>(() => request.Accept(_recipient, Now));
     }
+
+    [Fact]
+    public void A_newly_created_request_starts_at_revision_zero()
+    {
+        var request = FriendRequest.Create(_sender, _recipient, Now);
+
+        Assert.Equal(0, request.Revision);
+    }
+
+    [Theory]
+    [InlineData("accept")]
+    [InlineData("decline")]
+    [InlineData("cancel")]
+    public void A_successful_transition_increments_the_revision_exactly_once(string transition)
+    {
+        var request = FriendRequest.Create(_sender, _recipient, Now);
+
+        Apply(request, transition, Now);
+
+        Assert.Equal(1, request.Revision);
+    }
+
+    [Theory]
+    [InlineData("accept")]
+    [InlineData("decline")]
+    [InlineData("cancel")]
+    public void A_rejected_authorization_check_leaves_status_and_revision_unchanged(string transition)
+    {
+        var request = FriendRequest.Create(_sender, _recipient, Now);
+        var stranger = PlayerId.New();
+
+        Assert.Throws<FriendRequestAuthorizationException>(() => Apply(request, transition, Now, stranger));
+
+        Assert.Equal(FriendRequestStatus.Pending, request.Status);
+        Assert.Equal(0, request.Revision);
+    }
+
+    [Fact]
+    public void A_transition_on_an_already_resolved_request_leaves_revision_unchanged()
+    {
+        var request = FriendRequest.Create(_sender, _recipient, Now);
+        request.Decline(_recipient, Now);
+        var revisionAfterDecline = request.Revision;
+
+        Assert.Throws<IllegalFriendRequestTransitionException>(() => request.Cancel(_sender, Now));
+
+        Assert.Equal(revisionAfterDecline, request.Revision);
+    }
+
+    private void Apply(FriendRequest request, string transition, DateTimeOffset now, PlayerId? actingPlayerId = null)
+    {
+        switch (transition)
+        {
+            case "accept":
+                request.Accept(actingPlayerId ?? _recipient, now);
+                break;
+            case "decline":
+                request.Decline(actingPlayerId ?? _recipient, now);
+                break;
+            case "cancel":
+                request.Cancel(actingPlayerId ?? _sender, now);
+                break;
+        }
+    }
 }
