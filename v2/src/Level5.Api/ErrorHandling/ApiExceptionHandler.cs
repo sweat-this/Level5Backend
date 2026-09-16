@@ -48,6 +48,7 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
     {
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code),
         Level5.Application.Identity.InvalidCredentialsException e => (StatusCodes.Status401Unauthorized, e.Code),
+        Level5.Application.Identity.InvalidRefreshTokenException e => (StatusCodes.Status401Unauthorized, e.Code),
         FriendshipRequiredException e => (StatusCodes.Status403Forbidden, e.Code),
         ConflictException e => (StatusCodes.Status409Conflict, e.Code),
         ValidationFailedException e => (StatusCodes.Status400BadRequest, e.Code),

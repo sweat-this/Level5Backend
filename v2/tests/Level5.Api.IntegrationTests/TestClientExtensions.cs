@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Level5.Api.IntegrationTests;
 
-public sealed record RegisteredPlayer(HttpClient Client, Guid PlayerId, string AccessToken);
+public sealed record RegisteredPlayer(HttpClient Client, Guid PlayerId, string AccessToken, string RefreshToken);
 
 public static class TestClientExtensions
 {
@@ -27,8 +27,8 @@ public static class TestClientExtensions
         var body = await response.Content.ReadFromJsonAsync<RegisterResponse>(JsonOptions);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body!.AccessToken);
 
-        return new RegisteredPlayer(client, body.PlayerId, body.AccessToken);
+        return new RegisteredPlayer(client, body.PlayerId, body.AccessToken, body.RefreshToken);
     }
 
-    private sealed record RegisterResponse(string AccessToken, DateTimeOffset ExpiresAt, Guid PlayerId);
+    private sealed record RegisterResponse(string AccessToken, DateTimeOffset ExpiresAt, Guid PlayerId, string RefreshToken, DateTimeOffset RefreshTokenExpiresAt);
 }

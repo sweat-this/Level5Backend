@@ -72,6 +72,9 @@ builder.Services.AddLevel5Infrastructure(builder.Configuration);
 // dependency-injection framework reference.
 builder.Services.AddScoped<RegisterAccountUseCase>();
 builder.Services.AddScoped<LoginUseCase>();
+builder.Services.AddScoped<RefreshSessionUseCase>();
+builder.Services.AddScoped<LogoutUseCase>();
+builder.Services.AddScoped<GetCurrentAccountUseCase>();
 builder.Services.AddScoped<ResolvePlayerByTagUseCase>();
 builder.Services.AddScoped<SendFriendRequestUseCase>();
 builder.Services.AddScoped<AcceptFriendRequestUseCase>();
@@ -92,6 +95,7 @@ builder.Services.AddScoped<ListActiveSeriesUseCase>();
 builder.Services.AddScoped<StartAttemptUseCase>();
 builder.Services.AddScoped<CompleteAttemptUseCase>();
 
+builder.Services.AddScoped<ICurrentAccountAccessor, CurrentAccountAccessor>();
 builder.Services.AddScoped<ICurrentPlayerProvider, CurrentPlayerProvider>();
 
 builder.Services.AddCors(options =>
