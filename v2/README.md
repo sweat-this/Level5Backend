@@ -7,10 +7,13 @@ record for the foundation slice, plus everything needed to run it locally.
 
 ## Status
 
-Foundation slice only. Domain: player identity/tags, friendships, and a full correspondence
-`VersusSeries` lifecycle (challenge → accept → play best-of-N → complete, server-authoritative,
-concurrency-safe, sealed results). Not yet built: leaderboards, richer profiles, notifications,
-anything in the [Non-goals](#non-goals-for-this-slice) list below.
+Domain: player identity/tags, friendships, a full correspondence `VersusSeries` lifecycle
+(challenge → accept → play best-of-N → complete, server-authoritative, concurrency-safe, sealed
+results), and a complete authentication/session vertical (register, login, persistent rotating
+refresh sessions, logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized
+password policy - see [Authentication and sessions](#authentication-and-sessions)). Not yet built:
+leaderboards, richer profiles, notifications, anything in the
+[Non-goals](#non-goals-for-this-slice) list below.
 
 ## Why a separate solution
 
@@ -61,13 +64,14 @@ assembly.
 
 ## Domain boundaries (this slice)
 
-- **Identity** (`Level5.Domain.Identity`): `Account`, `Username`, `AccountStatus`, `Email`.
-  Purely the private authentication identity - no display name, no tag. `AccountStatus` is
-  `Active` (the default for every new account) or `Disabled`; this slice only defines and persists
-  it, it does not enforce it - a disabled account can still authenticate until the
-  authentication/session slice adds that check. `Email` is optional, normalized to a
-  lower-invariant canonical form for case-insensitive uniqueness, and never exposed through any
+- **Identity** (`Level5.Domain.Identity`): `Account`, `Username`, `AccountStatus`, `Email`,
+  `AuthSession`. Purely the private authentication identity - no display name, no tag.
+  `AccountStatus` is `Active` (the default for every new account) or `Disabled`, and is enforced at
+  login and at refresh (a `Disabled` account can do neither - see
+  [Authentication and sessions](#authentication-and-sessions)). `Email` is optional, normalized to
+  a lower-invariant canonical form for case-insensitive uniqueness, and never exposed through any
   public player-facing API or DTO - only `RegisterAccountUseCase`/`AccountStore` ever see it.
+  `AuthSession` is the persistent, rotating refresh session backing long-lived login - see below.
 - **Players** (`Level5.Domain.Players`): `PlayerProfile`, `PlayerTag`. The public in-game
   identity - deliberately holds nothing from the private account identity (no password hash,
   email, status, or IP address). `PlayerTag` is exact-match only (`Name#1234`; grammar: 2-20
@@ -109,6 +113,95 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
   the same `NotFoundException` a non-existent series id would produce (`SeriesLookup`), so probing
   random series ids can't be used to learn which ones are real.
 
+## Authentication and sessions
+
+The complete first V2 authenticated vertical: register, login, an authenticated `GET /api/v2/me`,
+persistent rotating refresh sessions, logout/revocation, `AccountStatus` enforcement, and a
+centralized password policy.
+
+- **Access tokens**: short-lived JWTs (`Jwt:AccessTokenLifetimeMinutes`, default 15 minutes),
+  issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal - `sub` is the V2 `AccountId` and
+  nothing else identifying (no email, username, or status) - this was already true before this
+  slice and is unchanged by it.
+- **Refresh sessions**: `AuthSession` (`Level5.Domain.Identity`) is a persistent, rotating
+  session - stable id, owning `AccountId`, a one-way hash of the current refresh credential
+  (`RefreshTokenHash`), `CreatedAt`/`ExpiresAt`/`RevokedAt`, and a `Revision` used exactly like
+  `VersusSeries.Revision` for optimistic concurrency. Default lifetime is 30 days
+  (`Sessions:RefreshTokenLifetimeDays`), extended on every successful rotation.
+- **Refresh credential security**: the raw refresh secret is 256 bits from
+  `RandomNumberGenerator` (a CSPRNG), base64url-encoded (`RefreshTokenGenerator`) - never derived
+  from any account/session id. Only a SHA-256 hex digest of it is ever persisted or looked up
+  (`IAuthSessionStore.FindByRefreshTokenHashAsync`); the raw value is returned exactly once, in the
+  register/login/refresh response body, and is never logged. This is deliberately not the same
+  port as `IPasswordHasher`: a refresh token is already a high-entropy random secret, not
+  low-entropy human input, so a fast one-way hash is the right tool for exact-match lookup rather
+  than a slow, salted password-hashing algorithm.
+- **Rotation and replay prevention**: `POST /api/v2/auth/refresh` looks up the session by the
+  presented credential's hash, checks `AuthSession.CanRefresh` (not revoked, not expired) and that
+  the owning account is still `Active`, then calls `AuthSession.Rotate` and persists it via
+  `IAuthSessionStore.TrySaveAsync(session, expectedRevision, ...)` - a conditional
+  `UPDATE ... WHERE id = @id AND revision = @expectedRevision`, the same pattern
+  `VersusSeriesStore.TrySaveAsync` uses. A 0-row update (someone already rotated or revoked this
+  exact session) is treated as an invalid/replayed credential, not a generic conflict - so at most
+  one of several concurrent refresh requests presenting the same token can ever succeed, and the
+  old credential is unusable immediately afterward. Covered by
+  `AuthSessionStoreTests.TrySaveAsync_rotation_wins_on_the_correct_revision_and_loses_on_a_stale_one`
+  against real Postgres.
+- **One stable failure contract for refresh**: unknown, expired, revoked, already-rotated
+  (replayed), and "owned by a non-`Active` account" all surface as the same `401` /
+  `invalid_refresh_token` - a client can never learn which one occurred.
+- **Logout/revocation** (`POST /api/v2/auth/logout`): revokes the session owning the presented
+  refresh credential (`AuthSession.Revoke`), so it can never be exchanged for another access token
+  again. Does not require a valid access token (logout must work even after the access token has
+  already expired - the caller authenticates by possessing the refresh credential itself, not a
+  bearer token). Idempotent: an unknown, already-rotated, or already-revoked credential is treated
+  as a no-op success, since the caller's intent ("this credential should not work anymore") is
+  already satisfied; a genuine infrastructure failure still propagates as an error rather than
+  being swallowed into a fake success.
+- **Access-token behavior after logout/revocation (explicit policy)**: revoking a refresh session
+  stops it from minting *future* access tokens; it does **not** invalidate an access token already
+  issued from it, which remains valid until its own short expiry. There is deliberately no
+  database lookup on the bearer-authenticated request path to check session state - only the
+  refresh/logout endpoints touch `auth_sessions`. If a product requirement later demands immediate
+  revocation of already-issued access tokens, that is a stateful-JWT-validation decision to make
+  deliberately (e.g. a token denylist), not something to introduce silently.
+- **Disabled accounts**: checked in `LoginUseCase` (after password verification, so a disabled
+  account takes the same password-hashing cost as an active one and isn't distinguishable by
+  response timing) and in `RefreshSessionUseCase`. A `Disabled` account can neither log in nor
+  refresh; both fail with the same generic contract (`invalid_credentials` / `invalid_refresh_token`)
+  used for every other failure mode in that endpoint. There is no account-status-changing endpoint
+  in this slice (still a non-goal) - integration tests flip `Status` directly in the database, the
+  same way a future admin tool eventually would.
+- **`GET /api/v2/me`**: the private authenticated-account view - `AccountId`, `Username`, `Status`,
+  `PlayerId`, `CreatedAt`. Deliberately separate from `GET /api/v2/players/me` (the public in-game
+  `PlayerProfile`). Claim parsing (`sub` -> `AccountId`) lives in exactly one place,
+  `Level5.Api.Security.ICurrentAccountAccessor`, shared by this endpoint and
+  `CurrentPlayerProvider` so it is never duplicated; `GetCurrentAccountUseCase` itself takes a
+  plain `AccountId` and has no dependency on `HttpContext`/`ClaimsPrincipal`/ASP.NET Core types.
+- **Password policy**: centralized behind `IPasswordPolicy`, enforced in `RegisterAccountUseCase`
+  before any account/profile/session state is created. No established policy existed anywhere in
+  this repository or its issues, so `PasswordPolicy` (`Level5.Infrastructure.Identity`) applies
+  conservative, NIST 800-63B-aligned defaults: a minimum length of 8 characters and a maximum of
+  128 (bounding hashing cost on pathological input, not a security control), and deliberately *no*
+  forced character-class complexity (uppercase/digit/symbol) - current guidance treats those rules
+  as pushing users toward predictable patterns without materially improving resistance to
+  guessing, and no concrete V2 product requirement calls for them. Revisit only when a concrete
+  requirement (e.g. a breached-password check) exists; do not add complexity rules speculatively.
+- **Registration/login durability**: both use one `IUnitOfWork.SaveChangesAsync` call committing
+  account + player profile + initial/new `AuthSession` together, and only issue the access token
+  (and return the raw refresh credential) after that commit succeeds - so a partial failure never
+  hands out credentials for state that was not actually persisted.
+- **Configuration**: `Sessions:RefreshTokenLifetimeDays` (default 30, range 1-365), validated at
+  startup the same way `Jwt:*` is (`ValidateDataAnnotations().ValidateOnStart()`), set via
+  `dotnet user-secrets` locally or `Sessions__RefreshTokenLifetimeDays` in production. No new
+  required configuration beyond this - refresh-token hashing and password-policy limits are fixed
+  constants, not configuration surface, since nothing in this slice needs them tunable.
+- **Rate limiting**: `/api/v2/auth/refresh` and `/api/v2/auth/logout` sit under the same
+  `AuthController`/`AuthPolicy` rate limiter as register/login (see
+  [Local development](#local-development) below) - refresh is as much a credential-guessing/replay
+  surface as login, and logout shares the policy rather than getting a separate, more restrictive
+  one it doesn't need.
+
 ## Persistence
 
 `competitive_series` is a deliberate relational/JSONB hybrid, chosen after considering (and
@@ -127,8 +220,8 @@ The hybrid: `challenger_id`, `opponent_id`, `status`, `total_games`, `current_ga
 `schema_version` field so a future shape change can be detected and migrated in code rather than
 silently misread. See `VersusSeriesRow`, `VersusSeriesStateJson`, `VersusSeriesStore`.
 
-Everything else (`accounts`, `player_profiles`, `friend_requests`, `friendships`) is plain
-relational EF Core, mapped through dedicated `*Row` types in `Level5.Infrastructure.Persistence.Rows`
+Everything else (`accounts`, `auth_sessions`, `player_profiles`, `friend_requests`, `friendships`)
+is plain relational EF Core, mapped through dedicated `*Row` types in `Level5.Infrastructure.Persistence.Rows`
 so the domain entities never need EF-friendly parameterless constructors or public setters. Each
 `*Store` maps explicitly between rows and domain aggregates - `Rehydrate` factory methods on the
 domain side handle reconstruction without re-validating already-persisted state as if it were
@@ -142,6 +235,13 @@ per account. `accounts.username_canonical` is uniquely indexed as before; `accou
 is also uniquely indexed, but since email is optional and Postgres unique indexes treat `NULL` as
 distinct from every other value, any number of accounts with no email can coexist - uniqueness only
 applies once an email is actually set.
+
+**`accounts` <-> `auth_sessions`**: `auth_sessions.account_id` is a real, database-enforced foreign
+key to `accounts.id` (`ON DELETE RESTRICT`, for the same reason as `player_profiles` above - there
+is no account-deletion feature yet, so a stray delete must fail loudly). `auth_sessions.refresh_token_hash`
+is uniquely indexed - the database itself enforces that two sessions never share a stored refresh
+credential representation - and `revision` is the optimistic-concurrency token
+`AuthSessionStore.TrySaveAsync` conditions its writes on, exactly like `competitive_series.revision`.
 
 Migrations are **not** applied automatically at startup (see `Program.cs` - there is no
 `Database.Migrate()` call). Apply them explicitly:
@@ -159,6 +259,9 @@ safe before doing it: no V2 deploy/CD workflow exists yet (`.github/workflows/` 
 until this same change added `build-v2`), and the only databases that had ever run the prior
 migration were local dev instances and ephemeral Testcontainers instances - both disposable. Going
 forward, once V2 is actually deployed anywhere, migrations must be additive, not rebaselined.
+
+A second migration, `AddAuthSessions`, adds the `auth_sessions` table for the authentication/session
+slice. This one **is** additive on top of `InitialCreate`, per the rule above.
 
 ## Shared competition domain
 
@@ -189,16 +292,17 @@ models, migrations, `level5` database, Docker image, deployment. Legacy and V2 c
 side-by-side; nothing here changes legacy behavior.
 
 **Replaced (V2 does this differently, not a straight port):** authentication (ASP.NET Core
-Identity password hashing + minimal-claim JWTs vs. the legacy custom scheme), identifiers
-(UUIDv7 vs. sequential ints), timestamps (`DateTimeOffset` vs. formatted strings), persistence
-model (domain-derived hybrid schema vs. a scaffolded 1:1 table mapping).
+Identity password hashing + minimal-claim JWTs + rotating refresh sessions vs. the legacy custom
+scheme), identifiers (UUIDv7 vs. sequential ints), timestamps (`DateTimeOffset` vs. formatted
+strings), persistence model (domain-derived hybrid schema vs. a scaffolded 1:1 table mapping).
 
 **Deferred (explicitly out of scope for this slice):** highscores/leaderboards, `ServerStats`,
-`ServerMessages`, `UserReport`, admin/dev endpoints, refresh-token rotation and session
-revocation, rejecting login for a `Disabled` account (`AccountStatus` is defined and persisted
-here, but not yet enforced - see the authentication/session slice), email verification, password
-reset, account recovery, public profile fields beyond display name/tag/avatar-id, any of the
-[non-goals](#non-goals-for-this-slice) below.
+`ServerMessages`, `UserReport`, admin/dev endpoints (including any account-status-changing
+endpoint - disabling an account is still a direct-database operation, see
+[Authentication and sessions](#authentication-and-sessions)), email verification, password reset,
+account recovery, MFA, OAuth/social login, device/session-management UI, refresh-token
+families/reuse-compromise tracking, a token denylist, public profile fields beyond display
+name/tag/avatar-id, any of the [non-goals](#non-goals-for-this-slice) below.
 
 ## Non-goals for this slice
 
@@ -212,8 +316,8 @@ establish the architecture; adding them now would be scope creep against an unpr
 1. **Unity V2 networking boundary** - `IApiTransport` + per-area API clients
    (`IAuthApiClient`, `IFriendsApiClient`, `ICorrespondenceApiClient`) backed by
    `UnityWebRequest`, replacing ad hoc calls into the legacy `APIHelper`.
-2. **Refresh/session tokens** - short-lived access tokens already exist (`ITokenIssuer`); add
-   rotating refresh sessions and logout/revocation once a real client needs long-lived sessions.
+2. **Account administration** - an endpoint to disable/re-enable an account, once there's an actual
+   admin surface; today `AccountStatus` is enforced but only ever changed directly in the database.
 3. **Public player profile fields** - avatar id, richer display data, once there's a UI that needs
    them.
 4. **Unity versus-domain audit** - see [Shared competition domain](#shared-competition-domain).

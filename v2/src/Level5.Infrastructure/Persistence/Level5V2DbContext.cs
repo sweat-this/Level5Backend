@@ -6,6 +6,7 @@ namespace Level5.Infrastructure.Persistence;
 public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> options) : DbContext(options)
 {
     public DbSet<AccountRow> Accounts => Set<AccountRow>();
+    public DbSet<AuthSessionRow> AuthSessions => Set<AuthSessionRow>();
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
@@ -28,6 +29,27 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // enforces uniqueness only when an email is actually present - unlimited accounts
             // with no email can coexist.
             entity.HasIndex(e => e.EmailCanonical).IsUnique();
+        });
+
+        modelBuilder.Entity<AuthSessionRow>(entity =>
+        {
+            entity.ToTable("auth_sessions");
+            entity.HasKey(e => e.Id);
+            // SHA-256 hex digest is 64 chars; headroom left in case the hashing scheme changes.
+            entity.Property(e => e.RefreshTokenHash).HasMaxLength(128);
+            entity.HasIndex(e => e.RefreshTokenHash).IsUnique();
+            entity.HasIndex(e => e.AccountId);
+            // The optimistic-concurrency token: rotation/revocation writes are conditioned on this
+            // column matching the value that was read, via ExecuteUpdate's WHERE clause in
+            // AuthSessionStore.TrySaveAsync - the same pattern VersusSeriesRow uses below.
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            // Restrict, not cascade: this migration defines the relationship, not
+            // account-deletion semantics (there is no account-deletion feature yet) - a stray
+            // delete must fail loudly rather than silently orphan sessions.
+            entity.HasOne<AccountRow>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PlayerProfileRow>(entity =>

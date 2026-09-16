@@ -37,13 +37,22 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<SessionOptions>()
+            .Bind(configuration.GetSection(SessionOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<IPlayerProfileStore, PlayerProfileStore>();
         services.AddScoped<IFriendshipStore, FriendshipStore>();
         services.AddScoped<IVersusSeriesStore, VersusSeriesStore>();
+        services.AddScoped<IAuthSessionStore, AuthSessionStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
+        services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
+        services.AddSingleton<IRefreshTokenGenerator, RefreshTokenGenerator>();
+        services.AddSingleton<IAuthSessionPolicy, AuthSessionPolicy>();
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();
         services.AddSingleton<IClock, SystemClock>();
 
