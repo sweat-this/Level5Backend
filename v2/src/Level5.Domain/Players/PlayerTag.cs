@@ -10,9 +10,6 @@ namespace Level5.Domain.Players;
 /// </summary>
 public sealed partial class PlayerTag : IEquatable<PlayerTag>
 {
-    private const int MinLength = 3;
-    private const int MaxLength = 24;
-
     public string Value { get; }
 
     private PlayerTag(string value)
@@ -29,16 +26,10 @@ public sealed partial class PlayerTag : IEquatable<PlayerTag>
 
         var trimmed = rawValue.Trim();
 
-        if (trimmed.Length < MinLength || trimmed.Length > MaxLength)
-        {
-            throw new InvalidPlayerTagException(
-                $"Player tag must be between {MinLength} and {MaxLength} characters.");
-        }
-
         if (!AllowedFormat().IsMatch(trimmed))
         {
             throw new InvalidPlayerTagException(
-                "Player tag may only contain letters, digits, underscore, and a single '#discriminator' suffix.");
+                "Player tag must be 2-20 letters/digits/underscores, followed by '#' and a 3-6 digit discriminator (e.g. 'Patrick#4821').");
         }
 
         return new PlayerTag(trimmed.ToUpperInvariant());

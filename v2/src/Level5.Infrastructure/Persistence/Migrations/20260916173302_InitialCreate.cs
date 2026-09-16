@@ -18,6 +18,9 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     Username = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
                     UsernameCanonical = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
+                    Email = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: true),
+                    EmailCanonical = table.Column<string>(type: "character varying(320)", maxLength: 320, nullable: true),
+                    Status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                     PasswordHash = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -91,7 +94,19 @@ namespace Level5.Infrastructure.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_player_profiles", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_player_profiles_accounts_AccountId",
+                        column: x => x.AccountId,
+                        principalTable: "accounts",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                 });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_accounts_EmailCanonical",
+                table: "accounts",
+                column: "EmailCanonical",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_accounts_UsernameCanonical",
@@ -149,9 +164,6 @@ namespace Level5.Infrastructure.Persistence.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "accounts");
-
-            migrationBuilder.DropTable(
                 name: "competitive_series");
 
             migrationBuilder.DropTable(
@@ -162,6 +174,9 @@ namespace Level5.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "player_profiles");
+
+            migrationBuilder.DropTable(
+                name: "accounts");
         }
     }
 }

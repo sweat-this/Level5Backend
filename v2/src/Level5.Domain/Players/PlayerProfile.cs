@@ -27,17 +27,19 @@ public sealed class PlayerProfile
 
     public static PlayerProfile Create(AccountId accountId, string displayName, PlayerTag tag, DateTimeOffset now)
     {
-        if (string.IsNullOrWhiteSpace(displayName))
+        var trimmed = (displayName ?? string.Empty).Trim();
+
+        if (trimmed.Length == 0)
         {
             throw new InvalidDisplayNameException("Display name cannot be empty.");
         }
 
-        if (displayName.Length > 32)
+        if (trimmed.Length > 32)
         {
             throw new InvalidDisplayNameException("Display name cannot exceed 32 characters.");
         }
 
-        return new PlayerProfile(PlayerId.New(), accountId, displayName.Trim(), tag, now);
+        return new PlayerProfile(PlayerId.New(), accountId, trimmed, tag, now);
     }
 
     /// <summary>Reconstitutes a profile from persisted state. Infrastructure only.</summary>

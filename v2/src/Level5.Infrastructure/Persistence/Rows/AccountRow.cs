@@ -10,6 +10,9 @@ public sealed class AccountRow
     public Guid Id { get; set; }
     public required string Username { get; set; }
     public required string UsernameCanonical { get; set; }
+    public string? Email { get; set; }
+    public string? EmailCanonical { get; set; }
+    public required string Status { get; set; }
     public required string PasswordHash { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

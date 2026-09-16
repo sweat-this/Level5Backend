@@ -44,4 +44,18 @@ public class RegisterAccountUseCaseTests
 
         Assert.Contains(result.AccountId.Value.ToString(), result.AccessToken.Value);
     }
+
+    [Fact]
+    public async Task Registering_with_a_long_display_name_still_produces_a_valid_tag()
+    {
+        // The generated handle is truncated to 20 chars, then combined with a '#' and a 4-digit
+        // discriminator - 25 chars total, valid per the PlayerTag grammar (max 27) but previously
+        // rejected by PlayerTag's own drifted MaxLength(24) pre-check.
+        var longDisplayName = new string('A', 30);
+
+        var result = await _useCase.ExecuteAsync(
+            new RegisterAccountRequest("longname", "P@ssw0rd!", longDisplayName), CancellationToken.None);
+
+        Assert.StartsWith(new string('A', 20) + "#", result.PlayerTag);
+    }
 }

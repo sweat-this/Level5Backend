@@ -19,8 +19,15 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Username).HasMaxLength(32);
             entity.Property(e => e.UsernameCanonical).HasMaxLength(32);
+            entity.Property(e => e.Email).HasMaxLength(320);
+            entity.Property(e => e.EmailCanonical).HasMaxLength(320);
+            entity.Property(e => e.Status).HasMaxLength(16);
             entity.Property(e => e.PasswordHash).HasMaxLength(512);
             entity.HasIndex(e => e.UsernameCanonical).IsUnique();
+            // Postgres unique indexes treat NULL as distinct from every other value, so this
+            // enforces uniqueness only when an email is actually present - unlimited accounts
+            // with no email can coexist.
+            entity.HasIndex(e => e.EmailCanonical).IsUnique();
         });
 
         modelBuilder.Entity<PlayerProfileRow>(entity =>
@@ -31,6 +38,19 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.Property(e => e.Tag).HasMaxLength(32);
             entity.HasIndex(e => e.AccountId).IsUnique();
             entity.HasIndex(e => e.Tag).IsUnique();
+            // Modeled as one-to-many at the FK level (not WithOne/one-to-one) because neither Row
+            // type has a navigation property, and EF's one-to-one navigation fixup severs an
+            // already-tracked dependent's FK when a second one referencing the same principal is
+            // added to the same context before saving - exactly what the "two profiles, same
+            // account" constraint test does. The actual one-profile-per-account invariant is
+            // enforced by the separate unique index on AccountId above, independent of how the FK
+            // relationship itself is shaped.
+            // Restrict (not cascade) - this issue defines the relationship, not account deletion
+            // semantics, so a stray delete must fail loudly rather than silently orphan/prune data.
+            entity.HasOne<AccountRow>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<FriendRequestRow>(entity =>
