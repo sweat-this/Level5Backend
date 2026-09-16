@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Level5.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(Level5V2DbContext))]
-    [Migration("20260916012328_InitialCreate")]
+    [Migration("20260916173302_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -34,10 +34,23 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("EmailCanonical")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<string>("Username")
                         .IsRequired()
@@ -50,6 +63,9 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EmailCanonical")
+                        .IsUnique();
 
                     b.HasIndex("UsernameCanonical")
                         .IsUnique();
@@ -199,6 +215,15 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.HasIndex("OpponentId", "Status");
 
                     b.ToTable("competitive_series", (string)null);
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.AccountRow", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

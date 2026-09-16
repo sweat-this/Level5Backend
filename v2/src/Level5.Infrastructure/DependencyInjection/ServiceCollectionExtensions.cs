@@ -18,11 +18,19 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddLevel5Infrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? throw new InvalidOperationException(
-                "ConnectionStrings:DefaultConnection is not configured. Set it via user-secrets (local dev) or the ConnectionStrings__DefaultConnection environment variable (production).");
+        // Resolved lazily (from the request-time IConfiguration, not the snapshot passed in here)
+        // so that a caller who overrides configuration after this call - e.g.
+        // WebApplicationFactory's ConfigureAppConfiguration, applied only once the host actually
+        // builds - is honored. Reading configuration.GetConnectionString(...) eagerly here would
+        // silently capture whatever value existed at registration time instead.
+        services.AddDbContext<Level5V2DbContext>((sp, options) =>
+        {
+            var connectionString = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
+                ?? throw new InvalidOperationException(
+                    "ConnectionStrings:DefaultConnection is not configured. Set it via user-secrets (local dev) or the ConnectionStrings__DefaultConnection environment variable (production).");
 
-        services.AddDbContext<Level5V2DbContext>(options => options.UseNpgsql(connectionString));
+            options.UseNpgsql(connectionString);
+        });
 
         services.AddOptions<JwtOptions>()
             .Bind(configuration.GetSection(JwtOptions.SectionName))

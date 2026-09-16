@@ -33,7 +33,7 @@ anything in the [Non-goals](#non-goals-for-this-slice) list below.
 |---|---|---|
 | Runtime | .NET 10, ASP.NET Core, EF Core 10, Npgsql 10, Postgres 18 (already migrated from MySQL) | Reuse the same stack for V2 - no reason to diverge |
 | Auth | Hand-rolled `TokenController` issuing JWTs, password hashed with a custom scheme, no ASP.NET Identity | V2 uses `Microsoft.AspNetCore.Identity`'s `PasswordHasher<T>` behind an `IPasswordHasher` port; JWT issuance behind `ITokenIssuer`; claims kept to `sub` only (no email/name) |
-| Identity model | Sequential `int` PKs; `Signupdate`/`Lastlogin` stored as `varchar(45)` strings, not real timestamps | V2 uses UUIDv7 (`Guid.CreateVersion7()`) for all IDs and `DateTimeOffset` everywhere; no int PKs, no string timestamps |
+| Identity model | Sequential `int` PKs; `Signupdate`/`Lastlogin` stored as `varchar(45)` strings, not real timestamps | V2 uses UUIDv7 (`Guid.CreateVersion7()`) for all IDs and `DateTimeOffset` everywhere; no int PKs, no string timestamps. `Account` carries a minimal `AccountStatus` (`Active`/`Disabled`, defaulting `Active`) and an optional private, normalized `Email` - see [Domain boundaries](#domain-boundaries-this-slice) |
 | Persistence | Scaffolded EF model 1:1 with a MySQL-derived schema (e.g. `Highscores.Difficulty` defaults hidden in `HasDefaultValueSql`) | V2's schema is derived from the domain, not reverse-engineered from a table; see [Persistence](#persistence) |
 | Tests | Legacy has a single controller-level test project (`Level5Backend.Tests`), added on `dev` after this audit began; no domain or integration coverage | V2 ships with domain, application, infrastructure-integration, API-integration, and architecture tests from the start |
 | Unity versus domain | Not present in this repository at all | Could not be audited here - see [Shared competition domain](#shared-competition-domain) |
@@ -61,10 +61,18 @@ assembly.
 
 ## Domain boundaries (this slice)
 
-- **Identity** (`Level5.Domain.Identity`): `Account`, `Username`. Purely the private
-  authentication identity - no display name, no tag, no email.
+- **Identity** (`Level5.Domain.Identity`): `Account`, `Username`, `AccountStatus`, `Email`.
+  Purely the private authentication identity - no display name, no tag. `AccountStatus` is
+  `Active` (the default for every new account) or `Disabled`; this slice only defines and persists
+  it, it does not enforce it - a disabled account can still authenticate until the
+  authentication/session slice adds that check. `Email` is optional, normalized to a
+  lower-invariant canonical form for case-insensitive uniqueness, and never exposed through any
+  public player-facing API or DTO - only `RegisterAccountUseCase`/`AccountStore` ever see it.
 - **Players** (`Level5.Domain.Players`): `PlayerProfile`, `PlayerTag`. The public in-game
-  identity. `PlayerTag` is exact-match only (`Name#1234`); no partial/prefix search.
+  identity - deliberately holds nothing from the private account identity (no password hash,
+  email, status, or IP address). `PlayerTag` is exact-match only (`Name#1234`; grammar: 2-20
+  handle characters, `#`, then a 3-6 digit discriminator - see `PlayerTag.cs`); no partial/prefix
+  search.
 - **Social** (`Level5.Domain.Social`): `FriendRequest` (Pending/Accepted/Declined/Cancelled) and
   `Friendship` (a canonically-ordered pair, so a unique DB index prevents a duplicate in either
   direction).
@@ -126,12 +134,31 @@ so the domain entities never need EF-friendly parameterless constructors or publ
 domain side handle reconstruction without re-validating already-persisted state as if it were
 new input.
 
+**`accounts` <-> `player_profiles`**: `player_profiles.account_id` is a real, database-enforced
+foreign key to `accounts.id` (`ON DELETE RESTRICT` - this slice defines the relationship, not
+account-deletion semantics, so a stray delete fails loudly instead of silently cascading or
+orphaning data), plus the pre-existing unique index on `account_id` that keeps it to one profile
+per account. `accounts.username_canonical` is uniquely indexed as before; `accounts.email_canonical`
+is also uniquely indexed, but since email is optional and Postgres unique indexes treat `NULL` as
+distinct from every other value, any number of accounts with no email can coexist - uniqueness only
+applies once an email is actually set.
+
 Migrations are **not** applied automatically at startup (see `Program.cs` - there is no
 `Database.Migrate()` call). Apply them explicitly:
 
 ```powershell
 dotnet ef database update --project src/Level5.Infrastructure --startup-project src/Level5.Api
 ```
+
+### Migration history
+
+The initial migration (`InitialCreate`) was rebaselined once, in the same slice that added
+`AccountStatus`, `Email`, and the `accounts`/`player_profiles` foreign key, rather than layered as
+a second migration on top of an initial one already known to be missing them. This was verified
+safe before doing it: no V2 deploy/CD workflow exists yet (`.github/workflows/` had no V2 job
+until this same change added `build-v2`), and the only databases that had ever run the prior
+migration were local dev instances and ephemeral Testcontainers instances - both disposable. Going
+forward, once V2 is actually deployed anywhere, migrations must be additive, not rebaselined.
 
 ## Shared competition domain
 
@@ -168,7 +195,9 @@ model (domain-derived hybrid schema vs. a scaffolded 1:1 table mapping).
 
 **Deferred (explicitly out of scope for this slice):** highscores/leaderboards, `ServerStats`,
 `ServerMessages`, `UserReport`, admin/dev endpoints, refresh-token rotation and session
-revocation, public profile fields beyond display name/tag/avatar-id, any of the
+revocation, rejecting login for a `Disabled` account (`AccountStatus` is defined and persisted
+here, but not yet enforced - see the authentication/session slice), email verification, password
+reset, account recovery, public profile fields beyond display name/tag/avatar-id, any of the
 [non-goals](#non-goals-for-this-slice) below.
 
 ## Non-goals for this slice
