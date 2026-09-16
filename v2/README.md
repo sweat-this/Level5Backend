@@ -7,13 +7,14 @@ record for the foundation slice, plus everything needed to run it locally.
 
 ## Status
 
-Domain: player identity/tags, friendships, a full correspondence `VersusSeries` lifecycle
-(challenge → accept → play best-of-N → complete, server-authoritative, concurrency-safe, sealed
-results), and a complete authentication/session vertical (register, login, persistent rotating
-refresh sessions, logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized
-password policy - see [Authentication and sessions](#authentication-and-sessions)). Not yet built:
-leaderboards, richer profiles, notifications, anything in the
-[Non-goals](#non-goals-for-this-slice) list below.
+Domain: player identity/tags (exact case-insensitive lookup, self-scoped display-name update -
+see [Public player identity and self-update](#public-player-identity-and-self-update)),
+friendships, a full correspondence `VersusSeries` lifecycle (challenge → accept → play best-of-N
+→ complete, server-authoritative, concurrency-safe, sealed results), and a complete
+authentication/session vertical (register, login, persistent rotating refresh sessions,
+logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy -
+see [Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
+richer profiles, notifications, anything in the [Non-goals](#non-goals-for-this-slice) list below.
 
 ## Why a separate solution
 
@@ -76,7 +77,11 @@ assembly.
   identity - deliberately holds nothing from the private account identity (no password hash,
   email, status, or IP address). `PlayerTag` is exact-match only (`Name#1234`; grammar: 2-20
   handle characters, `#`, then a 3-6 digit discriminator - see `PlayerTag.cs`); no partial/prefix
-  search.
+  search, and it is **immutable** - assigned once at registration and never editable by any
+  endpoint in this slice. `DisplayName` is the one mutable field on a profile
+  (`PlayerProfile.ChangeDisplayName`, validated with the same trim/length rules as creation - see
+  [Public player identity and self-update](#public-player-identity-and-self-update) below);
+  `PlayerId`, `AccountId`, `PlayerTag`, and `CreatedAt` never change after creation.
 - **Social** (`Level5.Domain.Social`): `FriendRequest` (Pending/Accepted/Declined/Cancelled) and
   `Friendship` (a canonically-ordered pair, so a unique DB index prevents a duplicate in either
   direction).
@@ -201,6 +206,40 @@ centralized password policy.
   [Local development](#local-development) below) - refresh is as much a credential-guessing/replay
   surface as login, and logout shares the policy rather than getting a separate, more restrictive
   one it doesn't need.
+
+## Public player identity and self-update
+
+The public in-game identity surface, behind `PlayersController` (`/api/v2/players/...`,
+`[Authorize]`):
+
+- **`GET /api/v2/players/me`**: the caller's own `PlayerId`, derived from the authenticated
+  account via `ICurrentPlayerProvider`/`ICurrentAccountAccessor` - never from anything the client
+  supplies.
+- **`GET /api/v2/players/by-tag/{tag}`**: exact, case-insensitive lookup only
+  (`ResolvePlayerByTagUseCase` -> `IPlayerProfileStore.FindByTagAsync`) - no partial/prefix search.
+  Because the tag grammar includes `#`, and `#` is the URL fragment delimiter, a client must
+  percent-encode it in the path (`Patrick#4821` -> `Patrick%234821`, e.g.
+  `Uri.EscapeDataString(tag)`); this is exercised end-to-end against the real ASP.NET routing
+  stack in `PlayersFlowTests`. A well-formed but unknown tag returns `404`/`not_found`; a
+  malformed tag (grammar violation) returns `400`/the domain validation code - never a
+  partial/fuzzy match either way.
+- **`PATCH /api/v2/players/me`**: self-scoped display-name update
+  (`UpdateMyPlayerProfileUseCase`). The profile mutated is always the one owned by the
+  authenticated account (`ICurrentAccountAccessor.GetCurrentAccountId()` ->
+  `IPlayerProfileStore.FindByAccountIdAsync`) - the request body
+  (`UpdatePlayerProfileRequestDto`) carries only `DisplayName`, so there is no `PlayerId`,
+  `AccountId`, or `Tag` field a client could supply to redirect the update to another player's
+  profile or change stable identity; any such fields in a raw request body are simply ignored by
+  model binding, not merely rejected by authorization logic. `PlayerTag` is immutable and cannot
+  be changed through this or any endpoint. Returns the same safe public representation as
+  `GET .../by-tag/{tag}` (`PlayerId`, `DisplayName`, `Tag`). An account with no profile is treated
+  as `NotFoundException`, the same application-error convention used elsewhere, rather than an
+  internal exception leaking to the client.
+- **Public/private boundary**: every response from `PlayersController` exposes only `PlayerId`,
+  `DisplayName`, and `Tag` - never `AccountId`, `Username`, `Email`, `AccountStatus`,
+  `PasswordHash`, or any `AuthSession`/token data. That private data lives behind the separate
+  `GET /api/v2/me` contract (`AccountController`) and is never merged into a players response.
+  Asserted directly against the serialized JSON (not just DTO shape) in `PlayersFlowTests`.
 
 ## Persistence
 

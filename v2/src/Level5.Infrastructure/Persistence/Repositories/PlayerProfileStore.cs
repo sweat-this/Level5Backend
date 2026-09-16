@@ -53,6 +53,12 @@ public sealed class PlayerProfileStore(Level5V2DbContext db) : IPlayerProfileSto
         }, cancellationToken);
     }
 
+    public async Task UpdateAsync(PlayerProfile profile, CancellationToken cancellationToken)
+    {
+        var row = await db.PlayerProfiles.SingleAsync(p => p.Id == profile.Id.Value, cancellationToken);
+        row.DisplayName = profile.DisplayName;
+    }
+
     private static PlayerProfile ToDomain(PlayerProfileRow row)
         => PlayerProfile.Rehydrate(new PlayerId(row.Id), new AccountId(row.AccountId), row.DisplayName, PlayerTag.Create(row.Tag), row.CreatedAt);
 }

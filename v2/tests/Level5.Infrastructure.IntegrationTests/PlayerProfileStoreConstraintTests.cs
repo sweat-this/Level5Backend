@@ -109,4 +109,28 @@ public sealed class PlayerProfileStoreConstraintTests(PostgresFixture fixture)
 
         Assert.Empty(results);
     }
+
+    [Fact]
+    public async Task DisplayName_update_survives_reload()
+    {
+        var tag = PlayerTag.Create($"Reload{Guid.NewGuid():N}"[..10] + "#1234");
+
+        await using var db = fixture.CreateDbContext();
+        var accountId = await CreateAccountAsync(db);
+        var store = new PlayerProfileStore(db);
+        var profile = PlayerProfile.Create(accountId, "Original", tag, Now);
+        await store.AddAsync(profile, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        profile.ChangeDisplayName("Updated");
+        await store.UpdateAsync(profile, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        await using var readDb = fixture.CreateDbContext();
+        var reloaded = await new PlayerProfileStore(readDb).FindByIdAsync(profile.Id, CancellationToken.None);
+
+        Assert.Equal("Updated", reloaded!.DisplayName);
+        Assert.Equal(profile.AccountId, reloaded.AccountId);
+        Assert.Equal(tag, reloaded.Tag);
+    }
 }

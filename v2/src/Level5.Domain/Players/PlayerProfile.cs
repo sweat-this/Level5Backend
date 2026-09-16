@@ -26,6 +26,18 @@ public sealed class PlayerProfile
     }
 
     public static PlayerProfile Create(AccountId accountId, string displayName, PlayerTag tag, DateTimeOffset now)
+        => new(PlayerId.New(), accountId, ValidateDisplayName(displayName), tag, now);
+
+    /// <summary>
+    /// Changes the public display name. PlayerId, AccountId, Tag, and CreatedAt are never touched -
+    /// this is the only mutable field on a profile in this slice.
+    /// </summary>
+    public void ChangeDisplayName(string displayName)
+    {
+        DisplayName = ValidateDisplayName(displayName);
+    }
+
+    private static string ValidateDisplayName(string displayName)
     {
         var trimmed = (displayName ?? string.Empty).Trim();
 
@@ -39,7 +51,7 @@ public sealed class PlayerProfile
             throw new InvalidDisplayNameException("Display name cannot exceed 32 characters.");
         }
 
-        return new PlayerProfile(PlayerId.New(), accountId, trimmed, tag, now);
+        return trimmed;
     }
 
     /// <summary>Reconstitutes a profile from persisted state. Infrastructure only.</summary>

@@ -43,4 +43,70 @@ public class PlayerProfileTests
 
         Assert.Throws<InvalidDisplayNameException>(() => PlayerProfile.Create(AccountId.New(), tooLong, Tag, Now));
     }
+
+    [Fact]
+    public void ChangeDisplayName_trims_the_new_name_before_storing_it()
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+
+        profile.ChangeDisplayName("  Updated  ");
+
+        Assert.Equal("Updated", profile.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ChangeDisplayName_rejects_empty_or_whitespace_only_names(string raw)
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+
+        Assert.Throws<InvalidDisplayNameException>(() => profile.ChangeDisplayName(raw));
+    }
+
+    [Fact]
+    public void ChangeDisplayName_accepts_exactly_32_characters()
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+        var thirtyTwo = new string('B', 32);
+
+        profile.ChangeDisplayName(thirtyTwo);
+
+        Assert.Equal(thirtyTwo, profile.DisplayName);
+    }
+
+    [Fact]
+    public void ChangeDisplayName_rejects_a_name_exceeding_32_characters()
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+        var tooLong = new string('B', 33);
+
+        Assert.Throws<InvalidDisplayNameException>(() => profile.ChangeDisplayName(tooLong));
+    }
+
+    [Fact]
+    public void ChangeDisplayName_rejects_a_name_that_still_exceeds_the_limit_after_trimming()
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+        var padded = "  " + new string('C', 33) + "  ";
+
+        Assert.Throws<InvalidDisplayNameException>(() => profile.ChangeDisplayName(padded));
+    }
+
+    [Fact]
+    public void ChangeDisplayName_leaves_stable_identity_and_state_unchanged()
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), "Patrick", Tag, Now);
+        var id = profile.Id;
+        var accountId = profile.AccountId;
+        var tag = profile.Tag;
+        var createdAt = profile.CreatedAt;
+
+        profile.ChangeDisplayName("New Name");
+
+        Assert.Equal(id, profile.Id);
+        Assert.Equal(accountId, profile.AccountId);
+        Assert.Equal(tag, profile.Tag);
+        Assert.Equal(createdAt, profile.CreatedAt);
+    }
 }
