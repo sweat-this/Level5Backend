@@ -54,6 +54,29 @@ public class FriendRequestUseCaseTests
     }
 
     [Fact]
+    public async Task Sending_a_reverse_direction_duplicate_pending_request_is_rejected()
+    {
+        var a = await SeedPlayerAsync("AnnR");
+        var b = await SeedPlayerAsync("BeaR");
+        await _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            _send.ExecuteAsync(new SendFriendRequestRequest(b, a), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Sending_a_request_to_an_existing_friend_is_rejected()
+    {
+        var a = await SeedPlayerAsync("AnnF");
+        var b = await SeedPlayerAsync("BeaF");
+        var request = await _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None);
+        await _accept.ExecuteAsync(new AcceptFriendRequestRequest(b, request.Id), CancellationToken.None);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Accepting_creates_a_friendship_visible_to_both_players()
     {
         var a = await SeedPlayerAsync("A2");
@@ -74,6 +97,28 @@ public class FriendRequestUseCaseTests
 
         await Assert.ThrowsAsync<Domain.Social.FriendRequestAuthorizationException>(() =>
             _accept.ExecuteAsync(new AcceptFriendRequestRequest(PlayerId.New(), request.Id), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Declining_someone_elses_request_is_rejected()
+    {
+        var a = await SeedPlayerAsync("A3d");
+        var b = await SeedPlayerAsync("B3d");
+        var request = await _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None);
+
+        await Assert.ThrowsAsync<Domain.Social.FriendRequestAuthorizationException>(() =>
+            _decline.ExecuteAsync(new DeclineFriendRequestRequest(PlayerId.New(), request.Id), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Cancelling_someone_elses_request_is_rejected()
+    {
+        var a = await SeedPlayerAsync("A3c");
+        var b = await SeedPlayerAsync("B3c");
+        var request = await _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None);
+
+        await Assert.ThrowsAsync<Domain.Social.FriendRequestAuthorizationException>(() =>
+            _cancel.ExecuteAsync(new CancelFriendRequestRequest(PlayerId.New(), request.Id), CancellationToken.None));
     }
 
     [Fact]

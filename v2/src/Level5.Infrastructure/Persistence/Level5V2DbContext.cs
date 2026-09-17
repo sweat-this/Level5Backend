@@ -87,6 +87,19 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasIndex(e => new { e.FromPlayerId, e.ToPlayerId })
                 .HasFilter("\"Status\" = 'Pending'")
                 .IsUnique();
+            // Same-direction duplicates alone aren't enough: A->B and B->A are two distinct rows
+            // under the index above and could both land as Pending from a genuine race between
+            // crossed sends. This second partial index, keyed on the canonical (order-independent)
+            // pair, is what actually blocks that - only one Pending request may exist between any
+            // two players regardless of direction.
+            entity.HasIndex(e => new { e.LowerPlayerId, e.UpperPlayerId })
+                .HasFilter("\"Status\" = 'Pending'")
+                .IsUnique();
+            // The optimistic-concurrency token: Accept/Decline/Cancel are written through the
+            // tracked entity in the same SaveChanges call that inserts the resulting Friendship
+            // (Accept only), so a stale write's failed concurrency check rolls back both together
+            // rather than needing a separate explicit transaction.
+            entity.Property(e => e.Revision).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<FriendshipRow>(entity =>

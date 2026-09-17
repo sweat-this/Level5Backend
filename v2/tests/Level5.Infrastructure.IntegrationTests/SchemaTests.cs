@@ -77,4 +77,47 @@ public sealed class SchemaTests(PostgresFixture fixture)
         var deleteRule = Assert.Single(deleteRules);
         Assert.Equal("RESTRICT", deleteRule);
     }
+
+    [Fact]
+    public async Task No_migrations_are_pending_after_applying_the_full_chain_from_an_empty_database()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var pending = await db.Database.GetPendingMigrationsAsync();
+
+        Assert.Empty(pending);
+    }
+
+    [Fact]
+    public async Task Friend_requests_has_a_unique_partial_index_on_the_canonical_pending_pair()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var indexDefs = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT indexdef FROM pg_indexes
+                 WHERE tablename = 'friend_requests' AND indexname = 'IX_friend_requests_LowerPlayerId_UpperPlayerId'
+                 """)
+            .ToListAsync();
+
+        var indexDef = Assert.Single(indexDefs);
+        Assert.Contains("UNIQUE", indexDef);
+        Assert.Contains("Status", indexDef);
+        Assert.Contains("Pending", indexDef);
+    }
+
+    [Fact]
+    public async Task Friend_requests_has_a_revision_column_for_optimistic_concurrency()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var columns = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT column_name FROM information_schema.columns
+                 WHERE table_name = 'friend_requests' AND column_name = 'Revision'
+                 """)
+            .ToListAsync();
+
+        Assert.Single(columns);
+    }
 }
