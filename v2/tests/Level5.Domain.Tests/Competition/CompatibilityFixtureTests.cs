@@ -25,17 +25,17 @@ public class CompatibilityFixtureTests
     private readonly PlayerId _opponent = PlayerId.New();
 
     [Theory]
-    [InlineData("02-open-target-primary-only.json", "open-target-primary-only", false)]
-    [InlineData("04-lower-is-better-result.json", "lower-is-better-result", false)]
-    [InlineData("05-ordered-multi-key-tiebreak.json", "ordered-multi-key-tiebreak", false)]
     [InlineData("09-unsupported-ruleset-version.json", "unsupported-ruleset-version", false)]
-    [InlineData("11-conflicting-result-replay.json", "conflicting-result-replay", false)]
     [InlineData("01-sealed-attempt-one-completed.json", "sealed-attempt-one-completed", true)]
+    [InlineData("02-open-target-primary-only.json", "open-target-primary-only", true)]
     [InlineData("03-higher-is-better-result.json", "higher-is-better-result", true)]
+    [InlineData("04-lower-is-better-result.json", "lower-is-better-result", true)]
+    [InlineData("05-ordered-multi-key-tiebreak.json", "ordered-multi-key-tiebreak", true)]
     [InlineData("06-true-draw.json", "true-draw", true)]
     [InlineData("07-best-of-3-early-termination.json", "best-of-3-early-termination", true)]
     [InlineData("08-best-of-7-full-run.json", "best-of-7-full-run", true)]
     [InlineData("10-identical-result-retry.json", "identical-result-retry", true)]
+    [InlineData("11-conflicting-result-replay.json", "conflicting-result-replay", true)]
     public void Fixture_manifest_identity_and_executability_flag_are_unchanged(
         string fileName, string expectedFixtureId, bool expectedBackendExecutable)
     {
@@ -119,47 +119,57 @@ public class CompatibilityFixtureTests
         Assert.Equal(3, series.Revision);
     }
 
+    [Fact]
+    public void Open_target_primary_only_reveal()
+    {
+        var fixture = Load("02-open-target-primary-only.json");
+        var series = Run(fixture);
+
+        var opponentView = series.ToView(_opponent);
+        var round = opponentView.Games.Single(g => g.GameNumber == 1);
+
+        Assert.NotNull(round.OpponentAttempt!.Result);
+        Assert.Single(round.OpponentAttempt.Result);
+        Assert.Equal(42d, round.OpponentAttempt.Result[ResultMetric.Score]);
+        Assert.Equal(SeriesStatus.Active, series.Status);
+    }
+
+    [Fact]
+    public void Lower_is_better_result()
+    {
+        var fixture = Load("04-lower-is-better-result.json");
+        var series = Run(fixture);
+
+        Assert.Equal(SeriesStatus.Completed, series.Status);
+        Assert.Equal(_opponent, series.WinnerId);
+    }
+
+    [Fact]
+    public void Ordered_multi_key_tiebreak()
+    {
+        var fixture = Load("05-ordered-multi-key-tiebreak.json");
+        var series = Run(fixture);
+
+        Assert.Equal(SeriesStatus.Completed, series.Status);
+        Assert.Equal(_opponent, series.WinnerId);
+    }
+
     /// <summary>
-    /// Documents, rather than hides, the gap fixture 11 describes: the Backend's current
-    /// CompleteAttempt cannot distinguish "identical retry" from "conflicting replay" - both take
-    /// the idempotent-return path with no comparison against the newly submitted payload. This
-    /// test pins today's actual (non-compliant) behavior so #11 has a failing assertion to flip
-    /// once it adds payload comparison, instead of silently discovering the gap later.
-    ///
-    /// Fixture 11 is not <c>backendExecutable</c> - by design, since what it proves is that the
-    /// Backend does NOT reject the conflicting command, which is the opposite of what
-    /// <see cref="Run"/>'s generic *ExpectRejected handling asserts. This test therefore drives
-    /// the series from the fixture's own commands directly (never hardcoding the scores or game
-    /// number as separate literals) so a future edit to the fixture's content is reflected here
-    /// automatically instead of silently diverging from what the test actually exercises.
+    /// Fixture 11 is now <c>backendExecutable</c>: <see cref="VersusSeries.CompleteAttempt"/>
+    /// compares an incoming result against the already-accepted one before taking the idempotent
+    /// path, so a materially different resubmission is rejected as a conflict (issue #11) rather
+    /// than silently discarded. <see cref="Run"/>'s generic <c>completeAttemptExpectRejected</c>
+    /// handling already proves the rejection; this test additionally proves the accepted result
+    /// was left untouched by the rejected retry.
     /// </summary>
     [Fact]
-    public void Conflicting_result_replay_is_not_yet_rejected_known_gap_for_issue_11()
+    public void Conflicting_result_replay_is_rejected()
     {
         var fixture = Load("11-conflicting-result-replay.json");
-        Assert.False(fixture.BackendExecutable);
-        Assert.Equal(5, fixture.Commands.Count);
+        var series = Run(fixture);
 
-        var accept = fixture.Commands[1];
-        var startAttempt = fixture.Commands[2];
-        var firstComplete = fixture.Commands[3];
-        var conflictingComplete = fixture.Commands[4];
-        Assert.Equal("completeAttempt", firstComplete.Op);
-        Assert.Equal("completeAttemptExpectRejected", conflictingComplete.Op);
-
-        var series = VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(fixture.SeriesFormat.TotalGames), RulesFrom(fixture.Ruleset), Now);
-        series.Accept(ResolveActor(accept.By), Now);
-        series.StartAttempt(ResolveActor(startAttempt.By), startAttempt.Game!.Value, Now);
-        var firstResult = ResultOf(fixture.FixtureId, firstComplete.Result!);
-        series.CompleteAttempt(ResolveActor(firstComplete.By), firstComplete.Game!.Value, firstResult, Now);
-
-        // Protocol requires this to be rejected as a conflict (HTTP 409). It is not, today: it
-        // silently returns the FIRST accepted result instead of throwing or rejecting.
-        var conflictingResult = ResultOf(fixture.FixtureId, conflictingComplete.Result!);
-        Assert.NotEqual(firstResult, conflictingResult); // the fixture must actually describe a conflict, not a retry
-        var second = series.CompleteAttempt(ResolveActor(conflictingComplete.By), conflictingComplete.Game!.Value, conflictingResult, Now);
-
-        Assert.Equal(firstResult, second.Result);
+        var attempt = series.Rounds.Single(r => r.GameNumber == 1).AttemptFor(_challenger);
+        Assert.Equal(50d, attempt!.Result!.ValueOf(ResultMetric.Score));
     }
 
     /// <summary>
@@ -199,7 +209,8 @@ public class CompatibilityFixtureTests
                         series!.StartAttempt(actor, command.Game!.Value, Now);
                         break;
                     case "completeAttempt":
-                        series!.CompleteAttempt(actor, command.Game!.Value, ResultOf(fixture.FixtureId, command.Result!), Now);
+                        var attemptId = series!.Rounds.Single(r => r.GameNumber == command.Game!.Value).AttemptFor(actor)!.Id;
+                        series.CompleteAttempt(actor, command.Game!.Value, attemptId, ResultOf(fixture.FixtureId, command.Result!), Now);
                         break;
                     default:
                         throw new NotSupportedException($"Fixture command '{op}' is not supported by the Backend-executable runner.");

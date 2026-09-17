@@ -26,6 +26,36 @@ internal sealed class AlwaysConflictingVersusSeriesStore(InMemoryVersusSeriesSto
 }
 
 /// <summary>
+/// Loses exactly its first <paramref name="failCount"/> save attempts (as if another request kept
+/// winning the revision race) and then delegates normally - stands in for "the race resolves after
+/// one reload" so StartAttempt/CompleteAttempt's bounded reload-and-reevaluate path can be proven
+/// without depending on real thread timing.
+/// </summary>
+internal sealed class FailFirstNSavesVersusSeriesStore(InMemoryVersusSeriesStore inner, int failCount) : IVersusSeriesStore
+{
+    private int _remainingFailures = failCount;
+
+    public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken) => inner.FindByIdAsync(id, cancellationToken);
+    public Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken) => inner.AddAsync(series, clientRequestId, cancellationToken);
+    public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken) => inner.FindByIdempotencyKeyAsync(challengerId, clientRequestId, cancellationToken);
+    public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListIncomingChallengesAsync(playerId, cancellationToken);
+    public Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListOutgoingChallengesAsync(playerId, cancellationToken);
+    public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListActiveSeriesAsync(playerId, cancellationToken);
+    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListCompletedSeriesAsync(playerId, cancellationToken);
+
+    public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)
+    {
+        if (_remainingFailures > 0)
+        {
+            _remainingFailures--;
+            return Task.FromResult(false);
+        }
+
+        return inner.TrySaveAsync(series, expectedRevision, cancellationToken);
+    }
+}
+
+/// <summary>
 /// Exercises the races the ADR calls out explicitly. The store-level "which write actually wins
 /// a stale-revision race" behavior is proven against real Postgres in the Infrastructure
 /// integration tests; this layer's own job is narrower and just as important: every mutating use
@@ -76,12 +106,12 @@ public class ConcurrencyTests
     {
         var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
         await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
-        await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+        var started = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
 
         var conflicting = new CompleteAttemptUseCase(new AlwaysConflictingVersusSeriesStore(_seriesStore), _clock);
 
         await Assert.ThrowsAsync<ConflictException>(() =>
-            conflicting.ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, 80), CancellationToken.None));
+            conflicting.ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(80)), CancellationToken.None));
     }
 
     [Fact]
@@ -97,5 +127,53 @@ public class ConcurrencyTests
 
         var stillPending = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
         Assert.Equal(SeriesStatus.PendingAcceptance, stillPending!.Status);
+    }
+
+    [Fact]
+    public async Task StartAttempt_reloads_and_returns_a_stable_descriptor_after_a_single_lost_race()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+
+        var reevaluating = new StartAttemptUseCase(new FailFirstNSavesVersusSeriesStore(_seriesStore, failCount: 1), _clock);
+
+        var descriptor = await reevaluating.ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+
+        Assert.Equal(1, descriptor.GameNumber);
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        Assert.Equal(descriptor.AttemptId, persisted!.Rounds.Single(r => r.GameNumber == 1).AttemptFor(challenger)!.Id);
+    }
+
+    [Fact]
+    public async Task CompleteAttempt_reloads_and_applies_the_completion_after_a_single_lost_race()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        var started = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+
+        var reevaluating = new CompleteAttemptUseCase(new FailFirstNSavesVersusSeriesStore(_seriesStore, failCount: 1), _clock);
+
+        var view = await reevaluating.ExecuteAsync(
+            new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(80)), CancellationToken.None);
+
+        var round = view.Games.Single(g => g.GameNumber == 1);
+        Assert.Equal(80d, round.YourAttempt!.Result![ResultMetric.Score]);
+    }
+
+    [Fact]
+    public async Task CompleteAttempt_with_a_conflicting_retry_payload_returns_conflict_not_last_write_wins()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        var started = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+        var completeAttempt = new CompleteAttemptUseCase(_seriesStore, _clock);
+        await completeAttempt.ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(50)), CancellationToken.None);
+
+        await Assert.ThrowsAsync<Domain.Competition.ConflictingAttemptResultException>(() =>
+            completeAttempt.ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(999)), CancellationToken.None));
+
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        var attempt = persisted!.Rounds.Single(r => r.GameNumber == 1).AttemptFor(challenger);
+        Assert.Equal(50d, attempt!.Result!.ValueOf(ResultMetric.Score));
     }
 }

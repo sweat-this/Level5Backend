@@ -1,6 +1,7 @@
 using Level5.Application.Common;
 using Level5.Application.Competition;
 using Level5.Application.Tests.Fakes;
+using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 using Level5.Domain.Social;
 using Xunit;
@@ -408,10 +409,10 @@ public class ChallengeUseCaseTests
 
         var toComplete = await _create.ExecuteAsync(Request(challenger, opponent, totalGames: 1), CancellationToken.None);
         await _accept.ExecuteAsync(new AcceptChallengeRequest(opponent, toComplete.Id), CancellationToken.None);
-        await new StartAttemptUseCase(_series, _clock).ExecuteAsync(new StartAttemptRequest(challenger, toComplete.Id, 1), CancellationToken.None);
-        await new StartAttemptUseCase(_series, _clock).ExecuteAsync(new StartAttemptRequest(opponent, toComplete.Id, 1), CancellationToken.None);
-        await new CompleteAttemptUseCase(_series, _clock).ExecuteAsync(new CompleteAttemptRequest(challenger, toComplete.Id, 1, 90), CancellationToken.None);
-        await new CompleteAttemptUseCase(_series, _clock).ExecuteAsync(new CompleteAttemptRequest(opponent, toComplete.Id, 1, 10), CancellationToken.None);
+        var challengerAttempt = await new StartAttemptUseCase(_series, _clock).ExecuteAsync(new StartAttemptRequest(challenger, toComplete.Id, 1), CancellationToken.None);
+        var opponentAttempt = await new StartAttemptUseCase(_series, _clock).ExecuteAsync(new StartAttemptRequest(opponent, toComplete.Id, 1), CancellationToken.None);
+        await new CompleteAttemptUseCase(_series, _clock).ExecuteAsync(new CompleteAttemptRequest(challenger, toComplete.Id, 1, challengerAttempt.AttemptId, AttemptResult.OfScore(90)), CancellationToken.None);
+        await new CompleteAttemptUseCase(_series, _clock).ExecuteAsync(new CompleteAttemptRequest(opponent, toComplete.Id, 1, opponentAttempt.AttemptId, AttemptResult.OfScore(10)), CancellationToken.None);
 
         var declined = await _create.ExecuteAsync(Request(challenger, opponent, totalGames: 3), CancellationToken.None);
         await _decline.ExecuteAsync(new DeclineChallengeRequest(opponent, declined.Id), CancellationToken.None);

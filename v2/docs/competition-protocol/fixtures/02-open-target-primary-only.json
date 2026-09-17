@@ -2,8 +2,8 @@
   "fixtureId": "open-target-primary-only",
   "protocolVersion": 1,
   "description": "Under OpenTarget, once the designated first participant completes, the responder may see only the primary comparison metric of that result before starting their own attempt - no other metric.",
-  "backendExecutable": false,
-  "requiresDownstream": ["#9", "#10", "#11"],
+  "backendExecutable": true,
+  "requiresDownstream": [],
   "seriesFormat": { "totalGames": 1 },
   "ruleset": {
     "rulesetId": "contest",
@@ -32,5 +32,5 @@
     "otherMetricsVisible": false,
     "seriesStatus": "Active"
   },
-  "notes": "The Backend has no OpenTarget concept and no issuance-order gating at all today (either participant may StartAttempt/CompleteAttempt for the current game in any order). This fixture is the spec #9 (frozen InformationPolicy + first-attempt ordering)/#10 (challenge-time policy selection)/#11 (issuance gating + partial-target projection) must satisfy; it mirrors Unity's SeriesSnapshot.FirstAttemptParticipantIndex + VersusGame.CanIssueTo + VersusGame.ViewFor exactly."
+  "notes": "Implemented by issue #11: VersusSeries.StartAttempt gates the non-first-mover behind the first mover's completion (EnsureIssuanceOrderAllows) and VersusSeries.ToView reveals only Rules.ComparisonKeys[0] of the first mover's result to the responder before the round resolves (PartialRevealMetricFor), mirroring Unity's SeriesSnapshot.FirstAttemptParticipantIndex + VersusGame.CanIssueTo + VersusGame.ViewFor. Selecting OpenTarget through the live remote CreateChallenge/StaticRulesetCatalog path still requires a catalog entry with InformationPolicy=OpenTarget, which issue #10's catalog population does not yet provide - this fixture proves the domain semantic directly, independent of catalog content."
 }

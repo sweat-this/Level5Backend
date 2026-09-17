@@ -59,6 +59,10 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         IllegalSeriesTransitionException e => (StatusCodes.Status409Conflict, e.Code),
         IllegalFriendRequestTransitionException e => (StatusCodes.Status409Conflict, e.Code),
         AttemptNotStartedException e => (StatusCodes.Status400BadRequest, e.Code),
+        AttemptIdentityMismatchException e => (StatusCodes.Status400BadRequest, e.Code),
+        ConflictingAttemptResultException e => (StatusCodes.Status409Conflict, e.Code),
+        OpenTargetIssuanceOrderException e => (StatusCodes.Status409Conflict, e.Code),
+        MissingRequiredMetricException e => (StatusCodes.Status400BadRequest, e.Code),
         DomainException e => (StatusCodes.Status400BadRequest, e.Code),
 
         _ => (StatusCodes.Status500InternalServerError, "internal_error")

@@ -29,15 +29,192 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         await bob.Client.PostAsync($"/api/v2/series/{seriesId}/accept", null);
 
-        await alice.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
-        await bob.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
+        var aliceAttemptId = await StartAttemptAsync(alice, seriesId, 1);
+        var bobAttemptId = await StartAttemptAsync(bob, seriesId, 1);
 
-        await alice.Client.PostAsJsonAsync($"/api/v2/series/{seriesId}/games/1/attempts/complete", new { score = 90 });
-        var finalResponse = await bob.Client.PostAsJsonAsync($"/api/v2/series/{seriesId}/games/1/attempts/complete", new { score = 10 });
+        await CompleteAttemptAsync(alice, seriesId, 1, aliceAttemptId, 90);
+        var finalResponse = await CompleteAttemptRawAsync(bob, seriesId, 1, bobAttemptId, 10);
         var final = await finalResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
 
         Assert.Equal("Completed", final.GetProperty("status").GetString());
         Assert.Equal(alice.PlayerId, final.GetProperty("winnerId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Start_returns_the_frozen_attempt_descriptor_required_by_unity()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceDesc");
+        var bob = await factory.RegisterNewPlayerAsync("BobDesc");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+
+        var response = await alice.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var descriptor = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+
+        Assert.Equal(seriesId, descriptor.GetProperty("seriesId").GetGuid());
+        Assert.NotEqual(Guid.Empty, descriptor.GetProperty("attemptId").GetGuid());
+        Assert.Equal(1, descriptor.GetProperty("gameNumber").GetInt32());
+        Assert.Equal(alice.PlayerId, descriptor.GetProperty("playerId").GetGuid());
+        Assert.Equal(1, descriptor.GetProperty("competitionProtocolVersion").GetInt32());
+        Assert.Equal("score-only", descriptor.GetProperty("rulesetId").GetString());
+        Assert.Equal("SealedAttempt", descriptor.GetProperty("informationPolicy").GetString());
+        Assert.Equal(3, descriptor.GetProperty("totalGames").GetInt32());
+        Assert.Equal("Score", descriptor.GetProperty("requiredResultMetrics")[0].GetString());
+        Assert.Equal("Score", descriptor.GetProperty("comparisonKeys")[0].GetProperty("metric").GetString());
+        Assert.Equal("HigherWins", descriptor.GetProperty("comparisonKeys")[0].GetProperty("direction").GetString());
+    }
+
+    [Fact]
+    public async Task Duplicate_start_returns_the_same_attempt_identity_and_descriptor()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceDup");
+        var bob = await factory.RegisterNewPlayerAsync("BobDup");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+
+        var first = await alice.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
+        var firstDescriptor = await first.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var second = await alice.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
+        var secondDescriptor = await second.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+
+        Assert.Equal(firstDescriptor.GetProperty("attemptId").GetGuid(), secondDescriptor.GetProperty("attemptId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Complete_with_a_missing_required_metric_is_rejected()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceMiss");
+        var bob = await factory.RegisterNewPlayerAsync("BobMiss");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        var response = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, metrics: new Dictionary<string, double> { ["Accuracy"] = 90 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_with_a_negative_metric_value_is_rejected_without_completing_the_attempt()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceNegative");
+        var bob = await factory.RegisterNewPlayerAsync("BobNegative");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        var response = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, score: -1);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var view = await alice.Client.GetFromJsonAsync<JsonElement>($"/api/v2/series/{seriesId}", JsonOptions);
+        Assert.Equal("NotStarted", view.GetProperty("games")[0].GetProperty("yourAttempt").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Complete_with_a_numeric_metric_identifier_is_rejected()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceNumeric");
+        var bob = await factory.RegisterNewPlayerAsync("BobNumeric");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        var response = await CompleteAttemptRawAsync(
+            alice, seriesId, 1, attemptId, new Dictionary<string, double> { ["0"] = 50 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_with_duplicate_canonical_metric_names_is_rejected()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceDuplicate");
+        var bob = await factory.RegisterNewPlayerAsync("BobDuplicate");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        var response = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, new Dictionary<string, double>
+        {
+            ["Score"] = 50,
+            ["score"] = 60
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Complete_with_the_wrong_attemptId_is_rejected()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceWrongId");
+        var bob = await factory.RegisterNewPlayerAsync("BobWrongId");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        await StartAttemptAsync(alice, seriesId, 1);
+
+        var response = await CompleteAttemptRawAsync(alice, seriesId, 1, Guid.NewGuid(), 90);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Duplicate_identical_completion_succeeds_idempotently()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceIdem");
+        var bob = await factory.RegisterNewPlayerAsync("BobIdem");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        var first = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, 50);
+        var retried = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, 50);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, retried.StatusCode);
+    }
+
+    [Fact]
+    public async Task Duplicate_conflicting_completion_returns_conflict_and_keeps_the_accepted_result()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceConf");
+        var bob = await factory.RegisterNewPlayerAsync("BobConf");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+        var attemptId = await StartAttemptAsync(alice, seriesId, 1);
+
+        await CompleteAttemptAsync(alice, seriesId, 1, attemptId, 50);
+        var conflicting = await CompleteAttemptRawAsync(alice, seriesId, 1, attemptId, 999);
+
+        Assert.Equal(HttpStatusCode.Conflict, conflicting.StatusCode);
+
+        var view = await alice.Client.GetAsync($"/api/v2/series/{seriesId}");
+        var body = await view.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var game1 = body.GetProperty("games")[0];
+        Assert.Equal(50d, game1.GetProperty("yourAttempt").GetProperty("result").GetProperty("Score").GetDouble());
+    }
+
+    [Fact]
+    public async Task Simultaneous_completions_resolve_the_game_exactly_once()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceSim");
+        var bob = await factory.RegisterNewPlayerAsync("BobSim");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 1);
+        var aliceAttemptId = await StartAttemptAsync(alice, seriesId, 1);
+        var bobAttemptId = await StartAttemptAsync(bob, seriesId, 1);
+
+        var responses = await Task.WhenAll(
+            CompleteAttemptRawAsync(alice, seriesId, 1, aliceAttemptId, 90),
+            CompleteAttemptRawAsync(bob, seriesId, 1, bobAttemptId, 10));
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+
+        var finalView = await alice.Client.GetAsync($"/api/v2/series/{seriesId}");
+        var body = await finalView.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Completed", body.GetProperty("status").GetString());
+        Assert.Equal(alice.PlayerId, body.GetProperty("winnerId").GetGuid());
+        Assert.Single(body.GetProperty("games").EnumerateArray());
     }
 
     [Fact]
@@ -60,9 +237,9 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
 
-        await alice.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
-        await bob.Client.PostAsync($"/api/v2/series/{seriesId}/games/1/attempts/start", null);
-        await alice.Client.PostAsJsonAsync($"/api/v2/series/{seriesId}/games/1/attempts/complete", new { score = 77 });
+        var aliceAttemptId = await StartAttemptAsync(alice, seriesId, 1);
+        await StartAttemptAsync(bob, seriesId, 1);
+        await CompleteAttemptAsync(alice, seriesId, 1, aliceAttemptId, 77);
 
         // Bob has not completed his own attempt yet - he must not be able to see Alice's score
         // through any read path: series detail, or any other field of the response body.
@@ -299,10 +476,10 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         var incomingSeriesId = await CreateSeriesAsync(alice, bob, totalGames: 3);
         var activeSeriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
         var completedSeriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 1);
-        await alice.Client.PostAsync($"/api/v2/series/{completedSeriesId}/games/1/attempts/start", null);
-        await bob.Client.PostAsync($"/api/v2/series/{completedSeriesId}/games/1/attempts/start", null);
-        await alice.Client.PostAsJsonAsync($"/api/v2/series/{completedSeriesId}/games/1/attempts/complete", new { score = 90 });
-        await bob.Client.PostAsJsonAsync($"/api/v2/series/{completedSeriesId}/games/1/attempts/complete", new { score = 10 });
+        var completedAliceAttempt = await StartAttemptAsync(alice, completedSeriesId, 1);
+        var completedBobAttempt = await StartAttemptAsync(bob, completedSeriesId, 1);
+        await CompleteAttemptAsync(alice, completedSeriesId, 1, completedAliceAttempt, 90);
+        await CompleteAttemptAsync(bob, completedSeriesId, 1, completedBobAttempt, 10);
 
         var bobIncoming = await GetArrayAsync(bob, "/api/v2/series/incoming");
         Assert.Contains(bobIncoming.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
@@ -370,5 +547,26 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
             new { opponentId = opponent.PlayerId, totalGames, rulesetId = "score-only", clientRequestId = clientRequestId ?? Guid.NewGuid() });
         var series = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
         return series.GetProperty("id").GetGuid();
+    }
+
+    /// <summary>Starts an attempt and returns its authoritative <c>attemptId</c> from the returned descriptor.</summary>
+    private static async Task<Guid> StartAttemptAsync(RegisteredPlayer player, Guid seriesId, int gameNumber)
+    {
+        var response = await player.Client.PostAsync($"/api/v2/series/{seriesId}/games/{gameNumber}/attempts/start", null);
+        response.EnsureSuccessStatusCode();
+        var descriptor = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        return descriptor.GetProperty("attemptId").GetGuid();
+    }
+
+    private static Task<HttpResponseMessage> CompleteAttemptRawAsync(RegisteredPlayer player, Guid seriesId, int gameNumber, Guid attemptId, double score)
+        => CompleteAttemptRawAsync(player, seriesId, gameNumber, attemptId, new Dictionary<string, double> { ["Score"] = score });
+
+    private static Task<HttpResponseMessage> CompleteAttemptRawAsync(RegisteredPlayer player, Guid seriesId, int gameNumber, Guid attemptId, IReadOnlyDictionary<string, double> metrics)
+        => player.Client.PostAsJsonAsync($"/api/v2/series/{seriesId}/games/{gameNumber}/attempts/{attemptId}/complete", new { metrics });
+
+    private static async Task CompleteAttemptAsync(RegisteredPlayer player, Guid seriesId, int gameNumber, Guid attemptId, double score)
+    {
+        var response = await CompleteAttemptRawAsync(player, seriesId, gameNumber, attemptId, score);
+        response.EnsureSuccessStatusCode();
     }
 }

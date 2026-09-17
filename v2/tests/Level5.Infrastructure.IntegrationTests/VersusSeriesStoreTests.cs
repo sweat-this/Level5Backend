@@ -24,10 +24,10 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         series.Accept(opponent, Now);
-        series.StartAttempt(challenger, 1, Now);
-        series.StartAttempt(opponent, 1, Now);
-        series.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
-        series.CompleteAttempt(opponent, 1, AttemptResult.OfScore(60), Now);
+        var challengerAttempt = series.StartAttempt(challenger, 1, Now);
+        var opponentAttempt = series.StartAttempt(opponent, 1, Now);
+        series.CompleteAttempt(challenger, 1, challengerAttempt.Id, AttemptResult.OfScore(80), Now);
+        series.CompleteAttempt(opponent, 1, opponentAttempt.Id, AttemptResult.OfScore(60), Now);
 
         var writeStore = new VersusSeriesStore(writeDb);
         await writeStore.AddAsync(series, clientRequestId: null, CancellationToken.None);
@@ -74,7 +74,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
         series.Accept(opponent, Now);
-        series.StartAttempt(challenger, 1, Now);
+        var challengerAttempt = series.StartAttempt(challenger, 1, Now);
 
         // Constructed here directly against the domain (not through the score-only API DTO) to
         // prove the persistence representation itself - not just the current HTTP contract -
@@ -85,7 +85,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
             [ResultMetric.CompletionTimeSeconds] = 42.5,
             [ResultMetric.Accuracy] = 0.87
         });
-        series.CompleteAttempt(challenger, 1, richResult, Now);
+        series.CompleteAttempt(challenger, 1, challengerAttempt.Id, richResult, Now);
 
         // AddAsync persists whatever state `series` is in right now - already including the
         // completed attempt above - so a single insert is enough to prove the round trip; no
@@ -171,6 +171,51 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task A_losing_stale_completion_cannot_overwrite_the_winning_participants_accepted_completion()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "Opponent", Now);
+        var original = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
+        original.Accept(opponent, Now);
+        var challengerAttempt = original.StartAttempt(challenger, 1, Now);
+        var opponentAttempt = original.StartAttempt(opponent, 1, Now);
+
+        await new VersusSeriesStore(setupDb).AddAsync(original, clientRequestId: null, CancellationToken.None);
+        var expectedRevision = original.Revision;
+
+        // Two concurrent requests - one per participant - both load the series at the same revision.
+        await using var dbA = fixture.CreateDbContext();
+        await using var dbB = fixture.CreateDbContext();
+        var storeA = new VersusSeriesStore(dbA);
+        var storeB = new VersusSeriesStore(dbB);
+
+        var seriesA = await storeA.FindByIdAsync(original.Id, CancellationToken.None);
+        var seriesB = await storeB.FindByIdAsync(original.Id, CancellationToken.None);
+
+        // Request A (the challenger's completion) saves first and wins.
+        seriesA!.CompleteAttempt(challenger, 1, challengerAttempt.Id, AttemptResult.OfScore(80), Now);
+        var savedA = await storeA.TrySaveAsync(seriesA, expectedRevision, CancellationToken.None);
+
+        // Request B (the opponent's completion) was loaded from the same now-stale revision and
+        // must not silently win a last-write-wins race against A's already-persisted state.
+        seriesB!.CompleteAttempt(opponent, 1, opponentAttempt.Id, AttemptResult.OfScore(60), Now);
+        var savedB = await storeB.TrySaveAsync(seriesB, expectedRevision, CancellationToken.None);
+
+        Assert.True(savedA);
+        Assert.False(savedB);
+
+        await using var verifyDb = fixture.CreateDbContext();
+        var final = await new VersusSeriesStore(verifyDb).FindByIdAsync(original.Id, CancellationToken.None);
+        var round = final!.Rounds.Single();
+        Assert.Equal(AttemptStatus.Completed, round.ChallengerAttempt!.Status);
+        // B's write lost the race entirely - the opponent's completion never reached the row, so
+        // the series is not resolved and no terminal completion happened twice (or at all yet).
+        Assert.Equal(AttemptStatus.NotStarted, round.OpponentAttempt!.Status);
+        Assert.Equal(SeriesStatus.Active, final.Status);
+    }
+
+    [Fact]
     public async Task ListIncomingChallengesAsync_only_returns_pending_challenges_for_the_opponent()
     {
         await using var db = fixture.CreateDbContext();
@@ -201,20 +246,20 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
 
         var completed = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
         completed.Accept(opponent, Now);
-        completed.StartAttempt(challenger, 1, Now);
-        completed.StartAttempt(opponent, 1, Now);
-        completed.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
-        completed.CompleteAttempt(opponent, 1, AttemptResult.OfScore(60), Now);
+        var completedChallengerAttempt = completed.StartAttempt(challenger, 1, Now);
+        var completedOpponentAttempt = completed.StartAttempt(opponent, 1, Now);
+        completed.CompleteAttempt(challenger, 1, completedChallengerAttempt.Id, AttemptResult.OfScore(80), Now);
+        completed.CompleteAttempt(opponent, 1, completedOpponentAttempt.Id, AttemptResult.OfScore(60), Now);
 
         var stillPending = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         var declined = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         declined.Decline(opponent, Now);
         var forSomeoneElse = VersusSeries.CreateChallenge(challenger, unrelated, SeriesFormat.BestOf(1), DefaultRules, Now);
         forSomeoneElse.Accept(unrelated, Now);
-        forSomeoneElse.StartAttempt(challenger, 1, Now);
-        forSomeoneElse.StartAttempt(unrelated, 1, Now);
-        forSomeoneElse.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
-        forSomeoneElse.CompleteAttempt(unrelated, 1, AttemptResult.OfScore(60), Now);
+        var elseChallengerAttempt = forSomeoneElse.StartAttempt(challenger, 1, Now);
+        var elseUnrelatedAttempt = forSomeoneElse.StartAttempt(unrelated, 1, Now);
+        forSomeoneElse.CompleteAttempt(challenger, 1, elseChallengerAttempt.Id, AttemptResult.OfScore(80), Now);
+        forSomeoneElse.CompleteAttempt(unrelated, 1, elseUnrelatedAttempt.Id, AttemptResult.OfScore(60), Now);
 
         var store = new VersusSeriesStore(db);
         await store.AddAsync(completed, clientRequestId: null, CancellationToken.None);

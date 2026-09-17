@@ -2,8 +2,8 @@
   "fixtureId": "conflicting-result-replay",
   "protocolVersion": 1,
   "description": "Submitting a DIFFERENT result payload for an attempt that already has an accepted result must be rejected as a conflict, not silently accepted and not silently discarded.",
-  "backendExecutable": false,
-  "requiresDownstream": ["#11"],
+  "backendExecutable": true,
+  "requiresDownstream": [],
   "seriesFormat": { "totalGames": 1 },
   "ruleset": {
     "rulesetId": "score-only",
@@ -24,5 +24,5 @@
     "acceptedResult": { "Score": 50 },
     "resultUnchanged": true
   },
-  "notes": "KNOWN GAP, not yet backend-executable: the Backend's actual current behavior for this exact sequence is NOT to reject - VersusSeries.CompleteAttempt checks only 'is the existing attempt already Completed?' and, if so, returns it unchanged with no comparison against the newly-submitted payload and no error (see Level5.Domain.Tests.Competition.VersusSeriesTests.CompleteAttempt_twice_is_idempotent_and_keeps_the_original_result, which submits 50 then 999 and asserts BOTH calls return 50 with no exception). That test proves the Backend cannot currently distinguish this fixture from fixture 10 (identical-result-retry) - both take the same code path and both silently keep the first value. Unity's Attempt.Complete DOES distinguish by rejecting outright ('a completed attempt cannot be resubmitted', VersusSeriesCorrespondenceTests.SubmittingTheSameFinishedTurnTwiceIsRefused), but it also does not special-case 'was the resubmission identical' - it just always throws, which would also incorrectly reject fixture 10 if driven through the domain a second time. Required for #11: CompleteAttempt must compare the incoming result to the stored one *before* returning early - identical payload -> fixture 10's idempotent-success path; different payload -> this fixture's conflict-rejected path (HTTP 409, not a silent 200)."
+  "notes": "Implemented by issue #11: VersusSeries.CompleteAttempt now compares the incoming result to the already-accepted one before returning early - an equal payload takes fixture 10's idempotent-success path; a different payload throws ConflictingAttemptResultException (mapped to HTTP 409), leaving the originally accepted result untouched. Unity's Attempt.Complete does not special-case 'was the resubmission identical' - it always throws - so this remains a protocol-level (transport-retry) distinction the Backend alone needs, per issue #8 section 13."
 }

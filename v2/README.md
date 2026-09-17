@@ -125,22 +125,32 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
   exist / is it already completed" *before* checking whether the series is still `Active` - a
   retried request whose response was lost still returns the original result, even if that very
   completion is what just finished the series. (`VersusSeries.CompleteAttempt`,
-  `VersusSeries.StartAttempt`; regression-tested in `VersusSeriesTests`.)
-- **Named attempt results**: `GameAttempt.Result` is an `AttemptResult` - a named-metric bag
-  (`ResultMetric`: `Score`, `Accuracy`, `CompletionTimeSeconds`, ...) with order-independent
-  semantic equality, replacing the earlier single `int Score`. Round resolution
-  (`GameRound.WinnerId`) still only compares the `Score` metric, higher-wins, exactly as before -
-  the ordered, direction-aware comparison engine over `FrozenRules.ComparisonKeys` is issue #11's
-  job, not #9's; #9 only needed the persistence representation to stop discarding every metric but
-  one. The public `CompleteAttempt` HTTP contract is unchanged (`{ "score": <int> }`) and is wrapped
-  into this representation internally - issue #11 owns exposing multi-metric submission.
-- **Sealed results**: `VersusSeries.ToView(viewerId)` produces a viewer-specific `SeriesView`,
-  which also carries the series' `FrozenRules` (safe to expose in full - it's the agreed contract
-  both participants already know). An opponent's attempt shows its real `Status` (so the viewer
-  knows they've submitted) but its full `Result` stays `null` until *both* attempts in that game
-  are complete. This lives in the domain, not the API layer or the client - see
-  `GameRound.IsResolved` / `VersusSeries.ToRoundView`. `OpenTarget`'s partial-reveal/issuance-gating
-  is not implemented yet (issue #10/#11); only `SealedAttempt` is enforced today.
+  `VersusSeries.StartAttempt`; regression-tested in `VersusSeriesTests`.) `CompleteAttempt` also
+  binds the submission to a specific `AttemptId` and compares an already-accepted result against a
+  retry's incoming payload before returning early: an identical payload is the idempotent-success
+  path above, but a *materially different* payload is rejected as `409`/`conflict`
+  (`ConflictingAttemptResultException`) rather than silently replacing the accepted result (issue
+  #11, Competition Protocol V1 §13).
+- **Named, ordered comparison engine**: `GameAttempt.Result` is an `AttemptResult` - a named-metric
+  bag (`ResultMetric`: `Score`, `Accuracy`, `CompletionTimeSeconds`, ...) with order-independent
+  semantic equality. Round resolution (`GameRound.ResolveWinner`) walks `FrozenRules.ComparisonKeys`
+  in order, skipping tied keys and deciding on the first key that differs per its
+  `MetricDirection` (`HigherWins`/`LowerWins`); every key tying is a true draw. `CompleteAttempt`
+  validates every comparison-key metric is present in the submitted result *before* accepting it
+  (`MissingRequiredMetricException`, `400`) so a completed attempt can never end up unresolvable
+  later (issue #11).
+- **Sealed and OpenTarget results**: `VersusSeries.ToView(viewerId)` produces a viewer-specific
+  `SeriesView`, which also carries the series' `FrozenRules` (safe to expose in full - it's the
+  agreed contract both participants already know). Under `SealedAttempt`, an opponent's attempt
+  shows its real `Status` (so the viewer knows they've submitted) but *every* metric of its `Result`
+  stays `null` until both attempts in that game are complete - never just `Score`. Under
+  `OpenTarget`, the non-first-mover cannot even `StartAttempt` until the designated first mover
+  (`FrozenRules.AlternatesFirstAttempt`-aware) completes theirs
+  (`OpenTargetIssuanceOrderException`, `409`); once they do, the responder's view reveals only
+  `ComparisonKeys[0]` of the first mover's result - no other metric - until the round itself
+  resolves, at which point the ordinary full reveal applies. All of this lives in the domain, not
+  the API layer or the client (`GameRound.IsResolved`, `VersusSeries.ToRoundView`,
+  `PartialRevealMetricFor`) - issue #11.
 - **Non-participant = 404, not 403**: every series-scoped use case checks participation and throws
   the same `NotFoundException` a non-existent series id would produce (`SeriesLookup`), so probing
   random series ids can't be used to learn which ones are real.
@@ -169,8 +179,10 @@ coverage around the existing aggregate/store from issue #9.
   catalog policy (`RulesetDefinition.InformationPolicy`) or the request is rejected with
   `400`/`validation_failed` - a client can request the ruleset's own policy for clarity/logging but
   can never freeze an arbitrary policy the ruleset doesn't actually use. The catalog today has one
-  entry (`score-only`, `SealedAttempt`); `OpenTarget` issuance-gating/partial-reveal enforcement is
-  still issue #11's job (unchanged from issue #9).
+  entry (`score-only`, `SealedAttempt`); issue #11 implements `OpenTarget` issuance-gating and
+  partial-reveal projection in full at the domain layer (`VersusSeries`/`GameRound`), but selecting
+  `OpenTarget` through the live remote `CreateChallenge` path still requires a catalog entry with
+  that policy, which remains issue #10's ruleset-catalog-administration concern, not #11's.
 - **Create idempotency**: `clientRequestId` (a client-generated GUID, required) is the retry-safety
   key, scoped to the authenticated challenger (`(ChallengerId, ClientRequestId)`, unique in
   `competitive_series` - Postgres unique indexes treat `NULL` as distinct from every other value,
@@ -211,6 +223,94 @@ coverage around the existing aggregate/store from issue #9.
   this issue's required scope and is left for a future issue if a concrete need appears. Ruleset
   catalog administration (beyond the existing hardcoded `StaticRulesetCatalog`) is similarly
   out of scope here.
+
+## Remote attempt API (issue #11)
+
+Hardens `StartAttempt`/`CompleteAttempt` into the authoritative, retry-safe, metric-complete
+attempt boundary Unity needs to launch a match and submit its result. No second attempt
+aggregate/store was introduced - an attempt is still just a `GameAttempt` inside the existing
+`VersusSeries`/`IVersusSeriesStore`; this issue hardens the descriptor, completion contract,
+comparison engine, idempotency, concurrency, and projection around the existing aggregate.
+
+- **`StartAttempt` descriptor contract**: `POST /api/v2/series/{seriesId}/games/{gameNumber}/attempts/start`
+  returns an `AttemptDescriptorDto` derived only from the series' persisted, frozen state - never
+  raw aggregate/persistence JSON, and never caller-supplied rules. It carries `seriesId`,
+  `attemptId`, `gameNumber`, `playerId`, `competitionProtocolVersion`, `rulesetId`,
+  `rulesetVersion`, `minimumCompatibleVersion`, `modeId`, `informationPolicy`, `totalGames`,
+  `gamesToWin`, ordered `comparisonKeys` (metric + direction), and `requiredResultMetrics` (the
+  same metrics, in the same order, as a flat name list). Retrying `StartAttempt` for the same
+  player/game before completion returns the same `attemptId` and an identical descriptor
+  (`StartAttemptUseCase`, `AttemptDescriptor`), and a backend restart/new `DbContext` between start
+  and any later call does not change it (frozen rules and attempt identity are both
+  persisted, not recomputed).
+- **`CompleteAttempt` is bound to a specific attempt**:
+  `POST /api/v2/series/{seriesId}/games/{gameNumber}/attempts/{attemptId}/complete` - the attempt
+  id is part of the route, not an optional body field, so a client can never complete an attempt it
+  did not start. A mismatched `attemptId` fails with `400`/`AttemptIdentityMismatchException`
+  before any state is touched.
+- **Protocol V1 named-metric result payload**: the request body is `{ "metrics": { "<ResultMetric
+  name>": <number>, ... } }` - stable names (`Score`, `Accuracy`, `CompletionTimeSeconds`, ...),
+  never a positional index. An empty payload, a numeric/unknown metric name, or duplicate aliases
+  for the same canonical metric is `400`/`validation_failed` at the API boundary
+  (`SeriesController.ParseResult`). `AttemptResult` rejects undefined metrics, non-finite or
+  negative values, accuracy outside `0..100`, and `ShotsMade > ShotsAttempted`; a payload missing a
+  metric the series' frozen `ComparisonKeys` require is `400`/`MissingRequiredMetricException` at
+  the domain boundary (`VersusSeries.EnsureResultSatisfiesFrozenRules`). All checks happen before
+  completion is applied, so malformed input cannot mutate the attempt and a completed attempt can
+  never end up unresolvable. A result may carry additional named metrics beyond what
+  `ComparisonKeys` require (e.g. a full multi-metric Unity result where only some metrics are used
+  for comparison); those extra, recognized metrics are accepted and persisted, not rejected. The
+  earlier score-only `{ "score": <int> }` contract has been fully replaced, not kept as a
+  transitional dual path.
+- **Ordered, direction-aware comparison engine**: `GameRound.ResolveWinner` walks
+  `FrozenRules.ComparisonKeys` in declared order, skipping a tied key and deciding on the first key
+  that differs per its `MetricDirection` (`HigherWins`/`LowerWins`); every key tying is a true
+  draw. This replaced the old hard-coded, `Score`-only, higher-wins-only comparison. Consulted only
+  against each attempt's own already-accepted `AttemptResult` - never the live ruleset catalog - so
+  an already-started or already-resolved game's outcome can never shift under a later catalog
+  change.
+- **Duplicate-completion idempotency vs. conflict**: `VersusSeries.CompleteAttempt` compares an
+  incoming result against an already-accepted one *before* taking the idempotent-return path -
+  semantically equal (order-independent) → `200` with the original accepted state unchanged;
+  materially different → `409`/`conflict` (`ConflictingAttemptResultException`), leaving the
+  originally accepted result untouched. See fixtures
+  [10](docs/competition-protocol/fixtures/10-identical-result-retry.json) (identical retry) and
+  [11](docs/competition-protocol/fixtures/11-conflicting-result-replay.json) (conflicting replay),
+  both now backend-executable.
+- **Bounded reload-and-reevaluate on a lost optimistic-concurrency race**: `StartAttemptUseCase` and
+  `CompleteAttemptUseCase` no longer fail outright the first time `TrySaveAsync` loses a revision
+  race. Each retries up to 3 times: reload the current authoritative series, reapply the same
+  domain call against the fresh state (which itself decides idempotent-success / new-mutation /
+  conflict / illegal-transition), and attempt to save again. A concurrent duplicate start, both
+  participants starting or completing simultaneously, and the last required completion resolving a
+  round while another request is in flight all converge correctly through this path rather than
+  needing last-write-wins or an unbounded retry loop. Exhausting all attempts (persistent, unusual
+  contention) still surfaces `409`/`conflict`.
+- **`OpenTarget` issuance gating and partial reveal**: implemented in full at the domain layer.
+  `VersusSeries.StartAttempt` rejects the non-first-mover with `409`/
+  `OpenTargetIssuanceOrderException` until the designated first mover
+  (`FrozenRules.AlternatesFirstAttempt`-aware: pinned to the challenger, or alternating by game
+  number) has completed their own attempt for that game. Once they have, `VersusSeries.ToView`
+  reveals only `ComparisonKeys[0]` of the first mover's result to the responder - no other metric -
+  until the round itself resolves. See [fixture
+  02](docs/competition-protocol/fixtures/02-open-target-primary-only.json), now
+  backend-executable at the domain level. Selecting `OpenTarget` through the live remote
+  `CreateChallenge` path still needs a catalog entry with that policy (issue #10's concern).
+- **Sealed projection hides every metric, not just `Score`**: `AttemptView.Result` is `null` (or,
+  under `OpenTarget`, a single-key partial dictionary) until disclosure is legal - never the full
+  metric dictionary with the client trusted to hide fields. Enforced at every response that can
+  carry attempt results: `GetSeries`, the list endpoints' sparse summaries (which never carry
+  attempt data at all), and `CompleteAttempt`'s own response.
+- **Reconnect/reload behavior**: attempt identity, the frozen descriptor, an accepted completion,
+  the current game/series state, and sealed/`OpenTarget` projection are all reconstructed from
+  persisted state alone - none of it is cached in memory across requests, so a backend restart or a
+  fresh `DbContext` between lifecycle steps is indistinguishable from the same process continuing
+  (`VersusSeriesStoreTests`, `CorrespondenceFlowTests`).
+- **Deferred, explicitly (not by omission)**: attempt `Abandon`/reissue (discarding a botched
+  attempt for a fresh one) is not implemented - Competition Protocol V1 §12 names this as a real,
+  optional feature reduction versus local Unity play, and no concrete requirement for it exists
+  yet. Server-simulated gameplay, anti-cheat/result attestation, and #21's list
+  projection/pagination hardening remain explicit non-goals of this issue.
 
 ## Authentication and sessions
 
@@ -591,9 +691,11 @@ establish the architecture; adding them now would be scope creep against an unpr
    contract, Best-of-`{1,3,5,7}` subset enforcement, create idempotency, completed-series list,
    accept retry-safety)~~ - done (issue #10, see
    [Remote challenge API](#remote-challenge-api-issue-10) above; ruleset catalog administration and
-   a mid-series forfeit command remain explicitly deferred, not silently dropped) - then the remote
-   attempt API (issue #11: ordered/direction-aware comparison engine, `OpenTarget` issuance gating
-   + partial reveal, identical-vs-conflicting resubmission handling, multi-metric submission).
+   a mid-series forfeit command remain explicitly deferred, not silently dropped) - ~~then the
+   remote attempt API (ordered/direction-aware comparison engine, `OpenTarget` issuance gating +
+   partial reveal, identical-vs-conflicting resubmission handling, multi-metric submission)~~ -
+   done (issue #11, see [Remote attempt API](#remote-attempt-api-issue-11) above; attempt
+   `Abandon`/reissue and #21's list projection/pagination hardening remain explicitly deferred).
 5. **Observability** - correlation/request IDs are not yet wired into `Level5.Api`'s middleware
    pipeline; add them alongside structured logging once there's a log aggregation target to send
    them to.
