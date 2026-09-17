@@ -12,7 +12,9 @@ see [Public player identity and self-update](#public-player-identity-and-self-up
 database-enforced, concurrency-safe friend request/friendship lifecycle (see
 [Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle)), a full
 correspondence `VersusSeries` lifecycle (challenge → accept → play best-of-N
-→ complete, server-authoritative, concurrency-safe, sealed results), and a complete
+→ complete, server-authoritative, concurrency-safe, sealed results, Competition Protocol V1
+frozen rules + named-metric attempt results - see
+[Competition domain: `VersusSeries`](#competition-domain-versusseries)), and a complete
 authentication/session vertical (register, login, persistent rotating refresh sessions,
 logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy -
 see [Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
@@ -98,8 +100,16 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
 
 `VersusSeries` is the server-authoritative aggregate for one challenge/match between two players.
 
-- **Frozen rules**: `SeriesFormat` (best-of-N) is captured once at `CreateChallenge` and never
-  changes for that series' lifetime, even if future series are configured differently.
+- **Frozen rules**: `SeriesFormat` (best-of-N) *and* `FrozenRules` (Competition Protocol V1's
+  ruleset id/version, minimum compatible version, mode id, information policy, first-attempt
+  ordering, and ordered comparison keys) are captured once at `CreateChallenge` and never change
+  for that series' lifetime, even if the live ruleset catalog or future series' configuration
+  changes. `FrozenRules` is resolved server-side, from `IRulesetCatalog`, never from client-supplied
+  comparison keys/directions/mode data (issue #9; see
+  [`v2/docs/competition-protocol/README.md`](docs/competition-protocol/README.md) §9/§15). The
+  catalog itself is a single hardcoded in-memory entry (`StaticRulesetCatalog`) - deliberately
+  minimal, since how it is administered/populated long-term is issue #10's concern, not #9's; #9
+  only needed *some* server-owned seam so a created series is never rules-less.
 - **Legal transitions only**: `PendingAcceptance -> Active -> Completed`, or
   `PendingAcceptance -> Declined/Cancelled`. Every mutating method validates the acting player and
   the current status before applying anything (`SeriesAuthorizationException`,
@@ -113,10 +123,21 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
   retried request whose response was lost still returns the original result, even if that very
   completion is what just finished the series. (`VersusSeries.CompleteAttempt`,
   `VersusSeries.StartAttempt`; regression-tested in `VersusSeriesTests`.)
-- **Sealed results**: `VersusSeries.ToView(viewerId)` produces a viewer-specific `SeriesView`. An
-  opponent's attempt shows its real `Status` (so the viewer knows they've submitted) but its
-  `Score` stays `null` until *both* attempts in that game are complete. This lives in the domain,
-  not the API layer or the client - see `GameRound.IsResolved` / `VersusSeries.ToRoundView`.
+- **Named attempt results**: `GameAttempt.Result` is an `AttemptResult` - a named-metric bag
+  (`ResultMetric`: `Score`, `Accuracy`, `CompletionTimeSeconds`, ...) with order-independent
+  semantic equality, replacing the earlier single `int Score`. Round resolution
+  (`GameRound.WinnerId`) still only compares the `Score` metric, higher-wins, exactly as before -
+  the ordered, direction-aware comparison engine over `FrozenRules.ComparisonKeys` is issue #11's
+  job, not #9's; #9 only needed the persistence representation to stop discarding every metric but
+  one. The public `CompleteAttempt` HTTP contract is unchanged (`{ "score": <int> }`) and is wrapped
+  into this representation internally - issue #11 owns exposing multi-metric submission.
+- **Sealed results**: `VersusSeries.ToView(viewerId)` produces a viewer-specific `SeriesView`,
+  which also carries the series' `FrozenRules` (safe to expose in full - it's the agreed contract
+  both participants already know). An opponent's attempt shows its real `Status` (so the viewer
+  knows they've submitted) but its full `Result` stays `null` until *both* attempts in that game
+  are complete. This lives in the domain, not the API layer or the client - see
+  `GameRound.IsResolved` / `VersusSeries.ToRoundView`. `OpenTarget`'s partial-reveal/issuance-gating
+  is not implemented yet (issue #10/#11); only `SealedAttempt` is enforced today.
 - **Non-participant = 404, not 403**: every series-scoped use case checks participation and throws
   the same `NotFoundException` a non-existent series id would produce (`SeriesLookup`), so probing
   random series ids can't be used to learn which ones are real.
@@ -320,9 +341,36 @@ rejecting) two alternatives:
 
 The hybrid: `challenger_id`, `opponent_id`, `status`, `total_games`, `current_game_number`,
 `revision`, and timestamps are real indexed columns; the nested per-game attempt state
-(`GameRound`/`GameAttempt`) is a single `jsonb` column (`state_json`), versioned with an embedded
-`schema_version` field so a future shape change can be detected and migrated in code rather than
-silently misread. See `VersusSeriesRow`, `VersusSeriesStateJson`, `VersusSeriesStore`.
+(`GameRound`/`GameAttempt`) *and* the series' frozen Protocol V1 rules snapshot are a single
+`jsonb` column (`state_json`), versioned with an embedded `schema_version` field. Nothing else was
+promoted to a relational column for #9 - there is no current query need to filter/index on
+ruleset id, comparison keys, or information policy, so they stay inside the JSONB document per the
+issue's "don't prematurely normalize" constraint. See `VersusSeriesRow`, `VersusSeriesStateJson`,
+`VersusSeriesStore`.
+
+**Schema version is enforced on read, not decorative.** `VersusSeriesStore` reads
+`schemaVersion` from the JSONB document before committing to a full deserialize; any value other
+than the current version (`2`) throws `UnsupportedSeriesSchemaVersionException` rather than being
+silently misread as the current shape (falls through to a `500`, since it indicates a genuine
+server-side data problem, not a client mistake). Schema v2 is the Competition Protocol V1 shape
+(adds the frozen `FrozenRules` snapshot; replaces each attempt's single integer score with a
+named-metric `Result` bag) added by issue #9. **Schema v1 rows (pre-#9) are rejected outright, not
+migrated**: a v1 row has no `RulesetId`/`ComparisonKeys`/`InformationPolicy` at all, so there is
+nothing to fabricate a `FrozenRules` snapshot from, and - per the migration-history note below -
+no V2 environment has ever run with real user data, so recreating the (disposable) affected series
+is safe and strictly simpler than a migration that would have to invent data it doesn't have.
+Persisted metric/comparison-key/information-policy identifiers are validated against the current
+enums on read too (`CorruptSeriesStateException` on an unrecognized value) - an unknown identifier
+never silently becomes valid domain data.
+
+**Known blast radius of failing loudly:** `ListIncomingChallengesAsync`/`ListOutgoingChallengesAsync`/
+`ListActiveSeriesAsync` deserialize every matching row eagerly (`rows.Select(ToDomain)`) with no
+per-row isolation - one row that fails schema-version or identifier validation currently fails the
+*entire* list call for that player, not just that one series. `FindByIdAsync` has no such blast
+radius (only the requested series is affected). This is accepted for now (no V2 environment has
+real data yet, so the failure mode is theoretical), but it is a real consequence of the "fail
+loudly, never migrate silently" choice above and should be revisited (e.g. skip-and-log a single
+bad row instead of failing the whole list) before this matters in an environment with real data.
 
 Everything else (`accounts`, `auth_sessions`, `player_profiles`, `friend_requests`, `friendships`)
 is plain relational EF Core, mapped through dedicated `*Row` types in `Level5.Infrastructure.Persistence.Rows`
@@ -440,8 +488,13 @@ establish the architecture; adding them now would be scope creep against an unpr
    them.
 4. ~~Unity versus-domain audit~~ - done, see [Shared competition domain](#shared-competition-domain).
    Its output (`v2/docs/competition-protocol/`) defines the required follow-up slices:
-   correspondence persistence (frozen rules, named metrics, information-policy projection),
-   the remote challenge API, and the remote attempt API.
+   ~~correspondence persistence (frozen rules, named metrics, information-policy projection)~~ -
+   done (issue #9, see [Competition domain: `VersusSeries`](#competition-domain-versusseries) and
+   [Persistence](#persistence) above) - then the remote challenge API (issue #10: finalized
+   `CreateChallenge` DTO, Best-of-`{1,3,5,7}` subset enforcement, client-selectable information
+   policy, ruleset catalog administration, forfeit decision) and the remote attempt API (issue #11:
+   ordered/direction-aware comparison engine, `OpenTarget` issuance gating + partial reveal,
+   identical-vs-conflicting resubmission handling, multi-metric submission).
 5. **Observability** - correlation/request IDs are not yet wired into `Level5.Api`'s middleware
    pipeline; add them alongside structured logging once there's a log aggregation target to send
    them to.

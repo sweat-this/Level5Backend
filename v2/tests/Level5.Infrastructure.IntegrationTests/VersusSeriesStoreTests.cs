@@ -1,6 +1,7 @@
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 using Level5.Infrastructure.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Level5.Infrastructure.IntegrationTests;
@@ -10,17 +11,22 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
+    private static readonly FrozenRules DefaultRules = FrozenRules.Create(
+        CompetitionProtocol.CurrentVersion, "score-only", 1, 1, "mode-score-only",
+        InformationPolicy.SealedAttempt, alternatesFirstAttempt: false,
+        [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]);
+
     [Fact]
     public async Task Round_trips_nested_attempt_state_through_the_jsonb_column()
     {
         var challenger = PlayerId.New();
         var opponent = PlayerId.New();
-        var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), Now);
+        var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         series.Accept(opponent, Now);
         series.StartAttempt(challenger, 1, Now);
         series.StartAttempt(opponent, 1, Now);
-        series.CompleteAttempt(challenger, 1, Score.Of(80), Now);
-        series.CompleteAttempt(opponent, 1, Score.Of(60), Now);
+        series.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
+        series.CompleteAttempt(opponent, 1, AttemptResult.OfScore(60), Now);
 
         await using var writeDb = fixture.CreateDbContext();
         var writeStore = new VersusSeriesStore(writeDb);
@@ -33,11 +39,100 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
 
         Assert.NotNull(reloaded);
         var round = Assert.Single(reloaded!.Rounds);
-        Assert.Equal(80, round.ChallengerAttempt!.Result!.Value.Value);
-        Assert.Equal(60, round.OpponentAttempt!.Result!.Value.Value);
+        Assert.Equal(80d, round.ChallengerAttempt!.Result!.ValueOf(ResultMetric.Score));
+        Assert.Equal(60d, round.OpponentAttempt!.Result!.ValueOf(ResultMetric.Score));
         Assert.Equal(AttemptStatus.Completed, round.OpponentAttempt.Status);
         Assert.Equal(challenger, reloaded.ChallengerId);
         Assert.Equal(opponent, reloaded.OpponentId);
+    }
+
+    [Fact]
+    public async Task Frozen_rules_survive_a_reload_unchanged()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+
+        await using var writeDb = fixture.CreateDbContext();
+        await new VersusSeriesStore(writeDb).AddAsync(series, CancellationToken.None);
+
+        await using var readDb = fixture.CreateDbContext();
+        var reloaded = await new VersusSeriesStore(readDb).FindByIdAsync(series.Id, CancellationToken.None);
+
+        // The required invariant: FrozenRules(series at creation) == FrozenRules(series after
+        // any later load). A later change to the live ruleset catalog must never retroactively
+        // affect an already-created series - this is what a reload proving byte-for-byte
+        // (structural) equality with the rules the series was created with actually verifies.
+        Assert.Equal(DefaultRules, reloaded!.Rules);
+    }
+
+    [Fact]
+    public async Task An_attempt_result_with_multiple_named_metrics_survives_a_reload_with_order_independent_equality()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
+        series.Accept(opponent, Now);
+        series.StartAttempt(challenger, 1, Now);
+
+        // Constructed here directly against the domain (not through the score-only API DTO) to
+        // prove the persistence representation itself - not just the current HTTP contract -
+        // carries every named Protocol V1 metric, not only Score.
+        var richResult = AttemptResult.Of(new Dictionary<ResultMetric, double>
+        {
+            [ResultMetric.Score] = 90,
+            [ResultMetric.CompletionTimeSeconds] = 42.5,
+            [ResultMetric.Accuracy] = 0.87
+        });
+        series.CompleteAttempt(challenger, 1, richResult, Now);
+
+        // AddAsync persists whatever state `series` is in right now - already including the
+        // completed attempt above - so a single insert is enough to prove the round trip; no
+        // separate TrySaveAsync is needed (and one wouldn't hit anyway: `series.Revision` is
+        // already 3 at this point, past Accept/StartAttempt/CompleteAttempt).
+        await using var writeDb = fixture.CreateDbContext();
+        await new VersusSeriesStore(writeDb).AddAsync(series, CancellationToken.None);
+
+        await using var readDb = fixture.CreateDbContext();
+        var reloaded = await new VersusSeriesStore(readDb).FindByIdAsync(series.Id, CancellationToken.None);
+
+        var reloadedResult = reloaded!.Rounds.Single().ChallengerAttempt!.Result!;
+
+        // A differently-ordered dictionary describing the same metrics must still compare equal -
+        // metric equality is semantic, not tied to JSON property/insertion order.
+        var reorderedExpectation = AttemptResult.Of(new Dictionary<ResultMetric, double>
+        {
+            [ResultMetric.Accuracy] = 0.87,
+            [ResultMetric.Score] = 90,
+            [ResultMetric.CompletionTimeSeconds] = 42.5
+        });
+        Assert.Equal(reorderedExpectation, reloadedResult);
+    }
+
+    [Fact]
+    public async Task A_row_persisted_with_an_unsupported_schema_version_is_rejected_on_read()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+
+        await using var writeDb = fixture.CreateDbContext();
+        await new VersusSeriesStore(writeDb).AddAsync(series, CancellationToken.None);
+
+        // Simulates a schema-v1 row (pre-issue-#9: no frozen rules at all) landing in the table -
+        // the read path must fail loudly and explicitly rather than silently misreading it as v2.
+        // PascalCase, matching the real (unconfigured JsonSerializerOptions, case-sensitive)
+        // shape VersusSeriesStore actually reads/writes - a lowercase literal would silently miss
+        // the SchemaVersion property entirely and this test would pass for the wrong reason.
+        const string legacyStateJson = """{"SchemaVersion":1,"Rounds":[]}""";
+        await writeDb.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE competitive_series SET "StateJson" = {legacyStateJson}::jsonb WHERE "Id" = {series.Id.Value}""");
+
+        await using var readDb = fixture.CreateDbContext();
+        var readStore = new VersusSeriesStore(readDb);
+
+        await Assert.ThrowsAsync<UnsupportedSeriesSchemaVersionException>(
+            () => readStore.FindByIdAsync(series.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -45,7 +140,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     {
         var challenger = PlayerId.New();
         var opponent = PlayerId.New();
-        var original = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), Now);
+        var original = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
 
         await using var setupDb = fixture.CreateDbContext();
         await new VersusSeriesStore(setupDb).AddAsync(original, CancellationToken.None);
@@ -82,8 +177,8 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         var opponent = PlayerId.New();
         var unrelated = PlayerId.New();
 
-        var pending = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), Now);
-        var forSomeoneElse = VersusSeries.CreateChallenge(challenger, unrelated, SeriesFormat.BestOf(3), Now);
+        var pending = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        var forSomeoneElse = VersusSeries.CreateChallenge(challenger, unrelated, SeriesFormat.BestOf(3), DefaultRules, Now);
 
         await using var db = fixture.CreateDbContext();
         var store = new VersusSeriesStore(db);

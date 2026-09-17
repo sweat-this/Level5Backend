@@ -7,16 +7,22 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Level5.Api.Controllers;
 
-public sealed record CreateChallengeDto(Guid OpponentId, int TotalGames);
+public sealed record CreateChallengeDto(Guid OpponentId, int TotalGames, string RulesetId, int? RulesetVersion = null);
 
-public sealed record AttemptViewDto(Guid Id, string Status, int? Score);
+public sealed record ComparisonKeyDto(string Metric, string Direction);
+
+public sealed record FrozenRulesDto(
+    int CompetitionProtocolVersion, string RulesetId, int RulesetVersion, int MinimumCompatibleVersion,
+    string ModeId, string InformationPolicy, bool AlternatesFirstAttempt, IReadOnlyList<ComparisonKeyDto> ComparisonKeys);
+
+public sealed record AttemptViewDto(Guid Id, string Status, IReadOnlyDictionary<string, double>? Result);
 
 public sealed record GameRoundViewDto(int GameNumber, AttemptViewDto? YourAttempt, AttemptViewDto? OpponentAttempt);
 
 public sealed record SeriesResponseDto(
     Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int TotalGames, int GamesToWin,
     int CurrentGameNumber, long Revision, Guid? WinnerId, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
-    IReadOnlyList<GameRoundViewDto> Games);
+    FrozenRulesDto Rules, IReadOnlyList<GameRoundViewDto> Games);
 
 public sealed record SeriesSummaryDto(
     Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision, DateTimeOffset CreatedAt);
@@ -46,7 +52,7 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var view = await createChallenge.ExecuteAsync(
-            new CreateChallengeRequest(me, new PlayerId(request.OpponentId), request.TotalGames), cancellationToken);
+            new CreateChallengeRequest(me, new PlayerId(request.OpponentId), request.RulesetId, request.RulesetVersion, request.TotalGames), cancellationToken);
 
         return Ok(ToDto(view));
     }
@@ -131,11 +137,17 @@ public sealed class SeriesController(
     private static SeriesResponseDto ToDto(SeriesView view) => new(
         view.Id.Value, view.ChallengerId.Value, view.OpponentId.Value, view.Status.ToString(),
         view.TotalGames, view.GamesToWin, view.CurrentGameNumber, view.Revision, view.WinnerId?.Value,
-        view.CreatedAt, view.CompletedAt,
+        view.CreatedAt, view.CompletedAt, ToDto(view.Rules),
         [.. view.Games.Select(g => new GameRoundViewDto(g.GameNumber, ToDto(g.YourAttempt), ToDto(g.OpponentAttempt)))]);
 
-    private static AttemptViewDto? ToDto(AttemptView? attempt)
-        => attempt is null ? null : new AttemptViewDto(attempt.Id.Value, attempt.Status.ToString(), attempt.Score);
+    private static FrozenRulesDto ToDto(FrozenRules rules) => new(
+        rules.CompetitionProtocolVersion, rules.RulesetId, rules.RulesetVersion, rules.MinimumCompatibleVersion,
+        rules.ModeId, rules.InformationPolicy.ToString(), rules.AlternatesFirstAttempt,
+        [.. rules.ComparisonKeys.Select(k => new ComparisonKeyDto(k.Metric.ToString(), k.Direction.ToString()))]);
+
+    private static AttemptViewDto? ToDto(AttemptView? attempt) => attempt is null
+        ? null
+        : new AttemptViewDto(attempt.Id.Value, attempt.Status.ToString(), attempt.Result?.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value));
 
     private static SeriesSummaryDto ToDto(SeriesSummary summary) => new(
         summary.Id.Value, summary.ChallengerId.Value, summary.OpponentId.Value, summary.Status.ToString(),

@@ -24,7 +24,7 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
     }
 
     private static VersusSeries Clone(VersusSeries source) => VersusSeries.Rehydrate(
-        source.Id, source.ChallengerId, source.OpponentId, SeriesFormat.Rehydrate(source.Format.TotalGames),
+        source.Id, source.ChallengerId, source.OpponentId, SeriesFormat.Rehydrate(source.Format.TotalGames), source.Rules,
         source.Status, source.CurrentGameNumber, source.WinnerId, source.Revision,
         source.CreatedAt, source.UpdatedAt, source.CompletedAt,
         source.Rounds.Select(r => GameRound.Rehydrate(r.GameNumber, CloneAttempt(r.ChallengerAttempt), CloneAttempt(r.OpponentAttempt))));

@@ -86,18 +86,20 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
 
     private static VersusSeries ToDomain(VersusSeriesRow row)
     {
-        var state = JsonSerializer.Deserialize<VersusSeriesStateJson>(row.StateJson) ?? new VersusSeriesStateJson();
+        var state = DeserializeState(row.Id, row.StateJson);
 
+        var rules = ToFrozenRules(row.Id, state.Rules);
         var rounds = state.Rounds.Select(r => GameRound.Rehydrate(
             r.GameNumber,
-            ToAttempt(r.ChallengerAttempt),
-            ToAttempt(r.OpponentAttempt)));
+            ToAttempt(row.Id, r.ChallengerAttempt),
+            ToAttempt(row.Id, r.OpponentAttempt)));
 
         return VersusSeries.Rehydrate(
             new VersusSeriesId(row.Id),
             new PlayerId(row.ChallengerId),
             new PlayerId(row.OpponentId),
             SeriesFormat.Rehydrate(row.TotalGames),
+            rules,
             Enum.Parse<SeriesStatus>(row.Status),
             row.CurrentGameNumber,
             row.WinnerId.HasValue ? new PlayerId(row.WinnerId.Value) : null,
@@ -108,7 +110,59 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
             rounds);
     }
 
-    private static GameAttempt? ToAttempt(AttemptJson? json)
+    /// <summary>
+    /// Reads <see cref="SeriesSchemaVersionEnvelope.SchemaVersion"/> before committing to a full,
+    /// version-specific deserialize, so an unsupported version fails with a clear, explicit
+    /// exception rather than a confusing JSON-shape error (a version-1 row has no "rules" field
+    /// at all, which <see cref="VersusSeriesStateJson.Rules"/> being <c>required</c> would
+    /// otherwise surface as a generic deserialization failure).
+    /// </summary>
+    private static VersusSeriesStateJson DeserializeState(Guid seriesId, string stateJson)
+    {
+        var envelope = JsonSerializer.Deserialize<SeriesSchemaVersionEnvelope>(stateJson)
+            ?? throw new UnsupportedSeriesSchemaVersionException($"Series {seriesId} has an empty or unparseable persisted state document.");
+
+        if (envelope.SchemaVersion != VersusSeriesStateJson.CurrentSchemaVersion)
+        {
+            throw new UnsupportedSeriesSchemaVersionException(
+                $"Series {seriesId} was persisted with schema version {envelope.SchemaVersion}, but this build only " +
+                $"supports version {VersusSeriesStateJson.CurrentSchemaVersion}. Schema v1 rows predate the Competition " +
+                "Protocol V1 frozen-rules format (issue #9) and cannot be safely reconstructed - a v1 row has no " +
+                "RulesetId/ComparisonKeys/InformationPolicy at all, so there is nothing to fabricate frozen rules from. " +
+                "V2 has not shipped to any environment with real user data, so the resolution is to recreate the " +
+                "affected series rather than migrate it in place.");
+        }
+
+        return JsonSerializer.Deserialize<VersusSeriesStateJson>(stateJson)
+            ?? throw new UnsupportedSeriesSchemaVersionException($"Series {seriesId} has an empty or unparseable persisted state document.");
+    }
+
+    private static FrozenRules ToFrozenRules(Guid seriesId, FrozenRulesJson json) => FrozenRules.Create(
+        json.CompetitionProtocolVersion,
+        json.RulesetId,
+        json.RulesetVersion,
+        json.MinimumCompatibleVersion,
+        json.ModeId,
+        ParseEnum<InformationPolicy>(seriesId, json.InformationPolicy, "InformationPolicy"),
+        json.AlternatesFirstAttempt,
+        [.. json.ComparisonKeys.Select(k => ToComparisonKey(seriesId, k))]);
+
+    private static ComparisonKey ToComparisonKey(Guid seriesId, ComparisonKeyJson json) => new(
+        ParseEnum<ResultMetric>(seriesId, json.Metric, "comparison key metric"),
+        ParseEnum<MetricDirection>(seriesId, json.Direction, "comparison key direction"));
+
+    private static TEnum ParseEnum<TEnum>(Guid seriesId, string value, string fieldName) where TEnum : struct, Enum
+    {
+        if (!Enum.TryParse<TEnum>(value, out var parsed))
+        {
+            throw new CorruptSeriesStateException(
+                $"Series {seriesId} has a persisted {fieldName} value '{value}' that is not a recognized {typeof(TEnum).Name}.");
+        }
+
+        return parsed;
+    }
+
+    private static GameAttempt? ToAttempt(Guid seriesId, AttemptJson? json)
     {
         if (json is null)
         {
@@ -119,16 +173,33 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
             new AttemptId(json.Id),
             new PlayerId(json.PlayerId),
             Enum.Parse<AttemptStatus>(json.Status),
-            json.Score.HasValue ? Score.Of(json.Score.Value) : null,
+            ToAttemptResult(seriesId, json.Result),
             json.StartedAt,
             json.CompletedAt);
+    }
+
+    private static AttemptResult? ToAttemptResult(Guid seriesId, Dictionary<string, double>? json)
+    {
+        if (json is null || json.Count == 0)
+        {
+            return null;
+        }
+
+        var metrics = new Dictionary<ResultMetric, double>(json.Count);
+        foreach (var (key, value) in json)
+        {
+            metrics[ParseEnum<ResultMetric>(seriesId, key, "attempt result metric")] = value;
+        }
+
+        return AttemptResult.Of(metrics);
     }
 
     private static string SerializeState(VersusSeries series)
     {
         var state = new VersusSeriesStateJson
         {
-            SchemaVersion = 1,
+            SchemaVersion = VersusSeriesStateJson.CurrentSchemaVersion,
+            Rules = ToFrozenRulesJson(series.Rules),
             Rounds = [.. series.Rounds.Select(r => new GameRoundJson
             {
                 GameNumber = r.GameNumber,
@@ -139,6 +210,18 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
 
         return JsonSerializer.Serialize(state);
     }
+
+    private static FrozenRulesJson ToFrozenRulesJson(FrozenRules rules) => new()
+    {
+        CompetitionProtocolVersion = rules.CompetitionProtocolVersion,
+        RulesetId = rules.RulesetId,
+        RulesetVersion = rules.RulesetVersion,
+        MinimumCompatibleVersion = rules.MinimumCompatibleVersion,
+        ModeId = rules.ModeId,
+        InformationPolicy = rules.InformationPolicy.ToString(),
+        AlternatesFirstAttempt = rules.AlternatesFirstAttempt,
+        ComparisonKeys = [.. rules.ComparisonKeys.Select(k => new ComparisonKeyJson { Metric = k.Metric.ToString(), Direction = k.Direction.ToString() })]
+    };
 
     private static AttemptJson? ToAttemptJson(GameAttempt? attempt)
     {
@@ -152,7 +235,7 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
             Id = attempt.Id.Value,
             PlayerId = attempt.PlayerId.Value,
             Status = attempt.Status.ToString(),
-            Score = attempt.Result?.Value,
+            Result = attempt.Result?.Metrics.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
             StartedAt = attempt.StartedAt,
             CompletedAt = attempt.CompletedAt
         };

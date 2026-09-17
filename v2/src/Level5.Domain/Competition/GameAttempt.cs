@@ -1,4 +1,3 @@
-using Level5.Domain.Common;
 using Level5.Domain.Ids;
 
 namespace Level5.Domain.Competition;
@@ -14,11 +13,11 @@ public sealed class GameAttempt
     public AttemptId Id { get; private set; }
     public PlayerId PlayerId { get; private set; }
     public AttemptStatus Status { get; private set; }
-    public Score? Result { get; private set; }
+    public AttemptResult? Result { get; private set; }
     public DateTimeOffset StartedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
 
-    private GameAttempt(AttemptId id, PlayerId playerId, AttemptStatus status, Score? result, DateTimeOffset startedAt, DateTimeOffset? completedAt)
+    private GameAttempt(AttemptId id, PlayerId playerId, AttemptStatus status, AttemptResult? result, DateTimeOffset startedAt, DateTimeOffset? completedAt)
     {
         Id = id;
         PlayerId = playerId;
@@ -31,7 +30,7 @@ public sealed class GameAttempt
     public static GameAttempt Start(PlayerId playerId, DateTimeOffset now)
         => new(AttemptId.New(), playerId, AttemptStatus.NotStarted, null, now, null);
 
-    public static GameAttempt Rehydrate(AttemptId id, PlayerId playerId, AttemptStatus status, Score? result, DateTimeOffset startedAt, DateTimeOffset? completedAt)
+    public static GameAttempt Rehydrate(AttemptId id, PlayerId playerId, AttemptStatus status, AttemptResult? result, DateTimeOffset startedAt, DateTimeOffset? completedAt)
         => new(id, playerId, status, result, startedAt, completedAt);
 
     /// <summary>
@@ -39,7 +38,7 @@ public sealed class GameAttempt
     /// succeeds without changing anything, so a client retrying a lost response converges on the
     /// same accepted result instead of erroring or double-applying the completion.
     /// </summary>
-    public void Complete(Score result, DateTimeOffset now)
+    public void Complete(AttemptResult result, DateTimeOffset now)
     {
         if (Status == AttemptStatus.Completed)
         {
