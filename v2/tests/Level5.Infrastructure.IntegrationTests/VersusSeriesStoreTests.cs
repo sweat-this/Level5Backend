@@ -38,7 +38,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         var reloaded = await readStore.FindByIdAsync(series.Id, CancellationToken.None);
 
         Assert.NotNull(reloaded);
-        var round = Assert.Single(reloaded!.Rounds);
+        var round = Assert.Single(reloaded.Rounds);
         Assert.Equal(80d, round.ChallengerAttempt!.Result!.ValueOf(ResultMetric.Score));
         Assert.Equal(60d, round.OpponentAttempt!.Result!.ValueOf(ResultMetric.Score));
         Assert.Equal(AttemptStatus.Completed, round.OpponentAttempt.Status);
