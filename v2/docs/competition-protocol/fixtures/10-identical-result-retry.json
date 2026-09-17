@@ -1,0 +1,28 @@
+{
+  "fixtureId": "identical-result-retry",
+  "protocolVersion": 1,
+  "description": "Submitting the exact same result payload twice for the same attempt (e.g. an HTTP retry after a dropped response) succeeds idempotently and returns the original accepted result, with no duplicate side effects.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 50 } },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 50 } }
+  ],
+  "expected": {
+    "secondCallOutcome": "idempotentSuccess",
+    "acceptedResult": { "Score": 50 },
+    "sideEffectsAppliedOnce": true
+  },
+  "notes": "The Backend already implements exactly this (GameAttempt.Complete / VersusSeries.CompleteAttempt: a second Complete call with the same attempt is a silent no-op returning the original result; GameRound is not re-resolved). Unity's Attempt.Complete does NOT special-case this: it throws VersusDomainException on ANY second completion, identical or not (see fixture 11's notes). This is the one place a naive parity check would wrongly conclude 'incompatible' - they only agree because retries never reach Unity's local domain a second time in the correspondence flow (the coordinator's own request already succeeded locally before it was ever sent), whereas the Backend must tolerate a second HTTP delivery of a request whose first delivery it already applied. See issue #8 section 13: 'semantically identical' is a protocol-level (transport-retry) concern, not a claim that both domains contain the same guard."
+}

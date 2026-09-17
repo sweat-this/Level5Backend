@@ -1,0 +1,28 @@
+{
+  "fixtureId": "lower-is-better-result",
+  "protocolVersion": 1,
+  "description": "A game whose primary comparison metric is LowerWins (e.g. completion time) resolves in favor of the smaller value.",
+  "backendExecutable": false,
+  "requiresDownstream": ["#11"],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "race",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "CompletionTimeSeconds", "direction": "LowerWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "CompletionTimeSeconds": 55.2 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 1, "result": { "CompletionTimeSeconds": 40.0 } }
+  ],
+  "expected": {
+    "seriesStatus": "Completed",
+    "winner": "opponent"
+  },
+  "notes": "The Backend's Score.Value is hard-coded higher-wins (Score.cs: 'Higher is better; comparison policy lives on GameRound', and GameRound.WinnerId does a plain >). There is no lower-wins path at all. This is required for #11: the comparison engine must read MetricDirection per comparison key rather than assuming higher-wins."
+}

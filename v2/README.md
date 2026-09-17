@@ -381,25 +381,27 @@ own comment for what to do before ever applying it against a populated database)
 
 ## Shared competition domain
 
-The prompt driving this work assumed a pure-C# Unity versus/correspondence domain
-(`VersusSeries`, `Attempt`, `IVersusSeriesRepository`, etc.) already exists in the Level 5 Unity
-project, and asked for an audit of whether it could become a shared framework-independent
-assembly used by both Unity and this backend.
+The prompt driving the original V2 foundation work assumed a pure-C# Unity versus/correspondence
+domain (`VersusSeries`, `Attempt`, `IVersusSeriesRepository`, etc.) already existed in the Level 5
+Unity project, and asked for an audit of whether it could become a shared framework-independent
+assembly used by both Unity and this backend. At that time the Unity project was not part of this
+repository and could not be inspected, so Backend V2's `VersusSeries` was built as a new,
+independent, server-authoritative implementation with a follow-up flagged: audit the Unity domain
+once available, and decide shared-code-vs-contract from real source on both sides.
 
-**That Unity project is not part of this repository** and could not be inspected as part of this
-work. Rather than force an extraction sight-unseen (risking coupling framework-independent Unity
-code to backend-specific concerns, or vice versa), the fallback path from the original brief was
-taken instead:
-
-- Backend V2's `VersusSeries` is a new, independent, server-authoritative implementation. It does
-  not assume Unity's rule representation, serialization format, or repository shape.
-- The wire contract is whatever `Level5.Api`'s DTOs define (`SeriesResponseDto`, etc.) - Unity
-  integrates against that HTTP contract, not against a shared assembly.
-- **Follow-up required**: once the Unity repository is available, audit its versus domain for (a)
-  genuine framework-independence, (b) compatibility of its result-comparison/rules-freezing
-  semantics with this implementation, and (c) migration risk before deciding whether extraction is
-  still worthwhile. Until then, add golden/compatibility tests that assert both sides interpret a
-  completed series' outcome identically, using fixed example payloads.
+That audit is done — see
+[`v2/docs/competition-protocol/README.md`](docs/competition-protocol/README.md) (issue #8) for the
+full compatibility matrix, decision rationale, and Competition Protocol V1 specification. The
+decision: **keep the two implementations separate** (a physically shared assembly was rejected on
+four concrete, source-confirmed blockers - not on a general DRY objection - see that document's
+§4) and **govern remote correspondence through a versioned protocol plus canonical compatibility
+fixtures** (`v2/docs/competition-protocol/fixtures/`), not a shared runtime domain. Remote
+competition is command/query based against `Level5.Api`'s existing DTOs/use cases, never a
+networked implementation of a repository interface that uploads a whole aggregate. The audit also
+surfaces the concrete semantic gaps (result metrics, ruleset/mode identity, `OpenTarget`
+information policy, retry-vs-conflict handling, and others) that issues #9-#11 must close before
+remote correspondence can support Unity's actual shipped competitive semantics - see that
+document's §19-§21 for exactly what each of those issues needs to do.
 
 ## Preserved / replaced / deferred
 
@@ -436,7 +438,10 @@ establish the architecture; adding them now would be scope creep against an unpr
    admin surface; today `AccountStatus` is enforced but only ever changed directly in the database.
 3. **Public player profile fields** - avatar id, richer display data, once there's a UI that needs
    them.
-4. **Unity versus-domain audit** - see [Shared competition domain](#shared-competition-domain).
+4. ~~Unity versus-domain audit~~ - done, see [Shared competition domain](#shared-competition-domain).
+   Its output (`v2/docs/competition-protocol/`) defines the required follow-up slices:
+   correspondence persistence (frozen rules, named metrics, information-policy projection),
+   the remote challenge API, and the remote attempt API.
 5. **Observability** - correlation/request IDs are not yet wired into `Level5.Api`'s middleware
    pipeline; add them alongside structured logging once there's a log aggregation target to send
    them to.
