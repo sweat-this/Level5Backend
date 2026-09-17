@@ -1,4 +1,3 @@
-using Level5.Domain.Ids;
 using Level5.Domain.Social;
 using Level5.Infrastructure.Persistence;
 using Level5.Infrastructure.Persistence.Repositories;
@@ -15,10 +14,10 @@ public sealed class FriendshipStoreConstraintTests(PostgresFixture fixture)
     [Fact]
     public async Task Database_rejects_a_second_pending_request_between_the_same_pair()
     {
-        var a = PlayerId.New();
-        var b = PlayerId.New();
-
         await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "A", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "B", Now);
+
         var store = new FriendshipStore(db);
         await store.AddRequestAsync(FriendRequest.Create(a, b, Now), CancellationToken.None);
         await db.SaveChangesAsync();
@@ -33,10 +32,10 @@ public sealed class FriendshipStoreConstraintTests(PostgresFixture fixture)
     [Fact]
     public async Task Database_allows_a_new_pending_request_after_the_first_was_declined()
     {
-        var a = PlayerId.New();
-        var b = PlayerId.New();
-
         await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "A", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "B", Now);
+
         var store = new FriendshipStore(db);
         var first = FriendRequest.Create(a, b, Now);
         await store.AddRequestAsync(first, CancellationToken.None);
@@ -53,10 +52,10 @@ public sealed class FriendshipStoreConstraintTests(PostgresFixture fixture)
     [Fact]
     public async Task Database_rejects_a_duplicate_friendship_regardless_of_argument_order()
     {
-        var a = PlayerId.New();
-        var b = PlayerId.New();
-
         await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "A", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "B", Now);
+
         var store = new FriendshipStore(db);
         await store.AddFriendshipAsync(Friendship.Between(a, b, Now), CancellationToken.None);
         await db.SaveChangesAsync();
@@ -68,10 +67,10 @@ public sealed class FriendshipStoreConstraintTests(PostgresFixture fixture)
     [Fact]
     public async Task Database_rejects_a_crossed_direction_pending_request_committed_after_the_first()
     {
-        var a = PlayerId.New();
-        var b = PlayerId.New();
-
         await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "A", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "B", Now);
+
         var store = new FriendshipStore(db);
         await store.AddRequestAsync(FriendRequest.Create(a, b, Now), CancellationToken.None);
         await db.SaveChangesAsync();
@@ -85,8 +84,9 @@ public sealed class FriendshipStoreConstraintTests(PostgresFixture fixture)
     [Fact]
     public async Task Two_genuinely_concurrent_crossed_sends_leave_exactly_one_pending_request()
     {
-        var a = PlayerId.New();
-        var b = PlayerId.New();
+        await using var seedDb = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(seedDb, "A", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(seedDb, "B", Now);
 
         // Two separate connections/contexts both insert without seeing each other's uncommitted
         // row, so this exercises the database constraint (not the application pre-check, which

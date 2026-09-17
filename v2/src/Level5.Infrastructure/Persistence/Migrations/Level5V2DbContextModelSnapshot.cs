@@ -142,6 +142,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UpperPlayerId");
+
                     b.HasIndex("FromPlayerId", "Status");
 
                     b.HasIndex("FromPlayerId", "ToPlayerId")
@@ -173,6 +175,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("UpperPlayerId");
 
                     b.HasIndex("LowerPlayerId", "UpperPlayerId")
                         .IsUnique();
@@ -261,6 +265,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("WinnerId");
+
                     b.HasIndex("ChallengerId", "ClientRequestId")
                         .IsUnique();
 
@@ -280,6 +286,48 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.FriendRequestRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("FromPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("LowerPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("ToPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("UpperPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.FriendshipRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("LowerPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("UpperPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", b =>
                 {
                     b.HasOne("Level5.Infrastructure.Persistence.Rows.AccountRow", null)
@@ -287,6 +335,26 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.VersusSeriesRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("ChallengerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("OpponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("WinnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 #pragma warning restore 612, 618
         }

@@ -470,6 +470,22 @@ is uniquely indexed - the database itself enforces that two sessions never share
 credential representation - and `revision` is the optimistic-concurrency token
 `AuthSessionStore.TrySaveAsync` conditions its writes on, exactly like `competitive_series.revision`.
 
+**`player_profiles` <-> social/correspondence (issue #20)**: every persisted player reference in
+`friend_requests`, `friendships`, and `competitive_series` is a real, database-enforced foreign key
+to `player_profiles.id`, all `ON DELETE RESTRICT`:
+
+- `friend_requests.from_player_id`, `to_player_id`, `lower_player_id`, `upper_player_id`
+- `friendships.lower_player_id`, `upper_player_id`
+- `competitive_series.challenger_id`, `opponent_id`, `winner_id` (nullable - a series has no
+  winner until it completes - but FK-constrained whenever it is set)
+
+Before this, the database allowed orphan player references in these tables; application code
+always supplied valid ids, but nothing at the schema level stopped a migration, repair script, or
+administrative tool from inserting one. `RESTRICT` (not `CASCADE`) throughout, same reasoning as
+`accounts` above: this slice defines referential integrity, not a player-deletion feature, so a
+stray delete of a referenced profile fails loudly instead of silently erasing social/correspondence
+history.
+
 Migrations are **not** applied automatically at startup (see `Program.cs` - there is no
 `Database.Migrate()` call). Apply them explicitly:
 
@@ -479,34 +495,34 @@ dotnet ef database update --project src/Level5.Infrastructure --startup-project 
 
 ### Migration history
 
-The initial migration (`InitialCreate`) was rebaselined once, in the same slice that added
-`AccountStatus`, `Email`, and the `accounts`/`player_profiles` foreign key, rather than layered as
-a second migration on top of an initial one already known to be missing them. This was verified
-safe before doing it: no V2 deploy/CD workflow exists yet (`.github/workflows/` had no V2 job
-until this same change added `build-v2`), and the only databases that had ever run the prior
-migration were local dev instances and ephemeral Testcontainers instances - both disposable. Going
-forward, once V2 is actually deployed anywhere, migrations must be additive, not rebaselined.
+The migration chain was rebaselined a second time for issue #20 (**Harden Persistence Integrity
+and Rebaseline Pre-Production Schema**), squashing the four migrations that previously existed
+(`InitialCreate`, `AddAuthSessions`, `HardenFriendshipInvariants`, `AddSeriesCreateIdempotency`)
+into a single new `InitialCreate` that produces the same final schema plus the player-profile
+foreign keys above, with the `HardenFriendshipInvariants` canonicalization hazard (below) removed
+rather than carried forward.
 
-A second migration, `AddAuthSessions`, adds the `auth_sessions` table for the authentication/session
-slice. This one **is** additive on top of `InitialCreate`, per the rule above.
+This was verified safe the same way the first rebaseline (noted below) was: no V2 deploy/CD
+workflow exists (`.github/workflows/ci.yml`'s `build-v2` job builds and tests V2, it does not
+deploy it or run migrations against any persistent database), and the only databases that have ever
+run any V2 migration are local dev instances and ephemeral Testcontainers instances spun up and
+torn down per test run - both disposable, with no durable V2 data anywhere to preserve. Going
+forward, once V2 is actually deployed anywhere, migrations must be additive, not rebaselined - the
+same rule the first rebaseline established and this one continues to follow.
 
-A third migration, `HardenFriendshipInvariants`, adds `friend_requests.Revision` (the
-optimistic-concurrency token) and the canonical `LowerPlayerId`/`UpperPlayerId` columns plus their
-unique partial index (`WHERE "Status" = 'Pending'`) that blocks a crossed-direction duplicate
-pending request - see [Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle).
-Also additive; any pre-existing row's canonical pair is backfilled from its real
-`FromPlayerId`/`ToPlayerId` in the same migration rather than left at the column's default, so the
-new unique index can't spuriously collide two unrelated pairs. That backfill orders by Postgres's
-native `uuid` comparison (`LEAST`/`GREATEST`), which is not guaranteed to agree with
-`Friendship.Order`'s `.NET` `Guid.CompareTo` ordering that the application itself uses for new
-rows - safe today only because no V2 environment has ever run with real data (see the migration's
-own comment for what to do before ever applying it against a populated database).
-
-A fourth migration, `AddSeriesCreateIdempotency`, adds `competitive_series.ClientRequestId`
-(nullable `uuid`) and its unique index over `(ChallengerId, ClientRequestId)` for issue #10's
-create-retry-safety - see [Remote challenge API](#remote-challenge-api-issue-10). Also additive;
-no backfill needed since a `NULL` key never collides with anything under Postgres's unique-index
-semantics.
+The pre-rebaseline chain, for reference (no longer present in `Migrations/`): `InitialCreate`
+(itself already a rebaseline of an earlier version, folding in `AccountStatus`, `Email`, and the
+`accounts`/`player_profiles` foreign key) → `AddAuthSessions` (added `auth_sessions`) →
+`HardenFriendshipInvariants` (added `friend_requests.Revision` and the canonical
+`LowerPlayerId`/`UpperPlayerId` columns/index) → `AddSeriesCreateIdempotency` (added
+`competitive_series.ClientRequestId`). `HardenFriendshipInvariants` backfilled any pre-existing
+row's canonical pair using Postgres's native `uuid` comparison (`LEAST`/`GREATEST`), which is not
+guaranteed to agree with `Friendship.Order`'s `.NET` `Guid.CompareTo` ordering that the application
+itself uses - safe only because nothing had ever been backfilled by it (see above), but a hazard
+worth removing from the durable path rather than leaving for a future migration to trip over. The
+rebaselined `InitialCreate` needs no such backfill: `LowerPlayerId`/`UpperPlayerId` are populated
+exclusively by `Friendship.Order` from the moment the columns exist, so no SQL-level
+canonicalization - correct or otherwise - is needed at all.
 
 ## Shared competition domain
 

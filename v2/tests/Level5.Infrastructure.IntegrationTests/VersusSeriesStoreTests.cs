@@ -1,6 +1,5 @@
 using Level5.Application.Common;
 using Level5.Domain.Competition;
-using Level5.Domain.Ids;
 using Level5.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -20,8 +19,9 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Round_trips_nested_attempt_state_through_the_jsonb_column()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         series.Accept(opponent, Now);
         series.StartAttempt(challenger, 1, Now);
@@ -29,7 +29,6 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         series.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
         series.CompleteAttempt(opponent, 1, AttemptResult.OfScore(60), Now);
 
-        await using var writeDb = fixture.CreateDbContext();
         var writeStore = new VersusSeriesStore(writeDb);
         await writeStore.AddAsync(series, clientRequestId: null, CancellationToken.None);
         await writeStore.TrySaveAsync(series, expectedRevision: 0, CancellationToken.None);
@@ -50,11 +49,11 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task Frozen_rules_survive_a_reload_unchanged()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var writeDb = fixture.CreateDbContext();
         await new VersusSeriesStore(writeDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
 
         await using var readDb = fixture.CreateDbContext();
@@ -70,8 +69,9 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task An_attempt_result_with_multiple_named_metrics_survives_a_reload_with_order_independent_equality()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
         series.Accept(opponent, Now);
         series.StartAttempt(challenger, 1, Now);
@@ -91,7 +91,6 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         // completed attempt above - so a single insert is enough to prove the round trip; no
         // separate TrySaveAsync is needed (and one wouldn't hit anyway: `series.Revision` is
         // already 3 at this point, past Accept/StartAttempt/CompleteAttempt).
-        await using var writeDb = fixture.CreateDbContext();
         await new VersusSeriesStore(writeDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
 
         await using var readDb = fixture.CreateDbContext();
@@ -113,11 +112,11 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task A_row_persisted_with_an_unsupported_schema_version_is_rejected_on_read()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "Opponent", Now);
         var series = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var writeDb = fixture.CreateDbContext();
         await new VersusSeriesStore(writeDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
 
         // Simulates a schema-v1 row (pre-issue-#9: no frozen rules at all) landing in the table -
@@ -139,11 +138,11 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task TrySaveAsync_rejects_a_write_based_on_a_stale_revision()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "Opponent", Now);
         var original = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var setupDb = fixture.CreateDbContext();
         await new VersusSeriesStore(setupDb).AddAsync(original, clientRequestId: null, CancellationToken.None);
 
         // Two concurrent requests both load the series at revision 0.
@@ -174,14 +173,14 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ListIncomingChallengesAsync_only_returns_pending_challenges_for_the_opponent()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
-        var unrelated = PlayerId.New();
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "Opponent", Now);
+        var unrelated = await PlayerSeeding.CreatePlayerAsync(db, "Unrelated", Now);
 
         var pending = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
         var forSomeoneElse = VersusSeries.CreateChallenge(challenger, unrelated, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var db = fixture.CreateDbContext();
         var store = new VersusSeriesStore(db);
         await store.AddAsync(pending, clientRequestId: null, CancellationToken.None);
         await store.AddAsync(forSomeoneElse, clientRequestId: null, CancellationToken.None);
@@ -195,9 +194,10 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task ListCompletedSeriesAsync_only_returns_completed_series_for_a_participant()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
-        var unrelated = PlayerId.New();
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "Challenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "Opponent", Now);
+        var unrelated = await PlayerSeeding.CreatePlayerAsync(db, "Unrelated", Now);
 
         var completed = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
         completed.Accept(opponent, Now);
@@ -216,7 +216,6 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         forSomeoneElse.CompleteAttempt(challenger, 1, AttemptResult.OfScore(80), Now);
         forSomeoneElse.CompleteAttempt(unrelated, 1, AttemptResult.OfScore(60), Now);
 
-        await using var db = fixture.CreateDbContext();
         var store = new VersusSeriesStore(db);
         await store.AddAsync(completed, clientRequestId: null, CancellationToken.None);
         await store.AddAsync(stillPending, clientRequestId: null, CancellationToken.None);
@@ -231,14 +230,14 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task AddAsync_rejects_a_duplicate_clientRequestId_for_the_same_challenger()
     {
-        var challenger = PlayerId.New();
-        var opponentA = PlayerId.New();
-        var opponentB = PlayerId.New();
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "Challenger", Now);
+        var opponentA = await PlayerSeeding.CreatePlayerAsync(db, "OpponentA", Now);
+        var opponentB = await PlayerSeeding.CreatePlayerAsync(db, "OpponentB", Now);
         var clientRequestId = Guid.NewGuid();
         var first = VersusSeries.CreateChallenge(challenger, opponentA, SeriesFormat.BestOf(3), DefaultRules, Now);
         var second = VersusSeries.CreateChallenge(challenger, opponentB, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var db = fixture.CreateDbContext();
         var store = new VersusSeriesStore(db);
         await store.AddAsync(first, clientRequestId, CancellationToken.None);
 
@@ -250,13 +249,13 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     [Fact]
     public async Task FindByIdempotencyKeyAsync_is_scoped_to_the_challenger_that_used_the_key()
     {
-        var challengerA = PlayerId.New();
-        var challengerB = PlayerId.New();
-        var opponent = PlayerId.New();
+        await using var db = fixture.CreateDbContext();
+        var challengerA = await PlayerSeeding.CreatePlayerAsync(db, "ChallengerA", Now);
+        var challengerB = await PlayerSeeding.CreatePlayerAsync(db, "ChallengerB", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "Opponent", Now);
         var sharedKey = Guid.NewGuid();
         var seriesA = VersusSeries.CreateChallenge(challengerA, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
 
-        await using var db = fixture.CreateDbContext();
         var store = new VersusSeriesStore(db);
         await store.AddAsync(seriesA, sharedKey, CancellationToken.None);
 

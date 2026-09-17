@@ -22,10 +22,10 @@ public sealed class FriendRequestConcurrencyTests(PostgresFixture fixture)
 
     private async Task<(FriendRequestId RequestId, PlayerId Sender, PlayerId Recipient)> SeedPendingRequestAsync()
     {
-        var sender = PlayerId.New();
-        var recipient = PlayerId.New();
-
         await using var db = fixture.CreateDbContext();
+        var sender = await PlayerSeeding.CreatePlayerAsync(db, "Sender", Now);
+        var recipient = await PlayerSeeding.CreatePlayerAsync(db, "Recipient", Now);
+
         var store = new FriendshipStore(db);
         var request = FriendRequest.Create(sender, recipient, Now);
         await store.AddRequestAsync(request, CancellationToken.None);

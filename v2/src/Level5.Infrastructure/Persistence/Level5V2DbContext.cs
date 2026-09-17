@@ -100,6 +100,29 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // (Accept only), so a stale write's failed concurrency check rolls back both together
             // rather than needing a separate explicit transaction.
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            // Restrict (not cascade), same reasoning as accounts/player_profiles above: these
+            // relationships define referential integrity, not a player-deletion feature, so a
+            // stray delete must fail loudly rather than silently orphan or prune social history.
+            // Four separate FKs to the same principal table (issue #20) - FromPlayerId/ToPlayerId
+            // carry direction, LowerPlayerId/UpperPlayerId are the derived canonical pair (see the
+            // comment on those columns in FriendRequestRow); all four must stay valid player
+            // references independently since they're populated from the same two players.
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.FromPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.ToPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.LowerPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.UpperPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<FriendshipRow>(entity =>
@@ -107,6 +130,16 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.ToTable("friendships");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.LowerPlayerId, e.UpperPlayerId }).IsUnique();
+            // Restrict, not cascade - see the FriendRequestRow FKs above; an accepted friendship
+            // is history that must not silently disappear if a player row is ever removed.
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.LowerPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.UpperPlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<VersusSeriesRow>(entity =>
@@ -125,6 +158,22 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // The optimistic-concurrency token: writes are conditioned on this column matching
             // the value that was read, via ExecuteUpdate's WHERE clause in VersusSeriesStore.
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            // Restrict, not cascade - see the FriendRequestRow FKs above; correspondence history
+            // must not silently disappear if a player row is ever removed. WinnerId stays
+            // nullable (a series with no winner yet, or a draw) but must reference a real player
+            // whenever it is set - EF/Npgsql make an optional FK nullable automatically.
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.ChallengerId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.OpponentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.WinnerId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }
