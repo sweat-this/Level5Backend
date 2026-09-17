@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using Level5.Application.Abstractions;
+using Level5.Application.Competition;
+using Level5.Domain.Competition;
 using Level5.Domain.Identity;
 using Level5.Domain.Ids;
 
@@ -9,6 +11,33 @@ namespace Level5.Application.Tests.Fakes;
 public sealed class FakeClock : IClock
 {
     public DateTimeOffset UtcNow { get; set; } = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+}
+
+/// <summary>Mirrors the single "score-only" entry of the real Infrastructure catalog (<c>StaticRulesetCatalog</c>) so use-case tests exercise the same resolution/rejection rules without depending on Infrastructure.</summary>
+public sealed class FakeRulesetCatalog : IRulesetCatalog
+{
+    public const int CurrentVersion = 1;
+    public const int MinimumCompatibleVersion = 1;
+
+    public RulesetDefinition Resolve(string rulesetId, int? requestedVersion)
+    {
+        if (rulesetId != "score-only")
+        {
+            throw new UnknownRulesetException($"Ruleset '{rulesetId}' is not recognized.");
+        }
+
+        var version = requestedVersion ?? CurrentVersion;
+        if (version < MinimumCompatibleVersion || version > CurrentVersion)
+        {
+            throw new RulesetVersionUnsupportedException(
+                $"Ruleset '{rulesetId}' version {version} is not supported (supported range: {MinimumCompatibleVersion}-{CurrentVersion}).");
+        }
+
+        return new RulesetDefinition(
+            rulesetId, version, MinimumCompatibleVersion, "mode-score-only",
+            InformationPolicy.SealedAttempt, AlternatesFirstAttempt: false,
+            [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]);
+    }
 }
 
 /// <summary>Not a real hash - deterministic and reversible so tests can assert on it directly.</summary>

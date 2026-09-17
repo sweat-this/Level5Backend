@@ -18,7 +18,7 @@ public sealed class CompleteAttemptUseCase(IVersusSeriesStore seriesStore, ICloc
         var series = await SeriesLookup.LoadForParticipantAsync(seriesStore, request.SeriesId, request.ActingPlayerId, cancellationToken);
         var expectedRevision = series.Revision;
 
-        series.CompleteAttempt(request.ActingPlayerId, request.GameNumber, Score.Of(request.Score), clock.UtcNow);
+        series.CompleteAttempt(request.ActingPlayerId, request.GameNumber, AttemptResult.OfScore(request.Score), clock.UtcNow);
 
         await SeriesLookup.SaveOrThrowAsync(seriesStore, series, expectedRevision, cancellationToken);
         return series.ToView(request.ActingPlayerId);

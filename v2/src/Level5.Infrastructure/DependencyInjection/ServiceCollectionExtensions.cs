@@ -1,4 +1,5 @@
 using Level5.Application.Abstractions;
+using Level5.Infrastructure.Competition;
 using Level5.Infrastructure.Health;
 using Level5.Infrastructure.Identity;
 using Level5.Infrastructure.Persistence;
@@ -55,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAuthSessionPolicy, AuthSessionPolicy>();
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();
         services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton<IRulesetCatalog, StaticRulesetCatalog>();
 
         services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 

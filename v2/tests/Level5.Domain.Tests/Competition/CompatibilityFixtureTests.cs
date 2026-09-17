@@ -55,7 +55,7 @@ public class CompatibilityFixtureTests
         var round = opponentView.Games.Single(g => g.GameNumber == 1);
 
         Assert.Equal(AttemptStatus.Completed, round.OpponentAttempt!.Status);
-        Assert.Null(round.OpponentAttempt.Score);
+        Assert.Null(round.OpponentAttempt.Result);
         Assert.NotNull(round.YourAttempt);
         Assert.Equal(SeriesStatus.Active, series.Status);
     }
@@ -113,7 +113,7 @@ public class CompatibilityFixtureTests
         var series = Run(fixture);
 
         var attempt = series.Rounds.Single(r => r.GameNumber == 1).AttemptFor(_challenger);
-        Assert.Equal(50, attempt!.Result!.Value.Value);
+        Assert.Equal(50d, attempt!.Result!.ValueOf(ResultMetric.Score));
         // Accept (0->1) + StartAttempt (1->2) + the first, genuinely-new CompleteAttempt (2->3)
         // each bump the revision; the second, idempotent CompleteAttempt must not bump it again.
         Assert.Equal(3, series.Revision);
@@ -147,19 +147,19 @@ public class CompatibilityFixtureTests
         Assert.Equal("completeAttempt", firstComplete.Op);
         Assert.Equal("completeAttemptExpectRejected", conflictingComplete.Op);
 
-        var series = VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(fixture.SeriesFormat.TotalGames), Now);
+        var series = VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(fixture.SeriesFormat.TotalGames), RulesFrom(fixture.Ruleset), Now);
         series.Accept(ResolveActor(accept.By), Now);
         series.StartAttempt(ResolveActor(startAttempt.By), startAttempt.Game!.Value, Now);
-        var firstScore = ScoreOf(fixture.FixtureId, firstComplete.Result!);
-        series.CompleteAttempt(ResolveActor(firstComplete.By), firstComplete.Game!.Value, firstScore, Now);
+        var firstResult = ResultOf(fixture.FixtureId, firstComplete.Result!);
+        series.CompleteAttempt(ResolveActor(firstComplete.By), firstComplete.Game!.Value, firstResult, Now);
 
         // Protocol requires this to be rejected as a conflict (HTTP 409). It is not, today: it
         // silently returns the FIRST accepted result instead of throwing or rejecting.
-        var conflictingScore = ScoreOf(fixture.FixtureId, conflictingComplete.Result!);
-        Assert.NotEqual(firstScore, conflictingScore); // the fixture must actually describe a conflict, not a retry
-        var second = series.CompleteAttempt(ResolveActor(conflictingComplete.By), conflictingComplete.Game!.Value, conflictingScore, Now);
+        var conflictingResult = ResultOf(fixture.FixtureId, conflictingComplete.Result!);
+        Assert.NotEqual(firstResult, conflictingResult); // the fixture must actually describe a conflict, not a retry
+        var second = series.CompleteAttempt(ResolveActor(conflictingComplete.By), conflictingComplete.Game!.Value, conflictingResult, Now);
 
-        Assert.Equal(firstScore.Value, second.Result!.Value.Value);
+        Assert.Equal(firstResult, second.Result);
     }
 
     /// <summary>
@@ -184,7 +184,7 @@ public class CompatibilityFixtureTests
                 switch (op)
                 {
                     case "createChallenge":
-                        series = VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(fixture.SeriesFormat.TotalGames), Now);
+                        series = VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(fixture.SeriesFormat.TotalGames), RulesFrom(fixture.Ruleset), Now);
                         break;
                     case "accept":
                         series!.Accept(actor, Now);
@@ -199,7 +199,7 @@ public class CompatibilityFixtureTests
                         series!.StartAttempt(actor, command.Game!.Value, Now);
                         break;
                     case "completeAttempt":
-                        series!.CompleteAttempt(actor, command.Game!.Value, ScoreOf(fixture.FixtureId, command.Result!), Now);
+                        series!.CompleteAttempt(actor, command.Game!.Value, ResultOf(fixture.FixtureId, command.Result!), Now);
                         break;
                     default:
                         throw new NotSupportedException($"Fixture command '{op}' is not supported by the Backend-executable runner.");
@@ -226,16 +226,31 @@ public class CompatibilityFixtureTests
         _ => throw new NotSupportedException($"Unknown actor role '{by}'.")
     };
 
-    private static Score ScoreOf(string fixtureId, Dictionary<string, JsonElement> result)
+    private static AttemptResult ResultOf(string fixtureId, Dictionary<string, JsonElement> result)
     {
-        if (!result.TryGetValue("Score", out var value))
+        var metrics = new Dictionary<ResultMetric, double>();
+        foreach (var (key, value) in result)
         {
-            throw new NotSupportedException(
-                $"Fixture '{fixtureId}' submits a metric the Backend cannot carry yet (it only has a single int Score today - see issue #8 required changes for #11).");
+            if (!Enum.TryParse<ResultMetric>(key, out var metric))
+            {
+                throw new NotSupportedException($"Fixture '{fixtureId}' submits an unrecognized metric '{key}'.");
+            }
+
+            metrics[metric] = value.GetDouble();
         }
 
-        return Score.Of(value.GetInt32());
+        return AttemptResult.Of(metrics);
     }
+
+    private static FrozenRules RulesFrom(FixtureRuleset ruleset) => FrozenRules.Create(
+        CompetitionProtocol.CurrentVersion,
+        ruleset.RulesetId,
+        ruleset.RulesetVersion,
+        ruleset.CatalogMinimumCompatibleVersion ?? 1,
+        modeId: $"mode-{ruleset.RulesetId}",
+        Enum.Parse<InformationPolicy>(ruleset.InformationPolicy),
+        ruleset.AlternatesFirstAttempt,
+        [.. ruleset.ComparisonKeys.Select(k => new ComparisonKey(Enum.Parse<ResultMetric>(k.Metric), Enum.Parse<MetricDirection>(k.Direction)))]);
 
     private static FixtureFile Load(string fileName)
     {
@@ -277,10 +292,21 @@ public class CompatibilityFixtureTests
         int ProtocolVersion,
         bool BackendExecutable,
         FixtureSeriesFormat SeriesFormat,
+        FixtureRuleset Ruleset,
         List<FixtureCommand> Commands,
         JsonElement Expected);
 
     private sealed record FixtureSeriesFormat(int TotalGames);
+
+    private sealed record FixtureRuleset(
+        string RulesetId,
+        int RulesetVersion,
+        int? CatalogMinimumCompatibleVersion,
+        string InformationPolicy,
+        bool AlternatesFirstAttempt,
+        List<FixtureComparisonKey> ComparisonKeys);
+
+    private sealed record FixtureComparisonKey(string Metric, string Direction);
 
     private sealed record FixtureCommand(string Op, string? By, int? Game, Dictionary<string, JsonElement>? Result);
 }

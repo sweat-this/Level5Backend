@@ -1,3 +1,4 @@
+using Level5.Domain.Common;
 using Level5.Domain.Ids;
 
 namespace Level5.Domain.Competition;
@@ -38,17 +39,28 @@ public sealed class GameRound
                 return null;
             }
 
-            var challengerScore = ChallengerAttempt!.Result!.Value.Value;
-            var opponentScore = OpponentAttempt!.Result!.Value.Value;
+            var challengerScore = ScoreOf(ChallengerAttempt!);
+            var opponentScore = ScoreOf(OpponentAttempt!);
 
             if (challengerScore == opponentScore)
             {
                 return null;
             }
 
-            return challengerScore > opponentScore ? ChallengerAttempt.PlayerId : OpponentAttempt.PlayerId;
+            return challengerScore > opponentScore ? ChallengerAttempt!.PlayerId : OpponentAttempt!.PlayerId;
         }
     }
+
+    /// <summary>
+    /// Round resolution compares only the Score metric, higher-wins - the same hardcoded rule
+    /// this type used before <see cref="AttemptResult"/> could carry multiple named metrics. A
+    /// series' <see cref="FrozenRules.ComparisonKeys"/>/<see cref="FrozenRules.MinimumCompatibleVersion"/>
+    /// are persisted starting with issue #9 but intentionally not consulted here yet - the
+    /// ordered, direction-aware comparison engine is issue #11's responsibility.
+    /// </summary>
+    private static double ScoreOf(GameAttempt attempt) => attempt.Result!.ValueOf(ResultMetric.Score)
+        ?? throw new ScoreMetricRequiredException(
+            "Round resolution requires a Score metric until issue #11 implements the full ordered comparison engine.");
 
     public (GameAttempt Attempt, bool WasCreated) StartOrGetAttempt(PlayerId playerId, PlayerId challengerId, DateTimeOffset now)
     {
@@ -85,5 +97,12 @@ public sealed class GameRound
         }
 
         return null;
+    }
+}
+
+public sealed class ScoreMetricRequiredException : DomainException
+{
+    public ScoreMetricRequiredException(string message) : base(message)
+    {
     }
 }

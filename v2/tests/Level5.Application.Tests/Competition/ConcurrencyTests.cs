@@ -34,6 +34,7 @@ public class ConcurrencyTests
 {
     private readonly InMemoryVersusSeriesStore _seriesStore = new();
     private readonly InMemoryFriendshipStore _friendships = new();
+    private readonly FakeRulesetCatalog _catalog = new();
     private readonly FakeClock _clock = new();
 
     private async Task<(VersusSeriesId SeriesId, PlayerId Challenger, PlayerId Opponent)> SeedPendingChallengeAsync()
@@ -42,8 +43,8 @@ public class ConcurrencyTests
         var opponent = PlayerId.New();
         await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
 
-        var view = await new CreateChallengeUseCase(_seriesStore, _friendships, _clock)
-            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, 3), CancellationToken.None);
+        var view = await new CreateChallengeUseCase(_seriesStore, _friendships, _catalog, _clock)
+            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3), CancellationToken.None);
 
         return (view.Id, challenger, opponent);
     }

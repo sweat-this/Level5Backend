@@ -7,11 +7,17 @@ namespace Level5.Domain.Tests.Competition;
 public class VersusSeriesTests
 {
     private static readonly DateTimeOffset Now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private static readonly FrozenRules DefaultRules = FrozenRules.Create(
+        CompetitionProtocol.CurrentVersion, "score-only", 1, 1, "mode-score-only",
+        InformationPolicy.SealedAttempt, alternatesFirstAttempt: false,
+        [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]);
+
     private readonly PlayerId _challenger = PlayerId.New();
     private readonly PlayerId _opponent = PlayerId.New();
 
     private VersusSeries CreateBestOf(int totalGames)
-        => VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(totalGames), Now);
+        => VersusSeries.CreateChallenge(_challenger, _opponent, SeriesFormat.BestOf(totalGames), DefaultRules, Now);
 
     [Fact]
     public void CreateChallenge_starts_pending_acceptance_with_revision_zero()
@@ -24,10 +30,18 @@ public class VersusSeriesTests
     }
 
     [Fact]
+    public void CreateChallenge_freezes_the_given_rules_unchanged()
+    {
+        var series = CreateBestOf(3);
+
+        Assert.Equal(DefaultRules, series.Rules);
+    }
+
+    [Fact]
     public void CreateChallenge_against_self_is_rejected()
     {
         Assert.Throws<InvalidChallengeException>(() =>
-            VersusSeries.CreateChallenge(_challenger, _challenger, SeriesFormat.BestOf(3), Now));
+            VersusSeries.CreateChallenge(_challenger, _challenger, SeriesFormat.BestOf(3), DefaultRules, Now));
     }
 
     [Fact]
@@ -124,7 +138,7 @@ public class VersusSeriesTests
         series.Accept(_opponent, Now);
         series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
-        series.CompleteAttempt(_challenger, 1, Score.Of(50), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(50), Now);
         // Opponent has not completed their game-1 attempt yet, so the round - and the series -
         // has not advanced past game 1.
 
@@ -153,7 +167,7 @@ public class VersusSeriesTests
         var series = CreateBestOf(3);
         series.Accept(_opponent, Now);
 
-        Assert.Throws<AttemptNotStartedException>(() => series.CompleteAttempt(_challenger, 1, Score.Of(10), Now));
+        Assert.Throws<AttemptNotStartedException>(() => series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(10), Now));
     }
 
     [Fact]
@@ -163,12 +177,12 @@ public class VersusSeriesTests
         series.Accept(_opponent, Now);
         series.StartAttempt(_challenger, 1, Now);
 
-        var first = series.CompleteAttempt(_challenger, 1, Score.Of(50), Now);
+        var first = series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(50), Now);
         var revisionAfterFirstComplete = series.Revision;
-        var second = series.CompleteAttempt(_challenger, 1, Score.Of(999), Now);
+        var second = series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(999), Now);
 
-        Assert.Equal(50, first.Result!.Value.Value);
-        Assert.Equal(50, second.Result!.Value.Value);
+        Assert.Equal(50d, first.Result!.ValueOf(ResultMetric.Score));
+        Assert.Equal(50d, second.Result!.ValueOf(ResultMetric.Score));
         Assert.Equal(revisionAfterFirstComplete, series.Revision);
     }
 
@@ -180,7 +194,7 @@ public class VersusSeriesTests
         series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
 
-        series.CompleteAttempt(_challenger, 1, Score.Of(50), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(50), Now);
 
         Assert.False(series.Rounds.Single(r => r.GameNumber == 1).IsResolved);
         Assert.Equal(1, series.CurrentGameNumber);
@@ -211,8 +225,8 @@ public class VersusSeriesTests
 
         series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
-        series.CompleteAttempt(_challenger, 1, Score.Of(10), Now);
-        series.CompleteAttempt(_opponent, 1, Score.Of(10), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(10), Now);
+        series.CompleteAttempt(_opponent, 1, AttemptResult.OfScore(10), Now);
 
         Assert.Equal(SeriesStatus.Completed, series.Status);
         Assert.Null(series.WinnerId);
@@ -225,7 +239,7 @@ public class VersusSeriesTests
         series.Accept(_opponent, Now);
         series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
-        series.CompleteAttempt(_challenger, 1, Score.Of(77), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(77), Now);
 
         var opponentView = series.ToView(_opponent);
         var round = opponentView.Games.Single(g => g.GameNumber == 1);
@@ -233,7 +247,7 @@ public class VersusSeriesTests
         // The opponent (viewer) has not completed their attempt, so the round is unresolved: the
         // challenger's attempt shows as completed (state is not secret) but its score must not leak.
         Assert.Equal(Domain.Competition.AttemptStatus.Completed, round.OpponentAttempt!.Status);
-        Assert.Null(round.OpponentAttempt.Score);
+        Assert.Null(round.OpponentAttempt.Result);
     }
 
     [Fact]
@@ -243,14 +257,24 @@ public class VersusSeriesTests
         series.Accept(_opponent, Now);
         series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
-        series.CompleteAttempt(_challenger, 1, Score.Of(77), Now);
-        series.CompleteAttempt(_opponent, 1, Score.Of(60), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(77), Now);
+        series.CompleteAttempt(_opponent, 1, AttemptResult.OfScore(60), Now);
 
         var opponentView = series.ToView(_opponent);
         var round = opponentView.Games.Single(g => g.GameNumber == 1);
 
-        Assert.Equal(77, round.OpponentAttempt!.Score);
-        Assert.Equal(60, round.YourAttempt!.Score);
+        Assert.Equal(77d, round.OpponentAttempt!.Result![ResultMetric.Score]);
+        Assert.Equal(60d, round.YourAttempt!.Result![ResultMetric.Score]);
+    }
+
+    [Fact]
+    public void ToView_exposes_the_frozen_rules()
+    {
+        var series = CreateBestOf(3);
+
+        var view = series.ToView(_challenger);
+
+        Assert.Equal(DefaultRules, view.Rules);
     }
 
     [Fact]
@@ -262,17 +286,17 @@ public class VersusSeriesTests
 
         series.StartAttempt(_challenger, 2, Now);
         series.StartAttempt(_opponent, 2, Now);
-        series.CompleteAttempt(_challenger, 2, Score.Of(100), Now);
-        series.CompleteAttempt(_opponent, 2, Score.Of(10), Now);
+        series.CompleteAttempt(_challenger, 2, AttemptResult.OfScore(100), Now);
+        series.CompleteAttempt(_opponent, 2, AttemptResult.OfScore(10), Now);
 
         Assert.Equal(SeriesStatus.Completed, series.Status);
 
         // The client's HTTP response for that last completion never arrived, so it retries the
         // exact same call. The series is no longer Active, but the retry must still succeed and
         // return the original result rather than fail because the series has moved on.
-        var retried = series.CompleteAttempt(_opponent, 2, Score.Of(10), Now);
+        var retried = series.CompleteAttempt(_opponent, 2, AttemptResult.OfScore(10), Now);
 
-        Assert.Equal(10, retried.Result!.Value.Value);
+        Assert.Equal(10d, retried.Result!.ValueOf(ResultMetric.Score));
     }
 
     [Fact]
@@ -282,8 +306,8 @@ public class VersusSeriesTests
         series.Accept(_opponent, Now);
         var started = series.StartAttempt(_challenger, 1, Now);
         series.StartAttempt(_opponent, 1, Now);
-        series.CompleteAttempt(_challenger, 1, Score.Of(100), Now);
-        series.CompleteAttempt(_opponent, 1, Score.Of(10), Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(100), Now);
+        series.CompleteAttempt(_opponent, 1, AttemptResult.OfScore(10), Now);
 
         Assert.Equal(SeriesStatus.Completed, series.Status);
 
@@ -304,7 +328,7 @@ public class VersusSeriesTests
     {
         series.StartAttempt(_challenger, gameNumber, Now);
         series.StartAttempt(_opponent, gameNumber, Now);
-        series.CompleteAttempt(_challenger, gameNumber, Score.Of(100), Now);
-        series.CompleteAttempt(_opponent, gameNumber, Score.Of(10), Now);
+        series.CompleteAttempt(_challenger, gameNumber, AttemptResult.OfScore(100), Now);
+        series.CompleteAttempt(_opponent, gameNumber, AttemptResult.OfScore(10), Now);
     }
 }

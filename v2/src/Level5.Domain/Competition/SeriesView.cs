@@ -15,13 +15,14 @@ public sealed record SeriesView(
     PlayerId? WinnerId,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
+    FrozenRules Rules,
     IReadOnlyList<GameRoundView> Games);
 
 /// <summary>
-/// One game's attempts from the viewer's perspective. <see cref="OpponentAttempt"/>'s
-/// <see cref="AttemptView.Score"/> is null until both attempts in the round are complete -
+/// One game's attempts from the viewer's perspective. <see cref="AttemptView.Result"/> on
+/// <see cref="OpponentAttempt"/> is null until both attempts in the round are complete -
 /// enforced here, in the domain, rather than left to API/UI code to hide.
 /// </summary>
 public sealed record GameRoundView(int GameNumber, AttemptView? YourAttempt, AttemptView? OpponentAttempt);
 
-public sealed record AttemptView(AttemptId Id, AttemptStatus Status, int? Score);
+public sealed record AttemptView(AttemptId Id, AttemptStatus Status, IReadOnlyDictionary<ResultMetric, double>? Result);

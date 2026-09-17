@@ -22,7 +22,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         await bob.Client.PostAsync($"/api/v2/friends/requests/{requestId}/accept", null);
 
-        var createResponse = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1 });
+        var createResponse = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1, rulesetId = "score-only" });
         Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
         var series = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
         var seriesId = series.GetProperty("id").GetGuid();
@@ -46,7 +46,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         var alice = await factory.RegisterNewPlayerAsync("Alice2");
         var stranger = await factory.RegisterNewPlayerAsync("Stranger");
 
-        var response = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = stranger.PlayerId, totalGames = 3 });
+        var response = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = stranger.PlayerId, totalGames = 3, rulesetId = "score-only" });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -76,7 +76,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         var game1 = parsed.GetProperty("games")[0];
         Assert.Equal("Completed", game1.GetProperty("opponentAttempt").GetProperty("status").GetString());
-        Assert.Equal(JsonValueKind.Null, game1.GetProperty("opponentAttempt").GetProperty("score").ValueKind);
+        Assert.Equal(JsonValueKind.Null, game1.GetProperty("opponentAttempt").GetProperty("result").ValueKind);
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
     private static async Task<Guid> CreateAndAcceptSeriesAsync(RegisteredPlayer challenger, RegisteredPlayer opponent, int totalGames)
     {
-        var createResponse = await challenger.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = opponent.PlayerId, totalGames });
+        var createResponse = await challenger.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = opponent.PlayerId, totalGames, rulesetId = "score-only" });
         var series = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
         var seriesId = series.GetProperty("id").GetGuid();
         await opponent.Client.PostAsync($"/api/v2/series/{seriesId}/accept", null);

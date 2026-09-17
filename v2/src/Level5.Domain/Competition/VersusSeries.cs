@@ -17,6 +17,7 @@ public sealed class VersusSeries
     public PlayerId ChallengerId { get; private set; }
     public PlayerId OpponentId { get; private set; }
     public SeriesFormat Format { get; private set; }
+    public FrozenRules Rules { get; private set; }
     public SeriesStatus Status { get; private set; }
     public int CurrentGameNumber { get; private set; }
     public PlayerId? WinnerId { get; private set; }
@@ -31,6 +32,7 @@ public sealed class VersusSeries
         PlayerId challengerId,
         PlayerId opponentId,
         SeriesFormat format,
+        FrozenRules rules,
         SeriesStatus status,
         int currentGameNumber,
         PlayerId? winnerId,
@@ -43,6 +45,7 @@ public sealed class VersusSeries
         ChallengerId = challengerId;
         OpponentId = opponentId;
         Format = format;
+        Rules = rules;
         Status = status;
         CurrentGameNumber = currentGameNumber;
         WinnerId = winnerId;
@@ -52,7 +55,14 @@ public sealed class VersusSeries
         CompletedAt = completedAt;
     }
 
-    public static VersusSeries CreateChallenge(PlayerId challengerId, PlayerId opponentId, SeriesFormat format, DateTimeOffset now)
+    /// <summary>
+    /// Creates a challenge with an already server-resolved, frozen rules snapshot. Callers (the
+    /// application layer, via its ruleset catalog port) must resolve <paramref name="rules"/>
+    /// from the server's own authoritative source before calling this - this constructor freezes
+    /// whatever it is given and never re-resolves it, so a later catalog change cannot
+    /// retroactively affect this series (Competition Protocol V1 section 9).
+    /// </summary>
+    public static VersusSeries CreateChallenge(PlayerId challengerId, PlayerId opponentId, SeriesFormat format, FrozenRules rules, DateTimeOffset now)
     {
         if (challengerId == opponentId)
         {
@@ -60,18 +70,18 @@ public sealed class VersusSeries
         }
 
         return new VersusSeries(
-            VersusSeriesId.New(), challengerId, opponentId, format,
+            VersusSeriesId.New(), challengerId, opponentId, format, rules,
             SeriesStatus.PendingAcceptance, currentGameNumber: 1, winnerId: null,
             revision: 0, createdAt: now, updatedAt: now, completedAt: null);
     }
 
     public static VersusSeries Rehydrate(
-        VersusSeriesId id, PlayerId challengerId, PlayerId opponentId, SeriesFormat format,
+        VersusSeriesId id, PlayerId challengerId, PlayerId opponentId, SeriesFormat format, FrozenRules rules,
         SeriesStatus status, int currentGameNumber, PlayerId? winnerId, long revision,
         DateTimeOffset createdAt, DateTimeOffset updatedAt, DateTimeOffset? completedAt,
         IEnumerable<GameRound> rounds)
     {
-        var series = new VersusSeries(id, challengerId, opponentId, format, status, currentGameNumber, winnerId, revision, createdAt, updatedAt, completedAt);
+        var series = new VersusSeries(id, challengerId, opponentId, format, rules, status, currentGameNumber, winnerId, revision, createdAt, updatedAt, completedAt);
         series._rounds.AddRange(rounds);
         return series;
     }
@@ -152,7 +162,7 @@ public sealed class VersusSeries
     /// without applying the transition a second time or re-resolving an already-resolved round,
     /// even if this same completion is what already finished the series.
     /// </summary>
-    public GameAttempt CompleteAttempt(PlayerId actingPlayerId, int gameNumber, Score result, DateTimeOffset now)
+    public GameAttempt CompleteAttempt(PlayerId actingPlayerId, int gameNumber, AttemptResult result, DateTimeOffset now)
     {
         if (!IsParticipant(actingPlayerId))
         {
@@ -197,7 +207,7 @@ public sealed class VersusSeries
 
         return new SeriesView(
             Id, ChallengerId, OpponentId, Status, Format.TotalGames, Format.GamesToWin,
-            CurrentGameNumber, Revision, WinnerId, CreatedAt, CompletedAt, rounds);
+            CurrentGameNumber, Revision, WinnerId, CreatedAt, CompletedAt, Rules, rounds);
     }
 
     private GameRoundView ToRoundView(GameRound round, PlayerId viewerId)
@@ -219,8 +229,8 @@ public sealed class VersusSeries
             return null;
         }
 
-        var score = revealResult ? attempt.Result?.Value : null;
-        return new AttemptView(attempt.Id, attempt.Status, score);
+        var result = revealResult ? attempt.Result?.Metrics : null;
+        return new AttemptView(attempt.Id, attempt.Status, result);
     }
 
     private GameRound GetOrCreateRound(int gameNumber)
