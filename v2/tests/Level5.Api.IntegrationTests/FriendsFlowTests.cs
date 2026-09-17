@@ -132,14 +132,14 @@ public sealed class FriendsFlowTests(ApiFactory factory)
         var requestId = await SendAsync(alice, bob.PlayerId);
         await bob.Client.PostAsync($"/api/v2/friends/requests/{requestId}/accept", null);
 
-        var firstChallenge = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1 });
+        var firstChallenge = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1, rulesetId = "score-only" });
         Assert.Equal(HttpStatusCode.OK, firstChallenge.StatusCode);
         var firstSeries = await firstChallenge.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         var firstSeriesId = firstSeries.GetProperty("id").GetGuid();
 
         await alice.Client.DeleteAsync($"/api/v2/friends/{bob.PlayerId}");
 
-        var secondChallenge = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1 });
+        var secondChallenge = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 1, rulesetId = "score-only" });
         Assert.Equal(HttpStatusCode.Forbidden, secondChallenge.StatusCode);
 
         // The already-created series from before the removal must remain untouched/accessible.
