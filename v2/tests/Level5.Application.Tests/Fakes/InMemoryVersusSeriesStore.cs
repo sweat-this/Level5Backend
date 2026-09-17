@@ -1,4 +1,5 @@
 using Level5.Application.Abstractions;
+using Level5.Application.Common;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -13,6 +14,7 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
 {
     private readonly Dictionary<Guid, long> _storedRevisions = [];
     private readonly Dictionary<Guid, VersusSeries> _rows = [];
+    private readonly Dictionary<Guid, Guid> _clientRequestIds = [];
 
     public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken)
     {
@@ -33,11 +35,31 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
         ? null
         : GameAttempt.Rehydrate(attempt.Id, attempt.PlayerId, attempt.Status, attempt.Result, attempt.StartedAt, attempt.CompletedAt);
 
-    public Task AddAsync(VersusSeries series, CancellationToken cancellationToken)
+    public Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken)
     {
+        if (clientRequestId is { } key)
+        {
+            var duplicateKey = _clientRequestIds.Any(kv => kv.Value == key && _rows[kv.Key].ChallengerId == series.ChallengerId);
+            if (duplicateKey)
+            {
+                throw new ConflictException("The request conflicts with existing data. Please retry.");
+            }
+
+            _clientRequestIds[series.Id.Value] = key;
+        }
+
         _rows[series.Id.Value] = series;
         _storedRevisions[series.Id.Value] = series.Revision;
         return Task.CompletedTask;
+    }
+
+    public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken)
+    {
+        var match = _clientRequestIds
+            .Where(kv => kv.Value == clientRequestId && _rows[kv.Key].ChallengerId == challengerId)
+            .Select(kv => _rows[kv.Key])
+            .SingleOrDefault();
+        return Task.FromResult(match is null ? null : Clone(match));
     }
 
     public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
@@ -51,6 +73,10 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
     public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<VersusSeries>>(
             [.. _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Active)]);
+
+    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<VersusSeries>>(
+            [.. _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Completed)]);
 
     public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)
     {

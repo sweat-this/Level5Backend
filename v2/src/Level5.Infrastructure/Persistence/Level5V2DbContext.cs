@@ -117,6 +117,11 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.Property(e => e.StateJson).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.OpponentId, e.Status });
             entity.HasIndex(e => new { e.ChallengerId, e.Status });
+            // Create idempotency (issue #10): Postgres unique indexes treat NULL as distinct from
+            // every other value, so this enforces uniqueness only once a create actually supplies
+            // a ClientRequestId - any number of rows with no key (e.g. seeded directly by tests)
+            // can coexist for the same challenger.
+            entity.HasIndex(e => new { e.ChallengerId, e.ClientRequestId }).IsUnique();
             // The optimistic-concurrency token: writes are conditioned on this column matching
             // the value that was read, via ExecuteUpdate's WHERE clause in VersusSeriesStore.
             entity.Property(e => e.Revision).IsConcurrencyToken();

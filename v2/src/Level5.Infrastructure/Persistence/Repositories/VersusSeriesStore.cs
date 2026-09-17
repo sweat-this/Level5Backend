@@ -15,10 +15,19 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task AddAsync(VersusSeries series, CancellationToken cancellationToken)
+    public async Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken)
     {
-        db.VersusSeries.Add(ToRow(series));
+        var row = ToRow(series);
+        row.ClientRequestId = clientRequestId;
+        db.VersusSeries.Add(row);
         await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
+    }
+
+    public async Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken)
+    {
+        var row = await db.VersusSeries.AsNoTracking()
+            .SingleOrDefaultAsync(r => r.ChallengerId == challengerId.Value && r.ClientRequestId == clientRequestId, cancellationToken);
+        return row is null ? null : ToDomain(row);
     }
 
     public async Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
@@ -41,6 +50,14 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
     {
         var rows = await db.VersusSeries.AsNoTracking()
             .Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Active))
+            .ToListAsync(cancellationToken);
+        return [.. rows.Select(ToDomain)];
+    }
+
+    public async Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
+    {
+        var rows = await db.VersusSeries.AsNoTracking()
+            .Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Completed))
             .ToListAsync(cancellationToken);
         return [.. rows.Select(ToDomain)];
     }

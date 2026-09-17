@@ -72,10 +72,55 @@ public class VersusSeriesTests
     }
 
     [Fact]
-    public void Accept_after_already_accepted_is_an_illegal_transition()
+    public void Accept_retry_by_the_same_opponent_on_an_active_series_is_idempotent()
     {
         var series = CreateBestOf(3);
         series.Accept(_opponent, Now);
+        var revisionAfterFirstAccept = series.Revision;
+
+        series.Accept(_opponent, Now);
+
+        Assert.Equal(SeriesStatus.Active, series.Status);
+        Assert.Equal(revisionAfterFirstAccept, series.Revision);
+    }
+
+    [Fact]
+    public void Accept_by_the_challenger_on_an_already_active_series_is_still_forbidden()
+    {
+        var series = CreateBestOf(3);
+        series.Accept(_opponent, Now);
+
+        Assert.Throws<SeriesAuthorizationException>(() => series.Accept(_challenger, Now));
+    }
+
+    [Fact]
+    public void Accept_on_a_declined_series_is_an_illegal_transition()
+    {
+        var series = CreateBestOf(3);
+        series.Decline(_opponent, Now);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Now));
+    }
+
+    [Fact]
+    public void Accept_on_a_cancelled_series_is_an_illegal_transition()
+    {
+        var series = CreateBestOf(3);
+        series.Cancel(_challenger, Now);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Now));
+    }
+
+    [Fact]
+    public void Accept_on_a_completed_series_is_an_illegal_transition()
+    {
+        var series = CreateBestOf(1);
+        series.Accept(_opponent, Now);
+        series.StartAttempt(_challenger, 1, Now);
+        series.StartAttempt(_opponent, 1, Now);
+        series.CompleteAttempt(_challenger, 1, AttemptResult.OfScore(10), Now);
+        series.CompleteAttempt(_opponent, 1, AttemptResult.OfScore(10), Now);
+        Assert.Equal(SeriesStatus.Completed, series.Status);
 
         Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Now));
     }

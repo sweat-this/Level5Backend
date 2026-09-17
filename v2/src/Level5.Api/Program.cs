@@ -93,6 +93,7 @@ builder.Services.AddScoped<GetSeriesUseCase>();
 builder.Services.AddScoped<ListIncomingChallengesUseCase>();
 builder.Services.AddScoped<ListOutgoingChallengesUseCase>();
 builder.Services.AddScoped<ListActiveSeriesUseCase>();
+builder.Services.AddScoped<ListCompletedSeriesUseCase>();
 builder.Services.AddScoped<StartAttemptUseCase>();
 builder.Services.AddScoped<CompleteAttemptUseCase>();
 
