@@ -1,0 +1,23 @@
+{
+  "fixtureId": "unsupported-ruleset-version",
+  "protocolVersion": 1,
+  "description": "A challenge that names a RulesetVersion the server's current ruleset catalog can no longer play (below its MinimumCompatibleVersion) is rejected at creation, before any attempt is issued.",
+  "backendExecutable": false,
+  "requiresDownstream": ["#9", "#10"],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "catalogMinimumCompatibleVersion": 2,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallengeExpectRejected", "by": "challenger" }
+  ],
+  "expected": {
+    "rejectionReason": "RulesetVersionUnsupported"
+  },
+  "notes": "Mirrors Unity's VersusSeriesValidator.ValidatePlayable + CompetitiveRuleset.CanPlayVersion (checked at attempt-issue time client-side). The remote contract must check this at CreateChallenge time instead: the client must never be authoritative for ruleset-version selection (issue #8 section 8). The Backend has no RulesetId/RulesetVersion/MinimumCompatibleVersion concept at all today, so there is nothing to reject against - this is required net-new work for #9 (frozen rules must carry ruleset id/version) and #10 (creation-time resolution/rejection)."
+}

@@ -1,0 +1,29 @@
+{
+  "fixtureId": "true-draw",
+  "protocolVersion": 1,
+  "description": "Every comparison key ties on the only game of a Best-of-1 series: the game is a draw and the series completes with no winner.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 10 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 1, "result": { "Score": 10 } }
+  ],
+  "expected": {
+    "seriesStatus": "Completed",
+    "winner": null,
+    "outcomeKind": "Draw"
+  },
+  "notes": "Both sides model this independently and identically: Unity's GameOutcomeKind.Draw / SeriesOutcomeKind.Draw and the Backend's GameRound.WinnerId==null / VersusSeries.CompleteWith(null, now). Compatible without any adapter."
+}

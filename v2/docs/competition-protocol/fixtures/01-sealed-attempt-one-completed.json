@@ -1,0 +1,32 @@
+{
+  "fixtureId": "sealed-attempt-one-completed",
+  "protocolVersion": 1,
+  "description": "Under SealedAttempt, once one participant completes their attempt and the other has not, the opponent's attempt status is visible but their result is not.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 77 } }
+  ],
+  "expected": {
+    "viewerRole": "opponent",
+    "game": 1,
+    "opponentAttemptStatusVisible": true,
+    "opponentAttemptStatus": "Completed",
+    "opponentResultVisible": false,
+    "ownResultVisible": true,
+    "seriesStatus": "Active"
+  },
+  "notes": "This is the one concept both sides already implement identically without having shared any code: Unity's VersusGame.ViewFor and the Backend's VersusSeries.ToRoundView both reveal opponent attempt state but seal the opponent's score until the round resolves. This fixture locks that convergence in."
+}

@@ -1,0 +1,36 @@
+{
+  "fixtureId": "open-target-primary-only",
+  "protocolVersion": 1,
+  "description": "Under OpenTarget, once the designated first participant completes, the responder may see only the primary comparison metric of that result before starting their own attempt - no other metric.",
+  "backendExecutable": false,
+  "requiresDownstream": ["#9", "#10", "#11"],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "contest",
+    "rulesetVersion": 1,
+    "informationPolicy": "OpenTarget",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [
+      { "metric": "Score", "direction": "HigherWins" },
+      { "metric": "CompletionTimeSeconds", "direction": "LowerWins" }
+    ]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttemptExpectRejected", "by": "opponent", "game": 1 },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 42, "CompletionTimeSeconds": 30.5 } },
+    { "op": "startAttempt", "by": "opponent", "game": 1 }
+  ],
+  "expected": {
+    "opponentIssuanceBeforeFirstMoverCompletes": "rejected",
+    "viewerRole": "opponent",
+    "game": 1,
+    "targetMetric": "Score",
+    "targetValue": 42,
+    "otherMetricsVisible": false,
+    "seriesStatus": "Active"
+  },
+  "notes": "The Backend has no OpenTarget concept and no issuance-order gating at all today (either participant may StartAttempt/CompleteAttempt for the current game in any order). This fixture is the spec #9 (frozen InformationPolicy + first-attempt ordering)/#10 (challenge-time policy selection)/#11 (issuance gating + partial-target projection) must satisfy; it mirrors Unity's SeriesSnapshot.FirstAttemptParticipantIndex + VersusGame.CanIssueTo + VersusGame.ViewFor exactly."
+}

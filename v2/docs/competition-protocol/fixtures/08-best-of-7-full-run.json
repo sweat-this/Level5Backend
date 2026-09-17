@@ -1,0 +1,53 @@
+{
+  "fixtureId": "best-of-7-full-run",
+  "protocolVersion": 1,
+  "description": "A Best-of-7 series requires 4 wins; a 4-3 split plays every game and completes correctly.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 7 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 10 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 1, "result": { "Score": 100 } },
+    { "op": "startAttempt", "by": "challenger", "game": 2 },
+    { "op": "startAttempt", "by": "opponent", "game": 2 },
+    { "op": "completeAttempt", "by": "challenger", "game": 2, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 2, "result": { "Score": 10 } },
+    { "op": "startAttempt", "by": "challenger", "game": 3 },
+    { "op": "startAttempt", "by": "opponent", "game": 3 },
+    { "op": "completeAttempt", "by": "challenger", "game": 3, "result": { "Score": 10 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 3, "result": { "Score": 100 } },
+    { "op": "startAttempt", "by": "challenger", "game": 4 },
+    { "op": "startAttempt", "by": "opponent", "game": 4 },
+    { "op": "completeAttempt", "by": "challenger", "game": 4, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 4, "result": { "Score": 10 } },
+    { "op": "startAttempt", "by": "challenger", "game": 5 },
+    { "op": "startAttempt", "by": "opponent", "game": 5 },
+    { "op": "completeAttempt", "by": "challenger", "game": 5, "result": { "Score": 10 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 5, "result": { "Score": 100 } },
+    { "op": "startAttempt", "by": "challenger", "game": 6 },
+    { "op": "startAttempt", "by": "opponent", "game": 6 },
+    { "op": "completeAttempt", "by": "challenger", "game": 6, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 6, "result": { "Score": 10 } },
+    { "op": "startAttempt", "by": "challenger", "game": 7 },
+    { "op": "startAttempt", "by": "opponent", "game": 7 },
+    { "op": "completeAttempt", "by": "challenger", "game": 7, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 7, "result": { "Score": 10 } }
+  ],
+  "expected": {
+    "seriesStatus": "Completed",
+    "winner": "challenger",
+    "gamesPlayed": 7
+  },
+  "notes": "Best-of-7 is the upper bound of the remote MVP subset (issue #8 section 7): both Unity (SeriesFormat.All caps at BestOf7) and the Backend (SeriesFormat.BestOf allows up to 25) already support 7; the Backend's 9-25 range is surplus that #10 must reject at the remote challenge boundary (see fixture 09 for the analogous unsupported-version rejection shape)."
+}

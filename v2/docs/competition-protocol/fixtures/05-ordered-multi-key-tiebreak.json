@@ -1,0 +1,33 @@
+{
+  "fixtureId": "ordered-multi-key-tiebreak",
+  "protocolVersion": 1,
+  "description": "When the primary comparison key is tied, the next comparison key in declared order decides the winner; only when every key ties is the game a draw.",
+  "backendExecutable": false,
+  "requiresDownstream": ["#11"],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "contest",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [
+      { "metric": "Score", "direction": "HigherWins" },
+      { "metric": "CompletionTimeSeconds", "direction": "LowerWins" },
+      { "metric": "Accuracy", "direction": "HigherWins" }
+    ]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 50, "CompletionTimeSeconds": 20.0, "Accuracy": 80 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 1, "result": { "Score": 50, "CompletionTimeSeconds": 15.0, "Accuracy": 60 } }
+  ],
+  "expected": {
+    "seriesStatus": "Completed",
+    "winner": "opponent",
+    "decidingKey": "CompletionTimeSeconds"
+  },
+  "notes": "Score ties at 50; CompletionTimeSeconds breaks the tie (opponent is faster). Mirrors Unity's CompetitiveRuleset.Compare exactly: iterate comparisonKeys in order, skip on equality, decide on the first key that differs. The Backend's GameRound.WinnerId has exactly one key and no fallthrough mechanism - required for #11."
+}
