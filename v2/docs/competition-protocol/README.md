@@ -462,19 +462,26 @@ requirement.
 **Backend (`sweat-this/Level5Backend`, this repository) — changed and executed in this session:**
 
 - `v2/tests/Level5.Domain.Tests/Competition/CompatibilityFixtureTests.cs` — loads the fixture
-  files directly (by walking up from the test assembly's output directory to
-  `Level5BackendV2.sln`, then into `docs/competition-protocol/fixtures/`) and drives the real
-  `VersusSeries` domain type, not a spike or a mock. Covers:
+  files directly (by walking up from the test assembly's output directory - or, as a fallback, the
+  current working directory - to `Level5BackendV2.sln`, then into
+  `docs/competition-protocol/fixtures/`) and drives the real `VersusSeries` domain type, not a
+  spike or a mock. Covers:
   - the 6 fixtures marked `backendExecutable: true` (01, 03, 06, 07, 08, 10), each asserting the
     fixture's actual expected outcome (sealed visibility, higher-wins winner, draw, best-of-3
-    clinch-and-stop, full best-of-7 run, idempotent identical retry);
-  - a manifest test (`Fixture_manifest_executability_flag_is_unchanged`) that loads all 11 fixture
-    files and pins each one's `backendExecutable` flag, so a silent flip of that flag (in either
-    direction) without a matching runner/removal is caught by CI rather than drifting unnoticed;
+    clinch-and-stop-with-the-rejection-of-the-now-unnecessary-3rd-game-asserted-generically, full
+    best-of-7 run, idempotent identical retry) - a command named `*ExpectRejected` (e.g. fixture
+    07's 3rd-game `startAttemptExpectRejected`) is asserted to throw by the shared fixture runner
+    itself, not re-derived by hand afterwards in the calling test;
+  - a manifest test (`Fixture_manifest_identity_and_executability_flag_are_unchanged`) that loads
+    all 11 fixture files and pins each one's `fixtureId` and `backendExecutable` flag, so neither a
+    swapped/renamed fixture nor a silent flip of that flag (in either direction) without a matching
+    runner/removal is caught by CI rather than drifting unnoticed;
   - `Conflicting_result_replay_is_not_yet_rejected_known_gap_for_issue_11` — deliberately asserts
     **today's actual, non-compliant** behavior (a differing resubmission is silently accepted with
     the original value kept) so this exact gap has a red flag ready to flip once #11 fixes it,
-    instead of being rediscovered later.
+    instead of being rediscovered later. Drives the series from fixture 11's own commands/result
+    payloads directly (never a separately hand-authored literal), so an edit to the fixture's
+    content is reflected here automatically rather than silently diverging from what runs.
 - **Executed:** `dotnet build v2/Level5BackendV2.sln` — succeeded, 0 errors (6 pre-existing,
   unrelated warnings: an `SSH.NET` advisory and two ASP.NET Core `KnownNetworks`/`IPNetwork`
   deprecation warnings, none touched by this change).
