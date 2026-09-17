@@ -1,4 +1,5 @@
 using Level5.Application.Abstractions;
+using Level5.Application.Observability;
 using Level5.Domain.Identity;
 using Level5.Domain.Ids;
 
@@ -37,15 +38,21 @@ public sealed class LoginUseCase(
         }
         catch (InvalidUsernameException)
         {
+            ApplicationMetrics.LoginFailures.Increment(ApplicationMetrics.ReasonCategoryTag, "bad_username_format");
             throw new InvalidCredentialsException();
         }
 
-        var account = await accountStore.FindByUsernameAsync(username, cancellationToken)
-            ?? throw new InvalidCredentialsException();
+        var account = await accountStore.FindByUsernameAsync(username, cancellationToken);
+        if (account is null)
+        {
+            ApplicationMetrics.LoginFailures.Increment(ApplicationMetrics.ReasonCategoryTag, "unknown_account");
+            throw new InvalidCredentialsException();
+        }
 
         var verification = passwordHasher.Verify(account.PasswordHash, request.Password);
         if (verification == PasswordVerificationResult.Failed)
         {
+            ApplicationMetrics.LoginFailures.Increment(ApplicationMetrics.ReasonCategoryTag, "bad_password");
             throw new InvalidCredentialsException();
         }
 
@@ -54,6 +61,7 @@ public sealed class LoginUseCase(
         // account does not become distinguishable from an active one by response timing.
         if (account.Status != AccountStatus.Active)
         {
+            ApplicationMetrics.LoginFailures.Increment(ApplicationMetrics.ReasonCategoryTag, "account_disabled");
             throw new InvalidCredentialsException();
         }
 

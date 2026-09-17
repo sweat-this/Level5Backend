@@ -1,5 +1,6 @@
 using Level5.Application.Abstractions;
 using Level5.Application.Common;
+using Level5.Application.Observability;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -64,6 +65,7 @@ public sealed class StartAttemptUseCase(IVersusSeriesStore seriesStore, IClock c
             // other way.
         }
 
+        ApplicationMetrics.SeriesConcurrencyConflicts.Increment(ApplicationMetrics.OperationTag, "start_attempt");
         throw new ConflictException("Series was concurrently modified by another request. Reload and retry.");
     }
 

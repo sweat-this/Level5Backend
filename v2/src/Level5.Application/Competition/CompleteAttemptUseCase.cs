@@ -1,5 +1,6 @@
 using Level5.Application.Abstractions;
 using Level5.Application.Common;
+using Level5.Application.Observability;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -30,10 +31,19 @@ public sealed class CompleteAttemptUseCase(IVersusSeriesStore seriesStore, ICloc
             var series = await SeriesLookup.LoadForParticipantAsync(seriesStore, request.SeriesId, request.ActingPlayerId, cancellationToken);
             var expectedRevision = series.Revision;
 
-            series.CompleteAttempt(request.ActingPlayerId, request.GameNumber, request.AttemptId, request.Result, clock.UtcNow);
+            try
+            {
+                series.CompleteAttempt(request.ActingPlayerId, request.GameNumber, request.AttemptId, request.Result, clock.UtcNow);
+            }
+            catch (ConflictingAttemptResultException)
+            {
+                ApplicationMetrics.AttemptCompleteOutcomes.Increment(ApplicationMetrics.OutcomeTag, "conflicting_result");
+                throw;
+            }
 
             if (await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
             {
+                ApplicationMetrics.AttemptCompleteOutcomes.Increment(ApplicationMetrics.OutcomeTag, "success");
                 return series.ToView(request.ActingPlayerId);
             }
 
@@ -43,6 +53,7 @@ public sealed class CompleteAttemptUseCase(IVersusSeriesStore seriesStore, ICloc
             // rather than the stale snapshot this iteration started from.
         }
 
+        ApplicationMetrics.SeriesConcurrencyConflicts.Increment(ApplicationMetrics.OperationTag, "complete_attempt");
         throw new ConflictException("Series was concurrently modified by another request. Reload and retry.");
     }
 }

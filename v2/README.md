@@ -23,8 +23,13 @@ list projections that never hydrate the full aggregate (see
 and a complete authentication/session
 vertical (register, login, persistent rotating refresh sessions, logout/revocation,
 `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy - see
-[Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
-richer profiles, notifications, anything in the [Non-goals](#non-goals-for-this-slice) list below.
+[Authentication and sessions](#authentication-and-sessions)). Operationally, V2 now carries a
+production-operations baseline: an OpenTelemetry tracing/metrics baseline, a small set of
+service-level signals, request/trace correlation into `ProblemDetails`, GitHub branch protection on
+`main`/`dev`, and a deployment/migration runbook (see
+[Production operations baseline](#production-operations-baseline-issue-22)). Not yet built:
+leaderboards, richer profiles, notifications, anything in the
+[Non-goals](#non-goals-for-this-slice) list below.
 
 ## Why a separate solution
 
@@ -743,11 +748,266 @@ establish the architecture; adding them now would be scope creep against an unpr
    partial reveal, identical-vs-conflicting resubmission handling, multi-metric submission)~~ -
    done (issue #11, see [Remote attempt API](#remote-attempt-api-issue-11) above; attempt
    `Abandon`/reissue and #21's list projection/pagination hardening remain explicitly deferred).
-5. **Observability** - correlation/request IDs are not yet wired into `Level5.Api`'s middleware
-   pipeline; add them alongside structured logging once there's a log aggregation target to send
-   them to.
+5. ~~Observability~~ - done (issue #22, see
+   [Production operations baseline](#production-operations-baseline-issue-22) below): standard
+   trace context is now wired via the OpenTelemetry ASP.NET Core instrumentation, and
+   `HttpContext.TraceIdentifier`/`ProblemDetails.traceId` derive from it. A vendor
+   backend/dashboard and business-derived numeric SLOs remain explicitly deferred until a
+   deployment actually needs one.
 6. **Leaderboards/highscores** - only after the correspondence vertical slice is proven in
    production; do not migrate the legacy `Highscores` table wholesale.
+
+## Production operations baseline (issue #22)
+
+The minimum set of production-operations capabilities needed to run Backend V2 safely, without
+turning it into an observability platform: a standard OpenTelemetry baseline, a small set of
+service-level signals, request/trace correlation into `ProblemDetails`, GitHub merge protection,
+and a deployment/migration runbook. Correspondence business behavior is unchanged by this issue.
+
+### OpenTelemetry configuration
+
+Registered in the Api composition root (`Level5.Api/Telemetry/TelemetryServiceCollectionExtensions.cs`,
+called from `Program.cs`) using the standard `OpenTelemetry.Extensions.Hosting`/
+`OpenTelemetry.Instrumentation.*` libraries - no vendor SDK:
+
+- **ASP.NET Core instrumentation** (`OpenTelemetry.Instrumentation.AspNetCore`): request
+  traces/metrics (`http.server.request.duration`, status code, route), for free from the framework.
+- **Database spans**: Npgsql's own native tracing (`ActivitySource` named `"Npgsql"`) - the
+  `TracerProviderBuilder.AddSource(...)` call subscribes to it via
+  `Level5.Infrastructure.Persistence.PersistenceTelemetry.DatabaseActivitySourceName`, not a
+  hardcoded string in Api, so the one piece of Npgsql-specific knowledge stays in the
+  Infrastructure layer that actually depends on Npgsql (see
+  `tests/Level5.Architecture.Tests/DependencyRuleTests.cs`'s
+  `Api_does_not_reference_persistence_libraries_directly`). No separate EF Core/Npgsql
+  instrumentation package is needed.
+- **Runtime/process metrics** (`OpenTelemetry.Instrumentation.Runtime`): GC, thread pool, process
+  metrics, at effectively no configuration cost.
+- **This app's own counters**: `Level5.Application.Observability.ApplicationMetrics` and
+  `Level5.Api.Observability.ApiMetrics` (see [Service-level signals](#service-level-signals)
+  below), registered by meter name (`AddMeter(...)`).
+- **OTLP exporter**: only wired in when `Telemetry:Otlp:Endpoint` is configured (empty by default).
+  With it empty, tracing/metrics still run entirely in-process - they just have nowhere to ship
+  to - so local dev and every automated test run with **no observability backend running**. An
+  unreachable-but-configured endpoint does not fail startup either: OTLP export happens
+  asynchronously in the background, never during host startup
+  (`TelemetryOtlpStartupTests` proves this against a real, never-listening endpoint).
+
+Configuration shape (`appsettings.json`, bound to `Level5.Api.Telemetry.TelemetryOptions`):
+
+```json
+"Telemetry": {
+  "ServiceName": "Level5.Api.V2",
+  "ServiceVersion": "1.0.0",
+  "Otlp": {
+    "Endpoint": ""
+  }
+}
+```
+
+Set `Telemetry__Otlp__Endpoint` (e.g. `http://otel-collector:4317`) as an environment variable in
+any deployment that has a collector to send to; leave it unset everywhere else. Registering
+telemetry does not change health-endpoint semantics - see
+[Health endpoints](#health-endpoints) below.
+
+### Service-level signals
+
+A deliberately small set of counters on top of the framework metrics above - only for
+state-changing or failure-prone flows named by issue #22, not blanket instrumentation. All live as
+static `Meter`/`Counter<long>` instruments (`Level5.Application.Observability.ApplicationMetrics`,
+`Level5.Api.Observability.ApiMetrics`), not DI services: OpenTelemetry's `MeterProvider` subscribes
+by meter name, so a use case records against a stable instrument exactly where the outcome is
+already known, with no constructor wiring required.
+
+| Metric | Where recorded | Tag | Values |
+|---|---|---|---|
+| `auth.login.failure` | `LoginUseCase` | `reason_category` | `bad_username_format`, `unknown_account`, `bad_password`, `account_disabled` |
+| `auth.refresh.outcome` | `RefreshSessionUseCase` | `outcome` | `success`, `unknown`, `expired`, `revoked`, `account_inactive`, `replay_conflict` |
+| `series.concurrency.conflict` | `StartAttemptUseCase`/`CompleteAttemptUseCase` | `operation` | `start_attempt`, `complete_attempt` |
+| `challenge.create.replay_or_conflict` | `CreateChallengeUseCase` | `outcome` | `created`, `idempotent_replay`, `conflict` |
+| `attempt.complete.outcome` | `CompleteAttemptUseCase` | `outcome` | `success`, `conflicting_result` |
+| `http.server.5xx` | `ApiExceptionHandler` | `code` | the same fixed `ProblemDetails` "code" vocabulary already returned to the client (currently just `internal_error`) |
+
+Each internal breakdown (e.g. distinguishing `bad_password` from `account_disabled`) is strictly an
+operational signal - it does not change any client-facing contract. `LoginUseCase` and
+`RefreshSessionUseCase` still return the same single generic `invalid_credentials`/
+`invalid_refresh_token` response for every failure mode, exactly as before this issue.
+
+### Sensitive/high-cardinality label policy
+
+Every metric tag above is a small, fixed, non-sensitive vocabulary - never an account/player/
+series/attempt id, email, username, token, request body, or raw exception message.
+`Level5.Application.Tests.Observability.MetricsLabelSafetyTests` enforces this with a real
+`MeterListener` (the same mechanism OpenTelemetry's own `MeterProvider` uses to observe these
+counters): it drives every instrumented failure path and asserts every recorded tag key/value pair
+falls inside the documented vocabulary, and separately that no recorded value equals any of the
+real identifiers/tokens the test itself generated. Structured logs follow the same rule
+(`ApiExceptionHandler` logs `{Method} {Path}` and the exception on a 500, never request bodies or
+credentials) and were already the case before this issue - see
+[`ApiExceptionHandlerTests`](tests/Level5.Api.IntegrationTests/ApiExceptionHandlerTests.cs).
+Passwords, password hashes, access tokens, and refresh tokens are never logged anywhere in this
+codebase, before or after this issue.
+
+### Correlation and diagnostics
+
+Request/trace identifiers are now consistently available end-to-end via **standard trace
+context**, not a second custom correlation system:
+
+- `Activity.Current` is populated per-request once the ASP.NET Core OpenTelemetry instrumentation
+  is active (registered unconditionally, exporter or not).
+- `HttpContext.TraceIdentifier` derives from that `Activity` (ASP.NET Core's own behavior once an
+  Activity is present), so it is already a W3C trace id, not an opaque per-request counter.
+- `ApiExceptionHandler` and `Program.cs`'s `CustomizeProblemDetails` callback both stamp
+  `ProblemDetails.Extensions["traceId"] = httpContext.TraceIdentifier` - unchanged from before this
+  issue, now backed by real trace context instead of ASP.NET Core's request-id fallback.
+- Database spans (Npgsql's native tracing) are children of the same request `Activity`, so a trace
+  viewer can walk from an HTTP request into its own database commands.
+- `TelemetryTests` (`Level5.Api.IntegrationTests`) asserts a real HTTP round trip's `ProblemDetails`
+  response carries a non-empty `traceId` alongside its `code`, for both the `ApiExceptionHandler`
+  path and the built-in `[ApiController]` validation-failure path.
+
+### Health endpoints
+
+Unchanged semantics, now covered by end-to-end HTTP tests (`TelemetryTests`) rather than only by
+inspection:
+
+- `GET /health/live` - process can respond; no dependency checks (`Predicate = _ => false`).
+  Registering telemetry does not add a dependency check here.
+- `GET /health/ready` - dependencies needed to serve traffic are ready; still includes the
+  Postgres connectivity check (`DatabaseHealthCheck`, tag `"ready"`) and nothing else.
+
+### Branch protection / required checks
+
+Applied directly via the GitHub API (this repository, `sweat-this/Level5Backend`, is public, so
+branch protection is available at no cost and the acting account has admin rights):
+
+| Branch | Required status checks | PR required to merge | Force-push / delete |
+|---|---|---|---|
+| `main` | `build`, `build-v2` (strict: branch must be up to date) | Yes (0 required approvals - solo/small-team friendly today; raise `required_approving_review_count` once there's more than one regular reviewer) | Disallowed |
+| `dev` | `build`, `build-v2` (strict) | No - `dev` remains directly pushable, matching current team workflow | Disallowed |
+
+`enforce_admins` is left `false` on both branches so an admin can still push a genuine hotfix if
+CI itself is broken; this is a deliberate, revisitable choice for the project's current maturity,
+not an oversight. If GitHub Actions' job names in `.github/workflows/ci.yml` (`build`, `build-v2`)
+are ever renamed, the required-status-check contexts above must be updated to match via
+`gh api --method PUT repos/sweat-this/Level5Backend/branches/<branch>/protection` (or the repo's
+Settings → Branches UI) or the checks will simply never be reported as satisfied.
+
+**If branch protection cannot be programmatically configured in a given environment** (e.g. a fork
+without admin rights, or an org policy blocking API changes), apply the same settings manually:
+GitHub repo → **Settings → Branches → Add branch protection rule** → target branch → check
+"Require status checks to pass before merging" (search for and add `build` and `build-v2`, enable
+"Require branches to be up to date before merging") → for `main` only, also check "Require a pull
+request before merging" → uncheck "Allow force pushes" and "Allow deletions" → Save.
+
+### Deployment and migration runbook
+
+```text
+backup / pre-deploy checks
+        ↓
+apply reviewed V2 migrations
+        ↓
+deploy API
+        ↓
+readiness succeeds
+        ↓
+serve traffic
+```
+
+- **Migrations are never applied by the API at startup** - there is no `Database.Migrate()` call
+  anywhere in `Program.cs` (see [Persistence](#persistence) above). A human (or a deploy pipeline
+  step distinct from the API process) runs them explicitly, after review, before the new API
+  version is deployed:
+  ```powershell
+  dotnet ef database update --project src/Level5.Infrastructure --startup-project src/Level5.Api
+  ```
+  Per the [migration history](#migration-history) notes above, migrations from this point forward
+  must be additive - the two prior rebaselines were only safe because no V2 environment had ever
+  held durable data yet.
+- **Backup / pre-deploy checks**: take a Postgres backup of `level5_v2` (or confirm the
+  infrastructure's existing automated backup covers it) before applying migrations to any
+  environment holding real data. Confirm the reviewed migration diff matches what's in the PR
+  being deployed - never apply an unreviewed migration.
+- **Required environment configuration/secrets** for the API process itself:
+  - `ConnectionStrings__DefaultConnection` (Postgres connection string)
+  - `Jwt__Key` (≥32 characters), `Jwt__Issuer`, `Jwt__Audience` - validated at startup
+    (`ValidateOnStart()`); a missing/short key fails the host immediately, not on first login
+  - `Sessions__RefreshTokenLifetimeDays` (optional, defaults to 30)
+  - `Telemetry__Otlp__Endpoint` (optional - set only where a collector exists)
+  - `ForwardedHeaders__KnownProxies` / `ForwardedHeaders__KnownNetworks` (only if deployed behind a
+    reverse proxy/load balancer - see [Running behind a reverse proxy](#running-behind-a-reverse-proxy))
+- **Deploy the API**, then wait for `/health/ready` to report healthy before shifting traffic to
+  the new instance - `/health/live` only proves the process started, not that it can reach
+  Postgres.
+- **Liveness vs readiness in practice**: point a process supervisor/orchestrator's restart policy
+  at `/health/live` (a stuck process, not a slow database, should trigger a restart) and its
+  load-balancer/traffic-admission check at `/health/ready` (an instance that can't reach Postgres
+  should stop receiving traffic without being killed - it may recover on its own once the database
+  does).
+- **Rollback/forward-fix expectations** (appropriate to this project's current pre-production
+  maturity - no V2 environment has ever held durable user data, per the migration history above):
+  redeploying the previous API image is always safe as a rollback as long as no migration was
+  applied first. Once a migration has been applied, prefer a forward-fix migration over a
+  down-migration/rollback against a database another (older) API version might still be talking
+  to - this project's own migration-history notes already commit to "additive going forward" for
+  the same reason.
+- **Diagnosing failures from logs/telemetry**:
+  - *Migration failures*: `dotnet ef database update` fails synchronously in its own step/logs
+    before the API is deployed - the API process is never started against a schema its migrations
+    didn't finish applying to.
+  - *Readiness failures*: `/health/ready` returns unhealthy; check `DatabaseHealthCheck`'s
+    dependency (Postgres reachability/credentials) and the database span traces for connection
+    errors/timeouts.
+  - *5xx spikes*: `http.server.5xx` (tag `code`) plus the `ApiExceptionHandler`
+    `LogError(exception, "Unhandled exception processing {Method} {Path}", ...)` entries that
+    accompany every one of them - the log line has the exception detail the metric deliberately
+    omits.
+  - *Auth failures*: `auth.login.failure` (tag `reason_category`) and `auth.refresh.outcome` (tag
+    `outcome`) - a spike in `replay_conflict` specifically suggests refresh-token replay attempts
+    or a client retry bug, not ordinary user error.
+  - *Database latency/errors*: the Npgsql `ActivitySource` spans (command duration, exceptions) -
+    surfaced once a trace backend is connected; the ASP.NET Core request-duration histogram will
+    also show elevated tail latency correlated with the same time window.
+  - *Replay/conflict spikes*: `series.concurrency.conflict` (optimistic-concurrency retries
+    genuinely exhausted - persistent contention, not a single race), `challenge.create.replay_or_conflict`,
+    and `attempt.complete.outcome`'s `conflicting_result` bucket.
+
+### Alert-worthy conditions
+
+Initial signals worth alerting on once telemetry is connected to a backend. No numeric thresholds
+are prescribed here - this project has no production baseline yet, so thresholds are
+deployment-specific; pick them once real traffic data exists, then revisit periodically:
+
+- **Sustained readiness failure** - `/health/ready` unhealthy for longer than one deploy/restart
+  cycle (a single transient failure during a rolling deploy is expected; a sustained one is not).
+- **Elevated 5xx rate** - a rise in `http.server.5xx` (or the standard ASP.NET Core
+  `http.server.request.duration` metric's `http.response.status_code` dimension) relative to that
+  deployment's own recent baseline.
+- **Abnormal auth failure or refresh-replay spike** - a sustained rise in `auth.login.failure`
+  and/or `auth.refresh.outcome{outcome=replay_conflict}` beyond normal background noise (mistyped
+  passwords, expired sessions) - both credential-stuffing and client retry-storm bugs look like
+  this.
+- **Elevated database latency/error rate** - the Npgsql activity spans' duration/exception rate
+  trending up, or `/health/ready` flapping.
+- **Abnormal series/challenge/attempt conflict or completion-failure rate** - a sustained rise in
+  `series.concurrency.conflict`, `challenge.create.replay_or_conflict{outcome=conflict}`, or
+  `attempt.complete.outcome{outcome=conflicting_result}` beyond normal background noise (occasional
+  simultaneous participant actions are expected; a sustained rise suggests a client bug retrying
+  with different payloads, or genuine contention worth investigating).
+
+### Validation commands
+
+```powershell
+dotnet restore v2/Level5BackendV2.sln
+dotnet build v2/Level5BackendV2.sln
+dotnet test v2/Level5BackendV2.sln    # includes Level5.Architecture.Tests
+
+dotnet build Level5Backend.csproj
+dotnet test Level5Backend.Tests/Level5Backend.Tests.csproj
+```
+
+`dotnet test v2/Level5BackendV2.sln` requires Docker (Testcontainers-backed Postgres for the two
+integration-test projects); everything else (`Level5.Domain.Tests`, `Level5.Application.Tests`
+including `MetricsLabelSafetyTests`, `Level5.Architecture.Tests`) runs without it.
 
 ## Local development
 

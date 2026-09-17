@@ -1,3 +1,4 @@
+using Level5.Api.Observability;
 using Level5.Application.Common;
 using Level5.Domain.Competition;
 using Level5.Domain.Common;
@@ -23,6 +24,7 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         if (status == StatusCodes.Status500InternalServerError)
         {
             logger.LogError(exception, "Unhandled exception processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+            ApiMetrics.UnhandledServerErrors.Add(1, new KeyValuePair<string, object?>(ApiMetrics.CodeTag, code));
         }
 
         var problemDetails = new ProblemDetails

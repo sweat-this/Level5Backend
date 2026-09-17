@@ -1,5 +1,6 @@
 using Level5.Application.Abstractions;
 using Level5.Application.Common;
+using Level5.Application.Observability;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -50,6 +51,7 @@ public sealed class CreateChallengeUseCase(
         if (existing is not null)
         {
             EnsureMatchesExistingRequest(existing, request, requestedInformationPolicy);
+            ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "idempotent_replay");
             return existing.ToView(request.ChallengerId);
         }
 
@@ -87,6 +89,7 @@ public sealed class CreateChallengeUseCase(
 
         await seriesStore.AddAsync(series, clientRequestId, cancellationToken);
 
+        ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "created");
         return series.ToView(request.ChallengerId);
     }
 
@@ -108,6 +111,7 @@ public sealed class CreateChallengeUseCase(
 
         if (!sameRequest)
         {
+            ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "conflict");
             throw new ConflictException("This clientRequestId was already used to create a different challenge request.");
         }
     }
