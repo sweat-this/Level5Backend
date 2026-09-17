@@ -120,4 +120,68 @@ public sealed class SchemaTests(PostgresFixture fixture)
 
         Assert.Single(columns);
     }
+
+    [Theory]
+    [InlineData("friend_requests", "FromPlayerId")]
+    [InlineData("friend_requests", "ToPlayerId")]
+    [InlineData("friend_requests", "LowerPlayerId")]
+    [InlineData("friend_requests", "UpperPlayerId")]
+    [InlineData("friendships", "LowerPlayerId")]
+    [InlineData("friendships", "UpperPlayerId")]
+    [InlineData("competitive_series", "ChallengerId")]
+    [InlineData("competitive_series", "OpponentId")]
+    [InlineData("competitive_series", "WinnerId")]
+    public async Task Player_reference_column_has_a_restrictive_foreign_key_to_player_profiles(string table, string column)
+    {
+        await using var db = fixture.CreateDbContext();
+
+        // Each player-reference column gets its own named FK constraint (issue #20), so join
+        // key-column-usage on both the column name and the table to pick out exactly the one
+        // constraint under test even where a table has several such FKs (e.g. friend_requests).
+        var deleteRules = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT rc.delete_rule
+                 FROM information_schema.referential_constraints rc
+                 JOIN information_schema.key_column_usage kcu
+                   ON kcu.constraint_name = rc.constraint_name
+                 WHERE kcu.table_name = {table} AND kcu.column_name = {column}
+                   AND kcu.constraint_name LIKE 'FK\_%' ESCAPE '\'
+                 """)
+            .ToListAsync();
+
+        var deleteRule = Assert.Single(deleteRules);
+        Assert.Equal("RESTRICT", deleteRule);
+    }
+
+    [Fact]
+    public async Task Competitive_series_WinnerId_is_nullable()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var nullability = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT is_nullable FROM information_schema.columns
+                 WHERE table_name = 'competitive_series' AND column_name = 'WinnerId'
+                 """)
+            .ToListAsync();
+
+        Assert.Equal("YES", Assert.Single(nullability));
+    }
+
+    [Fact]
+    public async Task Durable_migration_path_contains_no_LEAST_GREATEST_canonicalization_backfill()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        // The pre-production rebaseline (issue #20) squashed the migration chain specifically to
+        // remove the HardenFriendshipInvariants migration's LEAST/GREATEST backfill, whose
+        // Postgres-native uuid ordering was never guaranteed to match Friendship.Order's .NET
+        // Guid.CompareTo ordering. A fresh database's canonical pair columns are populated
+        // exclusively by application code (Friendship.Order) going forward, so no SQL-level
+        // canonicalization exists to search for - this asserts that migration is actually gone
+        // from history rather than merely unused.
+        var appliedMigrations = await db.Database.GetAppliedMigrationsAsync();
+
+        Assert.DoesNotContain(appliedMigrations, m => m.Contains("HardenFriendshipInvariants"));
+    }
 }

@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Level5.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(Level5V2DbContext))]
-    [Migration("20260916181940_AddAuthSessions")]
-    partial class AddAuthSessions
+    [Migration("20260917160146_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -122,8 +122,15 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("FromPlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("LowerPlayerId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("RespondedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -133,11 +140,20 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ToPlayerId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("UpperPlayerId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("UpperPlayerId");
 
                     b.HasIndex("FromPlayerId", "Status");
 
                     b.HasIndex("FromPlayerId", "ToPlayerId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Pending'");
+
+                    b.HasIndex("LowerPlayerId", "UpperPlayerId")
                         .IsUnique()
                         .HasFilter("\"Status\" = 'Pending'");
 
@@ -162,6 +178,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("UpperPlayerId");
 
                     b.HasIndex("LowerPlayerId", "UpperPlayerId")
                         .IsUnique();
@@ -211,6 +229,9 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ChallengerId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ClientRequestId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -247,6 +268,11 @@ namespace Level5.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("WinnerId");
+
+                    b.HasIndex("ChallengerId", "ClientRequestId")
+                        .IsUnique();
+
                     b.HasIndex("ChallengerId", "Status");
 
                     b.HasIndex("OpponentId", "Status");
@@ -263,6 +289,48 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.FriendRequestRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("FromPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("LowerPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("ToPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("UpperPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.FriendshipRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("LowerPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("UpperPlayerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", b =>
                 {
                     b.HasOne("Level5.Infrastructure.Persistence.Rows.AccountRow", null)
@@ -270,6 +338,26 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.VersusSeriesRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("ChallengerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("OpponentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("WinnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 #pragma warning restore 612, 618
         }
