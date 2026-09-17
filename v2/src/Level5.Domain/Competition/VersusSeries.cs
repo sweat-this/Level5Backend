@@ -162,6 +162,7 @@ public sealed class VersusSeries
 
         EnsureStatus(SeriesStatus.Active);
         EnsureCurrentGame(gameNumber);
+        EnsureIssuanceOrderAllows(actingPlayerId, gameNumber);
 
         var round = GetOrCreateRound(gameNumber);
         var (attempt, _) = round.StartOrGetAttempt(actingPlayerId, ChallengerId, now);
@@ -170,26 +171,45 @@ public sealed class VersusSeries
     }
 
     /// <summary>
-    /// Records a player's result for the given game. Idempotent - completing an
-    /// already-completed attempt again (e.g. a retried request) returns the original result
-    /// without applying the transition a second time or re-resolving an already-resolved round,
-    /// even if this same completion is what already finished the series.
+    /// Records a player's result for the given game, binding the submission to the specific
+    /// <paramref name="attemptId"/> <see cref="StartAttempt"/> issued so a client can never
+    /// complete an attempt it never started. Idempotent for a semantically identical retry
+    /// (e.g. a lost response): completing an already-completed attempt with the same accepted
+    /// result returns that result without re-applying the transition or re-resolving an
+    /// already-resolved round, even if this same completion is what already finished the series.
+    /// A retry carrying a materially different result is rejected as a conflict instead of
+    /// silently replacing the accepted result (Competition Protocol V1 section 13).
     /// </summary>
-    public GameAttempt CompleteAttempt(PlayerId actingPlayerId, int gameNumber, AttemptResult result, DateTimeOffset now)
+    public GameAttempt CompleteAttempt(PlayerId actingPlayerId, int gameNumber, AttemptId attemptId, AttemptResult result, DateTimeOffset now)
     {
         if (!IsParticipant(actingPlayerId))
         {
             throw new SeriesAuthorizationException("Only series participants may act on this series.");
         }
 
-        var existingAttempt = _rounds.FirstOrDefault(r => r.GameNumber == gameNumber)?.AttemptFor(actingPlayerId);
-        if (existingAttempt?.Status == AttemptStatus.Completed)
+        var existingAttempt = _rounds.FirstOrDefault(r => r.GameNumber == gameNumber)?.AttemptFor(actingPlayerId)
+            ?? throw new AttemptNotStartedException("StartAttempt must be called before CompleteAttempt.");
+
+        if (existingAttempt.Id != attemptId)
         {
-            return existingAttempt;
+            throw new AttemptIdentityMismatchException(
+                $"Attempt {attemptId} does not match the attempt {existingAttempt.Id} this player started for game {gameNumber}.");
+        }
+
+        if (existingAttempt.Status == AttemptStatus.Completed)
+        {
+            if (Equals(existingAttempt.Result, result))
+            {
+                return existingAttempt;
+            }
+
+            throw new ConflictingAttemptResultException(
+                $"Attempt {attemptId} was already completed with a different result. The accepted result cannot be replaced.");
         }
 
         EnsureStatus(SeriesStatus.Active);
         EnsureCurrentGame(gameNumber);
+        EnsureResultSatisfiesFrozenRules(result);
 
         var round = GetOrCreateRound(gameNumber);
         var attempt = round.AttemptFor(actingPlayerId)
@@ -204,6 +224,68 @@ public sealed class VersusSeries
 
         Touch(now);
         return attempt;
+    }
+
+    /// <summary>
+    /// Every comparison-key metric <see cref="Rules"/> requires must be present in the submitted
+    /// result before it is accepted - validated up front so a completed attempt can never end up
+    /// unresolvable later, and so a missing metric fails the submission itself (400) rather than
+    /// surfacing obscurely at round-resolution time.
+    /// </summary>
+    private void EnsureResultSatisfiesFrozenRules(AttemptResult result)
+    {
+        foreach (var key in Rules.ComparisonKeys)
+        {
+            if (result.ValueOf(key.Metric) is null)
+            {
+                throw new MissingRequiredMetricException($"Result is missing required metric '{key.Metric}'.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Under <see cref="InformationPolicy.OpenTarget"/>, the non-first-mover may not start their
+    /// attempt for this game until the designated first mover has completed theirs (Competition
+    /// Protocol V1 section 11, mirroring Unity's <c>VersusGame.CanIssueTo</c>). No gating applies
+    /// under <see cref="InformationPolicy.SealedAttempt"/> or to the first mover themselves.
+    /// </summary>
+    private void EnsureIssuanceOrderAllows(PlayerId actingPlayerId, int gameNumber)
+    {
+        if (Rules.InformationPolicy != InformationPolicy.OpenTarget)
+        {
+            return;
+        }
+
+        var firstMover = FirstMoverFor(gameNumber);
+        if (actingPlayerId == firstMover)
+        {
+            return;
+        }
+
+        var firstMoverAttempt = _rounds.FirstOrDefault(r => r.GameNumber == gameNumber)?.AttemptFor(firstMover);
+        if (firstMoverAttempt?.Status != AttemptStatus.Completed)
+        {
+            throw new OpenTargetIssuanceOrderException(
+                $"Game {gameNumber}: the designated first mover must complete their attempt before the other participant may start.");
+        }
+    }
+
+    /// <summary>
+    /// The participant designated to attempt first for a given game under
+    /// <see cref="InformationPolicy.OpenTarget"/> (Unity's
+    /// <c>SeriesSnapshot.FirstAttemptParticipantIndex</c>): pinned to the challenger unless
+    /// <see cref="FrozenRules.AlternatesFirstAttempt"/>, in which case it alternates by game
+    /// number.
+    /// </summary>
+    private PlayerId FirstMoverFor(int gameNumber)
+    {
+        if (!Rules.AlternatesFirstAttempt)
+        {
+            return ChallengerId;
+        }
+
+        var gameIndex = gameNumber - 1;
+        return gameIndex % 2 == 0 ? ChallengerId : OpponentId;
     }
 
     public SeriesView ToView(PlayerId viewerId)
@@ -231,19 +313,54 @@ public sealed class VersusSeries
 
         return new GameRoundView(
             round.GameNumber,
-            ToAttemptView(yourAttempt, revealResult: true),
-            ToAttemptView(opponentAttempt, revealResult: round.IsResolved));
+            ToAttemptView(yourAttempt, revealResult: true, partialMetric: null),
+            ToAttemptView(opponentAttempt, revealResult: round.IsResolved, partialMetric: PartialRevealMetricFor(round, viewerId)));
     }
 
-    private static AttemptView? ToAttemptView(GameAttempt? attempt, bool revealResult)
+    /// <summary>
+    /// Under <see cref="InformationPolicy.OpenTarget"/>, once the first mover completes but the
+    /// round has not yet resolved, the responder may see only the primary comparison metric
+    /// (<see cref="FrozenRules.ComparisonKeys"/>'s first entry) of the first mover's result - no
+    /// other metric (Competition Protocol V1 section 11, mirroring Unity's
+    /// <c>VersusGame.ViewFor</c>). Never applies under <see cref="InformationPolicy.SealedAttempt"/>,
+    /// to the first mover's own view of the responder, or once the round is fully resolved (at
+    /// which point the ordinary full reveal in <see cref="ToRoundView"/> already applies).
+    /// </summary>
+    private ResultMetric? PartialRevealMetricFor(GameRound round, PlayerId viewerId)
+    {
+        if (round.IsResolved || Rules.InformationPolicy != InformationPolicy.OpenTarget)
+        {
+            return null;
+        }
+
+        var firstMover = FirstMoverFor(round.GameNumber);
+        if (viewerId == firstMover)
+        {
+            return null;
+        }
+
+        var firstMoverAttempt = round.AttemptFor(firstMover);
+        return firstMoverAttempt?.Status == AttemptStatus.Completed ? Rules.ComparisonKeys[0].Metric : null;
+    }
+
+    private static AttemptView? ToAttemptView(GameAttempt? attempt, bool revealResult, ResultMetric? partialMetric)
     {
         if (attempt is null)
         {
             return null;
         }
 
-        var result = revealResult ? attempt.Result?.Metrics : null;
-        return new AttemptView(attempt.Id, attempt.Status, result);
+        if (revealResult)
+        {
+            return new AttemptView(attempt.Id, attempt.Status, attempt.Result?.Metrics);
+        }
+
+        if (partialMetric is { } metric && attempt.Result?.ValueOf(metric) is { } value)
+        {
+            return new AttemptView(attempt.Id, attempt.Status, new Dictionary<ResultMetric, double> { [metric] = value });
+        }
+
+        return new AttemptView(attempt.Id, attempt.Status, null);
     }
 
     private GameRound GetOrCreateRound(int gameNumber)
@@ -261,8 +378,8 @@ public sealed class VersusSeries
 
     private void AdvanceAfterRoundResolved(GameRound round, DateTimeOffset now)
     {
-        var challengerWins = _rounds.Count(r => r.WinnerId == ChallengerId);
-        var opponentWins = _rounds.Count(r => r.WinnerId == OpponentId);
+        var challengerWins = _rounds.Count(r => r.IsResolved && r.ResolveWinner(Rules.ComparisonKeys) == ChallengerId);
+        var opponentWins = _rounds.Count(r => r.IsResolved && r.ResolveWinner(Rules.ComparisonKeys) == OpponentId);
 
         if (challengerWins >= Format.GamesToWin)
         {
@@ -345,6 +462,41 @@ public sealed class IllegalSeriesTransitionException : DomainException
 public sealed class AttemptNotStartedException : DomainException
 {
     public AttemptNotStartedException(string message) : base(message)
+    {
+    }
+}
+
+/// <summary>The submitted <see cref="AttemptId"/> does not match the attempt this player actually started for this game - the client can never complete an attempt it did not start.</summary>
+public sealed class AttemptIdentityMismatchException : DomainException
+{
+    public AttemptIdentityMismatchException(string message) : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// A retry submitted a materially different result for an attempt that already has an accepted
+/// result (Competition Protocol V1 section 13). Maps to HTTP 409 - the accepted result is never
+/// silently replaced.
+/// </summary>
+public sealed class ConflictingAttemptResultException : DomainException
+{
+    public override string Code => "conflict";
+
+    public ConflictingAttemptResultException(string message) : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// Under <see cref="InformationPolicy.OpenTarget"/>, the non-first-mover attempted to start
+/// before the designated first mover completed their own attempt for this game.
+/// </summary>
+public sealed class OpenTargetIssuanceOrderException : DomainException
+{
+    public override string Code => "conflict";
+
+    public OpenTargetIssuanceOrderException(string message) : base(message)
     {
     }
 }

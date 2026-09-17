@@ -2,8 +2,8 @@
   "fixtureId": "lower-is-better-result",
   "protocolVersion": 1,
   "description": "A game whose primary comparison metric is LowerWins (e.g. completion time) resolves in favor of the smaller value.",
-  "backendExecutable": false,
-  "requiresDownstream": ["#11"],
+  "backendExecutable": true,
+  "requiresDownstream": [],
   "seriesFormat": { "totalGames": 1 },
   "ruleset": {
     "rulesetId": "race",
@@ -24,5 +24,5 @@
     "seriesStatus": "Completed",
     "winner": "opponent"
   },
-  "notes": "The Backend's Score.Value is hard-coded higher-wins (Score.cs: 'Higher is better; comparison policy lives on GameRound', and GameRound.WinnerId does a plain >). There is no lower-wins path at all. This is required for #11: the comparison engine must read MetricDirection per comparison key rather than assuming higher-wins."
+  "notes": "Implemented by issue #11: GameRound.ResolveWinner reads MetricDirection per comparison key (HigherWins or LowerWins) instead of assuming higher-wins, replacing the old hard-coded Score-only comparison."
 }

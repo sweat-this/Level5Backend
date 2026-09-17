@@ -29,38 +29,44 @@ public sealed class GameRound
     public bool IsResolved => ChallengerAttempt?.Status == AttemptStatus.Completed
         && OpponentAttempt?.Status == AttemptStatus.Completed;
 
-    /// <summary>The player with the higher score once both attempts are complete; null on a tie or if unresolved.</summary>
-    public PlayerId? WinnerId
+    /// <summary>
+    /// The round's winner once both attempts are complete, per the series' frozen, ordered
+    /// <paramref name="comparisonKeys"/> (Competition Protocol V1 section 10): each key is
+    /// compared in order, skipped on a tie, and the first key that differs decides the winner
+    /// (direction-aware - <see cref="MetricDirection.HigherWins"/> or
+    /// <see cref="MetricDirection.LowerWins"/>). <c>null</c> if every key ties (a true draw) or
+    /// the round is not yet resolved. Mirrors Unity's <c>CompetitiveRuleset.Compare</c>.
+    /// </summary>
+    public PlayerId? ResolveWinner(IReadOnlyList<ComparisonKey> comparisonKeys)
     {
-        get
+        if (!IsResolved)
         {
-            if (!IsResolved)
-            {
-                return null;
-            }
-
-            var challengerScore = ScoreOf(ChallengerAttempt!);
-            var opponentScore = ScoreOf(OpponentAttempt!);
-
-            if (challengerScore == opponentScore)
-            {
-                return null;
-            }
-
-            return challengerScore > opponentScore ? ChallengerAttempt!.PlayerId : OpponentAttempt!.PlayerId;
+            return null;
         }
+
+        foreach (var key in comparisonKeys)
+        {
+            var challengerValue = ValueOf(ChallengerAttempt!, key.Metric);
+            var opponentValue = ValueOf(OpponentAttempt!, key.Metric);
+
+            if (challengerValue.Equals(opponentValue))
+            {
+                continue;
+            }
+
+            var challengerWins = key.Direction == MetricDirection.HigherWins
+                ? challengerValue > opponentValue
+                : challengerValue < opponentValue;
+
+            return challengerWins ? ChallengerAttempt!.PlayerId : OpponentAttempt!.PlayerId;
+        }
+
+        return null;
     }
 
-    /// <summary>
-    /// Round resolution compares only the Score metric, higher-wins - the same hardcoded rule
-    /// this type used before <see cref="AttemptResult"/> could carry multiple named metrics. A
-    /// series' <see cref="FrozenRules.ComparisonKeys"/>/<see cref="FrozenRules.MinimumCompatibleVersion"/>
-    /// are persisted starting with issue #9 but intentionally not consulted here yet - the
-    /// ordered, direction-aware comparison engine is issue #11's responsibility.
-    /// </summary>
-    private static double ScoreOf(GameAttempt attempt) => attempt.Result!.ValueOf(ResultMetric.Score)
-        ?? throw new ScoreMetricRequiredException(
-            "Round resolution requires a Score metric until issue #11 implements the full ordered comparison engine.");
+    private double ValueOf(GameAttempt attempt, ResultMetric metric) => attempt.Result!.ValueOf(metric)
+        ?? throw new MissingRequiredMetricException(
+            $"Game {GameNumber}: {attempt.PlayerId}'s accepted result is missing required comparison metric '{metric}'.");
 
     public (GameAttempt Attempt, bool WasCreated) StartOrGetAttempt(PlayerId playerId, PlayerId challengerId, DateTimeOffset now)
     {
@@ -100,9 +106,15 @@ public sealed class GameRound
     }
 }
 
-public sealed class ScoreMetricRequiredException : DomainException
+/// <summary>
+/// A completed attempt's accepted <see cref="AttemptResult"/> does not carry a value for a metric
+/// the series' frozen <see cref="FrozenRules.ComparisonKeys"/> requires. Submission-time validation
+/// in <see cref="VersusSeries.CompleteAttempt"/> is meant to make this unreachable in practice -
+/// this is defense-in-depth at resolution time, not the primary enforcement point.
+/// </summary>
+public sealed class MissingRequiredMetricException : DomainException
 {
-    public ScoreMetricRequiredException(string message) : base(message)
+    public MissingRequiredMetricException(string message) : base(message)
     {
     }
 }

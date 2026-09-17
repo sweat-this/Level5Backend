@@ -27,6 +27,36 @@ public sealed class AttemptResult : IEquatable<AttemptResult>
             throw new InvalidAttemptResultException("An attempt result must contain at least one metric.");
         }
 
+        foreach (var (metric, value) in metrics)
+        {
+            if (!Enum.IsDefined(metric))
+            {
+                throw new InvalidAttemptResultException($"Metric '{metric}' is not a recognized Protocol V1 result metric.");
+            }
+
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                throw new InvalidAttemptResultException($"Metric '{metric}' must be a finite number.");
+            }
+
+            if (value < 0)
+            {
+                throw new InvalidAttemptResultException($"Metric '{metric}' cannot be negative.");
+            }
+
+            if (metric == ResultMetric.Accuracy && value > 100)
+            {
+                throw new InvalidAttemptResultException("Accuracy must be between 0 and 100.");
+            }
+        }
+
+        if (metrics.TryGetValue(ResultMetric.ShotsMade, out var shotsMade)
+            && metrics.TryGetValue(ResultMetric.ShotsAttempted, out var shotsAttempted)
+            && shotsMade > shotsAttempted)
+        {
+            throw new InvalidAttemptResultException("ShotsMade cannot exceed ShotsAttempted.");
+        }
+
         return new AttemptResult(new Dictionary<ResultMetric, double>(metrics));
     }
 

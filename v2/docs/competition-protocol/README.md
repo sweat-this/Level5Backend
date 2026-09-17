@@ -4,7 +4,13 @@
 Contract Fixtures.
 
 **Status:** Decision made and recorded. This is an architecture/contract document, not a
-production rewrite of either competition system. It does not implement issues #9-#11.
+production rewrite of either competition system - it does not itself implement issues #9-#11, and
+its narrative sections below (§1-§18) are left as the point-in-time audit they were written as.
+Issues #9, #10, and #11 have since shipped against the required changes this document specifies
+(§19-§21); the Backend's current behavior is documented in
+[`v2/README.md`](../../README.md#competition-domain-versusseries), not maintained here. §16 and
+§21 carry brief pointers to what actually shipped so this document does not go stale about its own
+fixtures.
 
 ## 1. Repositories and commits audited
 
@@ -290,6 +296,12 @@ indexes the stored metric array"*, `CompetitiveRuleset.cs:44`) — ordinals are 
 detail on the Unity side, not a stable cross-system contract, and the Backend has no ordinal
 scheme of its own to align with anyway.
 
+At the remote trust boundary, every Protocol V1 metric must be finite and non-negative,
+`Accuracy` is a percentage in the inclusive `0..100` range, and `ShotsMade` cannot exceed
+`ShotsAttempted` when both are supplied. A numeric enum ordinal is not a metric name, and aliases
+that collapse to the same canonical name are an ambiguous payload rather than last-write-wins
+input. The Backend rejects these malformed results before mutating an attempt.
+
 Required directions, confirmed against Unity's actual shipped rulesets: `Score → HigherWins`,
 `CompletionTimeSeconds → LowerWins`, `Accuracy → HigherWins`, plus ordered tie-breaks (fixture
 [05](fixtures/05-ordered-multi-key-tiebreak.json)).
@@ -439,19 +451,22 @@ Eleven fixtures, one canonical set, stored at
 covering exactly the issue's required list. Each fixture states its `backendExecutable` flag
 explicitly rather than leaving it implicit:
 
+**Updated by issue #11** (this table originally reflected the audit's own point-in-time state,
+before #9/#10/#11 shipped; entries below reflect current `dev`):
+
 | # | Fixture | Backend-executable today? |
 |---|---|---|
 | 01 | [SealedAttempt, one player completed](fixtures/01-sealed-attempt-one-completed.json) | ✅ |
-| 02 | [OpenTarget, only primary target visible](fixtures/02-open-target-primary-only.json) | ❌ (#9/#10/#11) |
+| 02 | [OpenTarget, only primary target visible](fixtures/02-open-target-primary-only.json) | ✅ (issue #11; live remote `CreateChallenge` selection of `OpenTarget` still needs a catalog entry, issue #10) |
 | 03 | [Higher-is-better result](fixtures/03-higher-is-better-result.json) | ✅ |
-| 04 | [Lower-is-better result](fixtures/04-lower-is-better-result.json) | ❌ (#11) |
-| 05 | [Ordered multi-key tie-break](fixtures/05-ordered-multi-key-tiebreak.json) | ❌ (#11) |
+| 04 | [Lower-is-better result](fixtures/04-lower-is-better-result.json) | ✅ (issue #11) |
+| 05 | [Ordered multi-key tie-break](fixtures/05-ordered-multi-key-tiebreak.json) | ✅ (issue #11) |
 | 06 | [True draw](fixtures/06-true-draw.json) | ✅ |
 | 07 | [Best-of-3 early termination](fixtures/07-best-of-3-early-termination.json) | ✅ |
 | 08 | [Best-of-7 full run](fixtures/08-best-of-7-full-run.json) | ✅ |
-| 09 | [Unsupported ruleset version](fixtures/09-unsupported-ruleset-version.json) | ❌ (#9/#10) |
+| 09 | [Unsupported ruleset version](fixtures/09-unsupported-ruleset-version.json) | ❌ (#9/#10 shipped the mechanism generally, but this fixture's specific scenario - a catalog whose current minimum exceeds an already-shipped version - needs a second catalog entry the single-entry `StaticRulesetCatalog` does not have; ruleset catalog administration remains #10's open item) |
 | 10 | [Identical result retry](fixtures/10-identical-result-retry.json) | ✅ |
-| 11 | [Conflicting result replay](fixtures/11-conflicting-result-replay.json) | ❌ (#11 — see [§13](#13-result-retryreplay-behavior)) |
+| 11 | [Conflicting result replay](fixtures/11-conflicting-result-replay.json) | ✅ (issue #11 — see [§13](#13-result-retryreplay-behavior)) |
 
 Fixtures are protocol-level JSON (participants, commands, expected participant-visible outcomes)
 — never coupled to EF rows, Unity save documents, or API-controller DTOs, per the issue's
@@ -598,27 +613,44 @@ instruction.
 
 ## 21. Required changes for #11 (remote attempt API)
 
+**Status: shipped.** All items below are implemented on `dev`; see
+[`v2/README.md`'s "Remote attempt API (issue #11)"](../../README.md#remote-attempt-api-issue-11)
+for the current, living description of the behavior. This section is left as the original
+requirements list, not rewritten as a changelog.
+
 - Attempt identity and the remote attempt descriptor: `AttemptId`, `RulesetId`, `RulesetVersion`,
   `ModeId`, plus whatever `MatchRequest`/`MatchConfiguration` re-audit determines is still missing
   ([§14](#14-define-remote-attempt-launch-semantics) — deliberately left open here per the issue's
-  instruction not to prematurely finalize this).
+  instruction not to prematurely finalize this). *Shipped as `AttemptDescriptor`/`AttemptDescriptorDto`,
+  returned by `StartAttempt`.*
 - Implement the named-metric comparison engine: ordered comparison keys, per-key direction
   (`HigherWins`/`LowerWins`), tie-break fallthrough, equal-on-every-key → draw
   ([fixtures 04](fixtures/04-lower-is-better-result.json)/[05](fixtures/05-ordered-multi-key-tiebreak.json)).
+  *Shipped as `GameRound.ResolveWinner`.*
 - Implement `OpenTarget` issuance gating (refuse `StartAttempt` for the non-first-mover until the
   first-mover's attempt is complete) and partial-target projection (expose only the primary
-  metric) — [fixture 02](fixtures/02-open-target-primary-only.json).
+  metric) — [fixture 02](fixtures/02-open-target-primary-only.json). *Shipped as
+  `VersusSeries.EnsureIssuanceOrderAllows`/`PartialRevealMetricFor`; selecting `OpenTarget` through
+  the live remote `CreateChallenge` path still needs a catalog entry with that policy (#10).*
 - **Fix the identical-vs-conflicting resubmission gap**, confirmed present today by this issue's
   added test: compare the incoming result against the stored one before taking the idempotent-
   return path; equal → success, different → reject as a conflict (HTTP 409, not a silent 200) —
   [§13](#13-result-retryreplay-behavior), [fixtures 10](fixtures/10-identical-result-retry.json)/
-  [11](fixtures/11-conflicting-result-replay.json).
+  [11](fixtures/11-conflicting-result-replay.json). *Shipped in `VersusSeries.CompleteAttempt` as
+  `ConflictingAttemptResultException`.*
 - Explicitly decide (and document, whichever way it goes) whether the remote MVP needs an
-  `Abandon`/reissue path, per [§12](#12-reconcile-attempt-lifecycle-semantics).
+  `Abandon`/reissue path, per [§12](#12-reconcile-attempt-lifecycle-semantics). *Decided: not
+  needed for this MVP — deferred, see `v2/README.md`'s "Deferred, explicitly" note under Remote
+  attempt API.*
 - Enforce the richer information-policy projection at every response that could carry attempt
   results (`GetSeries`, `ListSeries`, and the response to `CompleteAttempt` itself) — never
   construct a payload containing a hidden metric, matching the discipline the Backend already
-  applies to `Score` under `SealedAttempt` today.
+  applies to `Score` under `SealedAttempt` today. *Shipped: `ListSeries*` summaries never carried
+  attempt data at all (unchanged, pre-existing); `GetSeries`/`CompleteAttempt` both return the same
+  `SeriesView`, whose projection is enforced once in `VersusSeries.ToView`.*
+
+Attempt-boundary hardening beyond this list — e.g. the remaining-list projection/pagination work
+named in the issue's non-goals — is issue #21's, not #11's.
 
 ## 22. Remaining risks / unresolved decisions
 

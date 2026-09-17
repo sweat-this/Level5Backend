@@ -2,8 +2,8 @@
   "fixtureId": "ordered-multi-key-tiebreak",
   "protocolVersion": 1,
   "description": "When the primary comparison key is tied, the next comparison key in declared order decides the winner; only when every key ties is the game a draw.",
-  "backendExecutable": false,
-  "requiresDownstream": ["#11"],
+  "backendExecutable": true,
+  "requiresDownstream": [],
   "seriesFormat": { "totalGames": 1 },
   "ruleset": {
     "rulesetId": "contest",
@@ -29,5 +29,5 @@
     "winner": "opponent",
     "decidingKey": "CompletionTimeSeconds"
   },
-  "notes": "Score ties at 50; CompletionTimeSeconds breaks the tie (opponent is faster). Mirrors Unity's CompetitiveRuleset.Compare exactly: iterate comparisonKeys in order, skip on equality, decide on the first key that differs. The Backend's GameRound.WinnerId has exactly one key and no fallthrough mechanism - required for #11."
+  "notes": "Score ties at 50; CompletionTimeSeconds breaks the tie (opponent is faster). Mirrors Unity's CompetitiveRuleset.Compare exactly: iterate comparisonKeys in order, skip on equality, decide on the first key that differs. Implemented by issue #11 as GameRound.ResolveWinner."
 }

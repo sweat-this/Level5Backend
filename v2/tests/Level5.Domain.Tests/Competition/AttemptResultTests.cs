@@ -17,6 +17,45 @@ public class AttemptResultTests
         Assert.Throws<InvalidAttemptResultException>(() => AttemptResult.OfScore(-1));
     }
 
+    [Theory]
+    [InlineData(ResultMetric.Score)]
+    [InlineData(ResultMetric.ShotsMade)]
+    [InlineData(ResultMetric.ShotsAttempted)]
+    [InlineData(ResultMetric.Accuracy)]
+    [InlineData(ResultMetric.CompletionTimeSeconds)]
+    [InlineData(ResultMetric.LongestStreak)]
+    [InlineData(ResultMetric.TotalDistance)]
+    [InlineData(ResultMetric.BonusPoints)]
+    public void Of_rejects_a_negative_protocol_metric(ResultMetric metric)
+    {
+        Assert.Throws<InvalidAttemptResultException>(() => AttemptResult.Of(
+            new Dictionary<ResultMetric, double> { [metric] = -1 }));
+    }
+
+    [Fact]
+    public void Of_rejects_accuracy_above_one_hundred()
+    {
+        Assert.Throws<InvalidAttemptResultException>(() => AttemptResult.Of(
+            new Dictionary<ResultMetric, double> { [ResultMetric.Accuracy] = 100.01 }));
+    }
+
+    [Fact]
+    public void Of_rejects_more_made_shots_than_attempted_shots()
+    {
+        Assert.Throws<InvalidAttemptResultException>(() => AttemptResult.Of(new Dictionary<ResultMetric, double>
+        {
+            [ResultMetric.ShotsMade] = 6,
+            [ResultMetric.ShotsAttempted] = 5
+        }));
+    }
+
+    [Fact]
+    public void Of_rejects_an_undefined_metric()
+    {
+        Assert.Throws<InvalidAttemptResultException>(() => AttemptResult.Of(
+            new Dictionary<ResultMetric, double> { [(ResultMetric)999] = 1 }));
+    }
+
     [Fact]
     public void ValueOf_returns_null_for_a_metric_the_result_does_not_carry()
     {
