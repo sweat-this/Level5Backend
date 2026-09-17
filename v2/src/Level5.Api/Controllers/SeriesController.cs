@@ -59,18 +59,8 @@ public sealed class SeriesController(
     AcceptChallengeUseCase acceptChallenge,
     DeclineChallengeUseCase declineChallenge,
     CancelChallengeUseCase cancelChallenge,
-    GetSeriesUseCase getSeries,
-    ListIncomingChallengesUseCase listIncoming,
-    ListOutgoingChallengesUseCase listOutgoing,
-    ListActiveSeriesUseCase listActive,
-    ListCompletedSeriesUseCase listCompleted,
-    StartAttemptUseCase startAttempt,
-    CompleteAttemptUseCase completeAttempt,
     ICurrentPlayerProvider currentPlayer) : ControllerBase
 {
-    private static readonly IReadOnlyDictionary<string, ResultMetric> ResultMetricsByName =
-        Enum.GetValues<ResultMetric>().ToDictionary(metric => metric.ToString(), StringComparer.OrdinalIgnoreCase);
-
     [HttpPost]
     public async Task<ActionResult<SeriesResponseDto>> CreateChallenge(CreateChallengeDto request, CancellationToken cancellationToken)
     {
@@ -81,47 +71,7 @@ public sealed class SeriesController(
                 request.InformationPolicy, request.ClientRequestId),
             cancellationToken);
 
-        return Ok(ToDto(view));
-    }
-
-    [HttpGet("{seriesId:guid}")]
-    public async Task<ActionResult<SeriesResponseDto>> GetSeries(Guid seriesId, CancellationToken cancellationToken)
-    {
-        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var view = await getSeries.ExecuteAsync(new GetSeriesRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
-        return Ok(ToDto(view));
-    }
-
-    [HttpGet("incoming")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListIncoming(CancellationToken cancellationToken)
-    {
-        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listIncoming.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(ToDto));
-    }
-
-    [HttpGet("outgoing")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListOutgoing(CancellationToken cancellationToken)
-    {
-        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listOutgoing.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(ToDto));
-    }
-
-    [HttpGet("active")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListActive(CancellationToken cancellationToken)
-    {
-        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listActive.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(ToDto));
-    }
-
-    [HttpGet("completed")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListCompleted(CancellationToken cancellationToken)
-    {
-        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listCompleted.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(ToDto));
+        return Ok(SeriesDtoMapper.ToDto(view));
     }
 
     [HttpPost("{seriesId:guid}/accept")]
@@ -129,7 +79,7 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var view = await acceptChallenge.ExecuteAsync(new AcceptChallengeRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
-        return Ok(ToDto(view));
+        return Ok(SeriesDtoMapper.ToDto(view));
     }
 
     [HttpPost("{seriesId:guid}/decline")]
@@ -137,7 +87,7 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var view = await declineChallenge.ExecuteAsync(new DeclineChallengeRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
-        return Ok(ToDto(view));
+        return Ok(SeriesDtoMapper.ToDto(view));
     }
 
     [HttpPost("{seriesId:guid}/cancel")]
@@ -145,8 +95,72 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var view = await cancelChallenge.ExecuteAsync(new CancelChallengeRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
-        return Ok(ToDto(view));
+        return Ok(SeriesDtoMapper.ToDto(view));
     }
+}
+
+[ApiController]
+[Route("api/v2/series")]
+[Authorize]
+public sealed class SeriesQueriesController(
+    GetSeriesUseCase getSeries,
+    ListIncomingChallengesUseCase listIncoming,
+    ListOutgoingChallengesUseCase listOutgoing,
+    ListActiveSeriesUseCase listActive,
+    ListCompletedSeriesUseCase listCompleted,
+    ICurrentPlayerProvider currentPlayer) : ControllerBase
+{
+    [HttpGet("{seriesId:guid}")]
+    public async Task<ActionResult<SeriesResponseDto>> GetSeries(Guid seriesId, CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var view = await getSeries.ExecuteAsync(new GetSeriesRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(view));
+    }
+
+    [HttpGet("incoming")]
+    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListIncoming(CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var series = await listIncoming.ExecuteAsync(me, cancellationToken);
+        return Ok(series.Select(SeriesDtoMapper.ToDto));
+    }
+
+    [HttpGet("outgoing")]
+    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListOutgoing(CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var series = await listOutgoing.ExecuteAsync(me, cancellationToken);
+        return Ok(series.Select(SeriesDtoMapper.ToDto));
+    }
+
+    [HttpGet("active")]
+    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListActive(CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var series = await listActive.ExecuteAsync(me, cancellationToken);
+        return Ok(series.Select(SeriesDtoMapper.ToDto));
+    }
+
+    [HttpGet("completed")]
+    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListCompleted(CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var series = await listCompleted.ExecuteAsync(me, cancellationToken);
+        return Ok(series.Select(SeriesDtoMapper.ToDto));
+    }
+}
+
+[ApiController]
+[Route("api/v2/series")]
+[Authorize]
+public sealed class SeriesAttemptsController(
+    StartAttemptUseCase startAttempt,
+    CompleteAttemptUseCase completeAttempt,
+    ICurrentPlayerProvider currentPlayer) : ControllerBase
+{
+    private static readonly IReadOnlyDictionary<string, ResultMetric> ResultMetricsByName =
+        Enum.GetValues<ResultMetric>().ToDictionary(metric => metric.ToString(), StringComparer.OrdinalIgnoreCase);
 
     [HttpPost("{seriesId:guid}/games/{gameNumber:int}/attempts/start")]
     public async Task<ActionResult<AttemptDescriptorDto>> StartAttempt(Guid seriesId, int gameNumber, CancellationToken cancellationToken)
@@ -155,7 +169,7 @@ public sealed class SeriesController(
         var descriptor = await startAttempt.ExecuteAsync(
             new StartAttemptRequest(me, new VersusSeriesId(seriesId), gameNumber), cancellationToken);
 
-        return Ok(ToDto(descriptor));
+        return Ok(SeriesDtoMapper.ToDto(descriptor));
     }
 
     [HttpPost("{seriesId:guid}/games/{gameNumber:int}/attempts/{attemptId:guid}/complete")]
@@ -167,7 +181,7 @@ public sealed class SeriesController(
         var view = await completeAttempt.ExecuteAsync(
             new CompleteAttemptRequest(me, new VersusSeriesId(seriesId), gameNumber, new AttemptId(attemptId), result), cancellationToken);
 
-        return Ok(ToDto(view));
+        return Ok(SeriesDtoMapper.ToDto(view));
     }
 
     /// <summary>
@@ -198,8 +212,11 @@ public sealed class SeriesController(
 
         return AttemptResult.Of(parsed);
     }
+}
 
-    private static SeriesResponseDto ToDto(SeriesView view) => new(
+internal static class SeriesDtoMapper
+{
+    public static SeriesResponseDto ToDto(SeriesView view) => new(
         view.Id.Value, view.ChallengerId.Value, view.OpponentId.Value, view.Status.ToString(),
         view.TotalGames, view.GamesToWin, view.CurrentGameNumber, view.Revision, view.WinnerId?.Value,
         view.CreatedAt, view.CompletedAt, ToDto(view.Rules),
@@ -214,11 +231,11 @@ public sealed class SeriesController(
         ? null
         : new AttemptViewDto(attempt.Id.Value, attempt.Status.ToString(), attempt.Result?.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value));
 
-    private static SeriesSummaryDto ToDto(SeriesSummary summary) => new(
+    public static SeriesSummaryDto ToDto(SeriesSummary summary) => new(
         summary.Id.Value, summary.ChallengerId.Value, summary.OpponentId.Value, summary.Status.ToString(),
         summary.CurrentGameNumber, summary.TotalGames, summary.Revision, summary.CreatedAt);
 
-    private static AttemptDescriptorDto ToDto(AttemptDescriptor descriptor) => new(
+    public static AttemptDescriptorDto ToDto(AttemptDescriptor descriptor) => new(
         descriptor.SeriesId.Value, descriptor.AttemptId.Value, descriptor.GameNumber, descriptor.PlayerId.Value,
         descriptor.CompetitionProtocolVersion, descriptor.RulesetId, descriptor.RulesetVersion, descriptor.MinimumCompatibleVersion,
         descriptor.ModeId, descriptor.InformationPolicy.ToString(), descriptor.TotalGames, descriptor.GamesToWin,
