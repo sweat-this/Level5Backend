@@ -1,5 +1,6 @@
 using Level5.Application.Abstractions;
 using Level5.Application.Common;
+using Level5.Application.Competition;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -62,21 +63,55 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
         return Task.FromResult(match is null ? null : Clone(match));
     }
 
-    public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<VersusSeries>>(
-            [.. _rows.Values.Where(s => s.OpponentId == playerId && s.Status == SeriesStatus.PendingAcceptance)]);
+    public Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => Task.FromResult(Page(
+            _rows.Values.Where(s => s.OpponentId == playerId && s.Status == SeriesStatus.PendingAcceptance),
+            s => s.CreatedAt, limit, cursor, SeriesListPaging.IncomingScope));
 
-    public Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<VersusSeries>>(
-            [.. _rows.Values.Where(s => s.ChallengerId == playerId && s.Status == SeriesStatus.PendingAcceptance)]);
+    public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => Task.FromResult(Page(
+            _rows.Values.Where(s => s.ChallengerId == playerId && s.Status == SeriesStatus.PendingAcceptance),
+            s => s.CreatedAt, limit, cursor, SeriesListPaging.OutgoingScope));
 
-    public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<VersusSeries>>(
-            [.. _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Active)]);
+    public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => Task.FromResult(Page(
+            _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Active),
+            s => s.CreatedAt, limit, cursor, SeriesListPaging.ActiveScope));
 
-    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<VersusSeries>>(
-            [.. _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Completed)]);
+    public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => Task.FromResult(Page(
+            _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Completed),
+            s => s.CompletedAt ?? s.CreatedAt, limit, cursor, SeriesListPaging.CompletedScope));
+
+    /// <summary>
+    /// Mirrors <c>VersusSeriesStore</c>'s keyset pagination (issue #21): descending by
+    /// <paramref name="sortKey"/> then <c>Id</c>, with the same opaque, scope-tagged cursor format
+    /// (<see cref="KeysetCursor"/>), so application-layer tests exercise the real
+    /// pass-through/boundary/cross-scope-rejection semantics rather than a simplified stand-in.
+    /// </summary>
+    private static PagedResult<SeriesSummary> Page(
+        IEnumerable<VersusSeries> source, Func<VersusSeries, DateTimeOffset> sortKey, int? limit, string? cursor, string scope)
+    {
+        var resolvedLimit = SeriesListPaging.ResolveLimit(limit);
+        var ordered = source.OrderByDescending(sortKey).ThenByDescending(s => s.Id.Value).AsEnumerable();
+
+        if (cursor is not null)
+        {
+            var (cursorSortKey, cursorId) = KeysetCursor.Decode(scope, cursor);
+            ordered = ordered.Where(s => sortKey(s) < cursorSortKey || (sortKey(s) == cursorSortKey && s.Id.Value < cursorId));
+        }
+
+        var rows = ordered.Take(resolvedLimit + 1).ToList();
+        var hasMore = rows.Count > resolvedLimit;
+        var page = hasMore ? rows.Take(resolvedLimit).ToList() : rows;
+
+        var items = page.Select(ToSummary).ToList();
+        var nextCursor = hasMore ? KeysetCursor.Encode(scope, sortKey(page[^1]), page[^1].Id.Value) : null;
+        return new PagedResult<SeriesSummary>(items, nextCursor);
+    }
+
+    private static SeriesSummary ToSummary(VersusSeries s)
+        => new(s.Id, s.ChallengerId, s.OpponentId, s.Status, s.CurrentGameNumber, s.Format.TotalGames, s.Revision, s.CreatedAt);
 
     public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)
     {

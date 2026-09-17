@@ -214,8 +214,8 @@ public class ChallengeUseCaseTests
         await _create.ExecuteAsync(Request(challenger, opponent, clientRequestId: clientRequestId), CancellationToken.None);
         await _create.ExecuteAsync(Request(challenger, opponent, clientRequestId: clientRequestId), CancellationToken.None);
 
-        var outgoing = await new ListOutgoingChallengesUseCase(_series).ExecuteAsync(challenger, CancellationToken.None);
-        Assert.Single(outgoing);
+        var outgoing = await new ListOutgoingChallengesUseCase(_series).ExecuteAsync(new ListSeriesPageRequest(challenger, null, null), CancellationToken.None);
+        Assert.Single(outgoing.Items);
     }
 
     [Fact]
@@ -422,13 +422,13 @@ public class ChallengeUseCaseTests
 
         var stillPending = await _create.ExecuteAsync(Request(challenger, bystander, totalGames: 7), CancellationToken.None);
 
-        var challengerCompleted = await _listCompleted.ExecuteAsync(challenger, CancellationToken.None);
-        var opponentCompleted = await _listCompleted.ExecuteAsync(opponent, CancellationToken.None);
+        var challengerCompleted = await _listCompleted.ExecuteAsync(new ListSeriesPageRequest(challenger, null, null), CancellationToken.None);
+        var opponentCompleted = await _listCompleted.ExecuteAsync(new ListSeriesPageRequest(opponent, null, null), CancellationToken.None);
 
-        var challengerCompletedId = Assert.Single(challengerCompleted).Id;
+        var challengerCompletedId = Assert.Single(challengerCompleted.Items).Id;
         Assert.Equal(toComplete.Id, challengerCompletedId);
-        var opponentCompletedId = Assert.Single(opponentCompleted).Id;
+        var opponentCompletedId = Assert.Single(opponentCompleted.Items).Id;
         Assert.Equal(toComplete.Id, opponentCompletedId);
-        Assert.DoesNotContain(challengerCompleted, s => s.Id == declined.Id || s.Id == cancelled.Id || s.Id == stillPending.Id);
+        Assert.DoesNotContain(challengerCompleted.Items, s => s.Id == declined.Id || s.Id == cancelled.Id || s.Id == stillPending.Id);
     }
 }

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Level5.Application.Abstractions;
+using Level5.Application.Common;
+using Level5.Application.Competition;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 using Level5.Infrastructure.Persistence.Rows;
@@ -30,36 +32,96 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
+    public Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => PageByCreatedAtAsync(
+            db.VersusSeries.AsNoTracking().Where(r => r.OpponentId == playerId.Value && r.Status == nameof(SeriesStatus.PendingAcceptance)),
+            limit, cursor, SeriesListPaging.IncomingScope, cancellationToken);
+
+    public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => PageByCreatedAtAsync(
+            db.VersusSeries.AsNoTracking().Where(r => r.ChallengerId == playerId.Value && r.Status == nameof(SeriesStatus.PendingAcceptance)),
+            limit, cursor, SeriesListPaging.OutgoingScope, cancellationToken);
+
+    public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => PageByCreatedAtAsync(
+            db.VersusSeries.AsNoTracking().Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Active)),
+            limit, cursor, SeriesListPaging.ActiveScope, cancellationToken);
+
+    public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => PageByCompletedAtAsync(
+            db.VersusSeries.AsNoTracking().Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Completed)),
+            limit, cursor, SeriesListPaging.CompletedScope, cancellationToken);
+
+    /// <summary>Intermediate EF projection for a summary row - carries the actual creation time (for the DTO) separately from the keyset sort key, which differs between queries (see <see cref="PageByCompletedAtAsync"/>).</summary>
+    private sealed record SummaryRow(
+        Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision,
+        DateTimeOffset CreatedAt, DateTimeOffset SortKey);
+
+    /// <summary>
+    /// Keyset-paginates by (CreatedAt, Id) descending and projects straight from relational
+    /// columns to <see cref="SeriesSummary"/> - the generated SQL never selects <c>StateJson</c>,
+    /// so a malformed or unsupported-schema-version document on any row (in or out of this page)
+    /// cannot fail the query (issue #21). Used by incoming/outgoing/active, which have no
+    /// completion time to order by.
+    /// </summary>
+    private static async Task<PagedResult<SeriesSummary>> PageByCreatedAtAsync(
+        IQueryable<VersusSeriesRow> query, int? limit, string? cursor, string scope, CancellationToken cancellationToken)
     {
-        var rows = await db.VersusSeries.AsNoTracking()
-            .Where(r => r.OpponentId == playerId.Value && r.Status == nameof(SeriesStatus.PendingAcceptance))
+        var resolvedLimit = SeriesListPaging.ResolveLimit(limit);
+
+        if (cursor is not null)
+        {
+            var (sortKey, id) = KeysetCursor.Decode(scope, cursor);
+            query = query.Where(r => r.CreatedAt < sortKey || (r.CreatedAt == sortKey && r.Id < id));
+        }
+
+        var rows = await query
+            .OrderByDescending(r => r.CreatedAt).ThenByDescending(r => r.Id)
+            .Take(resolvedLimit + 1)
+            .Select(r => new SummaryRow(r.Id, r.ChallengerId, r.OpponentId, r.Status, r.CurrentGameNumber, r.TotalGames, r.Revision, r.CreatedAt, r.CreatedAt))
             .ToListAsync(cancellationToken);
-        return [.. rows.Select(ToDomain)];
+
+        return ToPage(rows, resolvedLimit, scope);
     }
 
-    public async Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Same relational-only projection as <see cref="PageByCreatedAtAsync"/>, but keyset-paginated
+    /// by (CompletedAt, Id) descending (issue #21's preferred completed-list ordering). Used only
+    /// for the completed-series query, where every row is expected to already carry a
+    /// <c>CompletedAt</c> - the <c>?? CreatedAt</c> fallback is defensive, not a normal path, and
+    /// exists only to keep the ordering total if that invariant is ever violated.
+    /// </summary>
+    private static async Task<PagedResult<SeriesSummary>> PageByCompletedAtAsync(
+        IQueryable<VersusSeriesRow> query, int? limit, string? cursor, string scope, CancellationToken cancellationToken)
     {
-        var rows = await db.VersusSeries.AsNoTracking()
-            .Where(r => r.ChallengerId == playerId.Value && r.Status == nameof(SeriesStatus.PendingAcceptance))
+        var resolvedLimit = SeriesListPaging.ResolveLimit(limit);
+
+        if (cursor is not null)
+        {
+            var (sortKey, id) = KeysetCursor.Decode(scope, cursor);
+            query = query.Where(r => (r.CompletedAt ?? r.CreatedAt) < sortKey || ((r.CompletedAt ?? r.CreatedAt) == sortKey && r.Id < id));
+        }
+
+        var rows = await query
+            .OrderByDescending(r => r.CompletedAt ?? r.CreatedAt).ThenByDescending(r => r.Id)
+            .Take(resolvedLimit + 1)
+            .Select(r => new SummaryRow(r.Id, r.ChallengerId, r.OpponentId, r.Status, r.CurrentGameNumber, r.TotalGames, r.Revision, r.CreatedAt, r.CompletedAt ?? r.CreatedAt))
             .ToListAsync(cancellationToken);
-        return [.. rows.Select(ToDomain)];
+
+        return ToPage(rows, resolvedLimit, scope);
     }
 
-    public async Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
+    private static PagedResult<SeriesSummary> ToPage(List<SummaryRow> rows, int resolvedLimit, string scope)
     {
-        var rows = await db.VersusSeries.AsNoTracking()
-            .Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Active))
-            .ToListAsync(cancellationToken);
-        return [.. rows.Select(ToDomain)];
-    }
+        var hasMore = rows.Count > resolvedLimit;
+        var page = hasMore ? rows.Take(resolvedLimit).ToList() : rows;
 
-    public async Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken)
-    {
-        var rows = await db.VersusSeries.AsNoTracking()
-            .Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Completed))
-            .ToListAsync(cancellationToken);
-        return [.. rows.Select(ToDomain)];
+        var items = page.Select(r => new SeriesSummary(
+            new VersusSeriesId(r.Id), new PlayerId(r.ChallengerId), new PlayerId(r.OpponentId),
+            Enum.Parse<SeriesStatus>(r.Status), r.CurrentGameNumber, r.TotalGames, r.Revision, r.CreatedAt)).ToList();
+
+        var nextCursor = hasMore ? KeysetCursor.Encode(scope, page[^1].SortKey, page[^1].Id) : null;
+        return new PagedResult<SeriesSummary>(items, nextCursor);
     }
 
     public async Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)

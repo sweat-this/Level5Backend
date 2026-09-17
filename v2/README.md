@@ -17,7 +17,10 @@ frozen rules + named-metric attempt results - see
 [Competition domain: `VersusSeries`](#competition-domain-versusseries)), a finalized, retry-safe
 remote challenge API (Best-of-`{1,3,5,7}` enforcement, create idempotency, completed-series
 history, accept retry-safety - see
-[Remote challenge API](#remote-challenge-api-issue-10)), and a complete authentication/session
+[Remote challenge API](#remote-challenge-api-issue-10)), relational-only, paginated correspondence
+list projections that never hydrate the full aggregate (see
+[Correspondence list projections and pagination](#correspondence-list-projections-and-pagination-issue-21)),
+and a complete authentication/session
 vertical (register, login, persistent rotating refresh sessions, logout/revocation,
 `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy - see
 [Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
@@ -206,10 +209,11 @@ coverage around the existing aggregate/store from issue #9.
   revision-based optimistic-concurrency conflict already gives a well-defined `409` for a repeated
   decline/cancel; extending idempotency there is deferred until a concrete need appears.
 - **Completed list**: `GET /api/v2/series/completed`
-  (`ListCompletedSeriesUseCase`/`IVersusSeriesStore.ListCompletedSeriesAsync`) returns the same
-  sparse `SeriesSummaryDto` shape as `incoming`/`outgoing`/`active`, scoped to
-  `SeriesStatus.Completed` only - `Declined`/`Cancelled` series never played out and are excluded,
-  since this issue does not add a separate "all history" endpoint.
+  (`ListCompletedSeriesUseCase`/`IVersusSeriesStore.ListCompletedSeriesSummariesAsync` - see issue
+  #21 below for the summary/pagination contract) returns the same sparse `SeriesSummaryDto` shape
+  as `incoming`/`outgoing`/`active`, scoped to `SeriesStatus.Completed` only -
+  `Declined`/`Cancelled` series never played out and are excluded, since this issue does not add a
+  separate "all history" endpoint.
 - **List isolation**: `incoming`/`outgoing`/`active`/`completed` are each scoped to the
   authenticated player only; an unrelated third player sees none of another pair's series through
   any of the four (`CorrespondenceFlowTests`).
@@ -311,6 +315,46 @@ comparison engine, idempotency, concurrency, and projection around the existing 
   optional feature reduction versus local Unity play, and no concrete requirement for it exists
   yet. Server-simulated gameplay, anti-cheat/result attestation, and #21's list
   projection/pagination hardening remain explicit non-goals of this issue.
+
+## Correspondence list projections and pagination (issue #21)
+
+Separates the four correspondence list endpoints (`incoming`/`outgoing`/`active`/`completed`)
+from full `VersusSeries` aggregate reconstruction, and adds bounded pagination to all four. No new
+persistence or aggregate was introduced - `IVersusSeriesStore` simply exposes a
+summary/paged query per list instead of returning `IReadOnlyList<VersusSeries>`.
+
+- **Relational-only projection, no `state_json` deserialization**: each list method
+  (`ListIncomingChallengeSummariesAsync`/`ListOutgoingChallengeSummariesAsync`/
+  `ListActiveSeriesSummariesAsync`/`ListCompletedSeriesSummariesAsync` on `IVersusSeriesStore`,
+  implemented in `VersusSeriesStore`) projects an EF `Select` straight from `competitive_series`
+  columns (`Id`, `ChallengerId`, `OpponentId`, `Status`, `CurrentGameNumber`, `TotalGames`,
+  `Revision`, `CreatedAt`) into `SeriesSummary`. The generated SQL never selects `StateJson`, never
+  calls `ToDomain()`, and never constructs a `VersusSeries` - so a malformed or
+  unsupported-schema-version document on any row (in or out of the requested page) cannot fail an
+  otherwise-valid list response (`VersusSeriesStoreTests`). Detail (`GetSeries`) and every
+  state-changing command still hydrate and validate the full aggregate exactly as before, and still
+  reject malformed/unsupported aggregate documents outright - this issue narrows what the *list*
+  path touches, not what `FindByIdAsync`/`TrySaveAsync` are allowed to accept.
+- **Bounded pagination, keyset-based**: every list endpoint takes optional `limit`/`cursor` query
+  parameters and returns `{ items, limit, nextCursor }` (`SeriesSummaryPageDto`) instead of a bare
+  array. `limit` defaults to 20 and is clamped (never rejected) to a maximum of 100
+  (`SeriesListPaging.DefaultLimit`/`MaxLimit`) - there is no way to request an unbounded list.
+  Ordering is `CreatedAt DESC, Id DESC` for `incoming`/`outgoing`/`active`, and
+  `CompletedAt DESC, Id DESC` for `completed` (falling back to `CreatedAt` if `CompletedAt` were
+  ever absent, which the `Completed` status invariant does not allow in practice). Keyset, not
+  offset/page, was chosen because the existing ordering already has a natural, indexable
+  tiebreaker (`Id`) and keyset pagination gives stable page boundaries under concurrent
+  inserts/completions for free, which offset pagination does not. `cursor` is an opaque token
+  (`KeysetCursor`, base64 of `"{scope}:{sortKeyTicks}:{id}"`) encoding which list query issued it
+  plus the last item's sort key and id - clients must treat it as opaque and pass it back verbatim;
+  a hand-edited/unparseable cursor, **or a well-formed cursor from a different list endpoint**
+  (e.g. an `/outgoing` cursor replayed against `/active`), is rejected with
+  `400`/`validation_failed` rather than being silently reinterpreted against the wrong sort key.
+- **No aggregate-vs-summary confusion**: `IVersusSeriesStore`'s list methods return
+  `PagedResult<SeriesSummary>`, never `VersusSeries` - there is no signature through which a list
+  call could accidentally reach aggregate/sealed state, independent of how any implementation
+  behaves. `FindByIdAsync`/`FindByIdempotencyKeyAsync`/`TrySaveAsync` are unchanged and remain the
+  only aggregate-hydrating paths on the interface.
 
 ## Authentication and sessions
 
@@ -538,14 +582,17 @@ Persisted metric/comparison-key/information-policy identifiers are validated aga
 enums on read too (`CorruptSeriesStateException` on an unrecognized value) - an unknown identifier
 never silently becomes valid domain data.
 
-**Known blast radius of failing loudly:** `ListIncomingChallengesAsync`/`ListOutgoingChallengesAsync`/
-`ListActiveSeriesAsync` deserialize every matching row eagerly (`rows.Select(ToDomain)`) with no
-per-row isolation - one row that fails schema-version or identifier validation currently fails the
-*entire* list call for that player, not just that one series. `FindByIdAsync` has no such blast
-radius (only the requested series is affected). This is accepted for now (no V2 environment has
-real data yet, so the failure mode is theoretical), but it is a real consequence of the "fail
-loudly, never migrate silently" choice above and should be revisited (e.g. skip-and-log a single
-bad row instead of failing the whole list) before this matters in an environment with real data.
+**Resolved blast radius (issue #21):** the four list methods on `IVersusSeriesStore`
+(`ListIncomingChallengeSummariesAsync`/`ListOutgoingChallengeSummariesAsync`/
+`ListActiveSeriesSummariesAsync`/`ListCompletedSeriesSummariesAsync`) used to deserialize every
+matching row eagerly (`rows.Select(ToDomain)`) with no per-row isolation - one row that failed
+schema-version or identifier validation failed the *entire* list call for that player. They now
+project straight from relational columns and never touch `StateJson`/`ToDomain()` at all (see
+[Correspondence list projections and pagination](#correspondence-list-projections-and-pagination-issue-21)),
+so a malformed or unsupported-schema-version row can no longer affect any list result, sibling or
+own. `FindByIdAsync` still has, and is still meant to have, the narrower blast radius of only the
+requested series - it must keep failing loudly on invalid aggregate state, which the "fail loudly,
+never migrate silently" choice above still governs for detail/command paths.
 
 Everything else (`accounts`, `auth_sessions`, `player_profiles`, `friend_requests`, `friendships`)
 is plain relational EF Core, mapped through dedicated `*Row` types in `Level5.Infrastructure.Persistence.Rows`

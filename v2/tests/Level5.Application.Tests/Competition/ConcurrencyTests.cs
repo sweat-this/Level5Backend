@@ -18,10 +18,10 @@ internal sealed class AlwaysConflictingVersusSeriesStore(InMemoryVersusSeriesSto
     public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken) => inner.FindByIdAsync(id, cancellationToken);
     public Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken) => inner.AddAsync(series, clientRequestId, cancellationToken);
     public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken) => inner.FindByIdempotencyKeyAsync(challengerId, clientRequestId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListIncomingChallengesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListOutgoingChallengesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListActiveSeriesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListCompletedSeriesAsync(playerId, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListIncomingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListOutgoingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListActiveSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListCompletedSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
     public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
 }
 
@@ -38,10 +38,10 @@ internal sealed class FailFirstNSavesVersusSeriesStore(InMemoryVersusSeriesStore
     public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken) => inner.FindByIdAsync(id, cancellationToken);
     public Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken) => inner.AddAsync(series, clientRequestId, cancellationToken);
     public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken) => inner.FindByIdempotencyKeyAsync(challengerId, clientRequestId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListIncomingChallengesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListOutgoingChallengesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListActiveSeriesAsync(playerId, cancellationToken);
-    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListCompletedSeriesAsync(playerId, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListIncomingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListOutgoingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListActiveSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListCompletedSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
 
     public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)
     {
