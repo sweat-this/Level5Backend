@@ -16,10 +16,12 @@ namespace Level5.Application.Tests.Competition;
 internal sealed class AlwaysConflictingVersusSeriesStore(InMemoryVersusSeriesStore inner) : IVersusSeriesStore
 {
     public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken) => inner.FindByIdAsync(id, cancellationToken);
-    public Task AddAsync(VersusSeries series, CancellationToken cancellationToken) => inner.AddAsync(series, cancellationToken);
+    public Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken) => inner.AddAsync(series, clientRequestId, cancellationToken);
+    public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken) => inner.FindByIdempotencyKeyAsync(challengerId, clientRequestId, cancellationToken);
     public Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListIncomingChallengesAsync(playerId, cancellationToken);
     public Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListOutgoingChallengesAsync(playerId, cancellationToken);
     public Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListActiveSeriesAsync(playerId, cancellationToken);
+    public Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken) => inner.ListCompletedSeriesAsync(playerId, cancellationToken);
     public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
 }
 
@@ -44,7 +46,7 @@ public class ConcurrencyTests
         await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
 
         var view = await new CreateChallengeUseCase(_seriesStore, _friendships, _catalog, _clock)
-            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3), CancellationToken.None);
+            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, Guid.NewGuid()), CancellationToken.None);
 
         return (view.Id, challenger, opponent);
     }

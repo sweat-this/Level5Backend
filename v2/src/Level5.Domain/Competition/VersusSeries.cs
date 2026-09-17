@@ -88,11 +88,24 @@ public sealed class VersusSeries
 
     public bool IsParticipant(PlayerId playerId) => playerId == ChallengerId || playerId == OpponentId;
 
+    /// <summary>
+    /// Idempotent for the opponent: <see cref="SeriesStatus.Active"/> is only ever reached via
+    /// this same opponent's own prior <see cref="Accept"/>, so a retried accept call (e.g. a lost
+    /// response) is a safe no-op that returns without re-touching the series, rather than an
+    /// illegal transition. The challenger and any non-participant are rejected regardless of
+    /// status - only the opponent gets this retry behavior. Every other status (Declined,
+    /// Cancelled, Completed) still falls through to <see cref="EnsureStatus"/> and conflicts.
+    /// </summary>
     public void Accept(PlayerId actingPlayerId, DateTimeOffset now)
     {
         if (actingPlayerId != OpponentId)
         {
             throw new SeriesAuthorizationException("Only the challenged player can accept a challenge.");
+        }
+
+        if (Status == SeriesStatus.Active)
+        {
+            return;
         }
 
         EnsureStatus(SeriesStatus.PendingAcceptance);

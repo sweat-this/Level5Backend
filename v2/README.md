@@ -14,10 +14,13 @@ database-enforced, concurrency-safe friend request/friendship lifecycle (see
 correspondence `VersusSeries` lifecycle (challenge → accept → play best-of-N
 → complete, server-authoritative, concurrency-safe, sealed results, Competition Protocol V1
 frozen rules + named-metric attempt results - see
-[Competition domain: `VersusSeries`](#competition-domain-versusseries)), and a complete
-authentication/session vertical (register, login, persistent rotating refresh sessions,
-logout/revocation, `AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy -
-see [Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
+[Competition domain: `VersusSeries`](#competition-domain-versusseries)), a finalized, retry-safe
+remote challenge API (Best-of-`{1,3,5,7}` enforcement, create idempotency, completed-series
+history, accept retry-safety - see
+[Remote challenge API](#remote-challenge-api-issue-10)), and a complete authentication/session
+vertical (register, login, persistent rotating refresh sessions, logout/revocation,
+`AccountStatus` enforcement, `GET /api/v2/me`, centralized password policy - see
+[Authentication and sessions](#authentication-and-sessions)). Not yet built: leaderboards,
 richer profiles, notifications, anything in the [Non-goals](#non-goals-for-this-slice) list below.
 
 ## Why a separate solution
@@ -141,6 +144,73 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
 - **Non-participant = 404, not 403**: every series-scoped use case checks participation and throws
   the same `NotFoundException` a non-existent series id would produce (`SeriesLookup`), so probing
   random series ids can't be used to learn which ones are real.
+
+## Remote challenge API (issue #10)
+
+Hardens the challenge lifecycle already described above into a finalized, retry-safe remote
+contract, behind `SeriesController` (`/api/v2/series/...`, `[Authorize]`). No second
+challenge/invitation aggregate was introduced - a challenge is still just `VersusSeries` in its
+`PendingAcceptance` lifecycle; this issue only hardens the API surface, idempotency, and list
+coverage around the existing aggregate/store from issue #9.
+
+- **Create contract**: `POST /api/v2/series` accepts `opponentId`, `totalGames`, `rulesetId`,
+  optional `rulesetVersion`, optional `informationPolicy`, and a required `clientRequestId`.
+  Everything else about the created series - `challengerId` (always the authenticated caller),
+  frozen `rules`/`comparisonKeys`, `status`, `revision`, `games`/`attempts`, raw state - is
+  server-owned; any such field present in the request body is silently ignored by model binding
+  (`CreateChallengeDto` simply has no such property), never trusted (`CorrespondenceFlowTests`'
+  overposting coverage).
+- **Best-of-`{1,3,5,7}` enforcement**: remote challenge creation rejects any `totalGames` outside
+  that set with `400`/`validation_failed`, even though the underlying `SeriesFormat.BestOf` domain
+  validator still accepts any odd value in `[1,25]` - the narrower remote-MVP subset
+  (Competition Protocol V1 §8) is enforced in `CreateChallengeUseCase`, at the application
+  boundary, not in the general-purpose domain type.
+- **Information policy**: optional on create. If supplied, it must equal the resolved ruleset's own
+  catalog policy (`RulesetDefinition.InformationPolicy`) or the request is rejected with
+  `400`/`validation_failed` - a client can request the ruleset's own policy for clarity/logging but
+  can never freeze an arbitrary policy the ruleset doesn't actually use. The catalog today has one
+  entry (`score-only`, `SealedAttempt`); `OpenTarget` issuance-gating/partial-reveal enforcement is
+  still issue #11's job (unchanged from issue #9).
+- **Create idempotency**: `clientRequestId` (a client-generated GUID, required) is the retry-safety
+  key, scoped to the authenticated challenger (`(ChallengerId, ClientRequestId)`, unique in
+  `competitive_series` - Postgres unique indexes treat `NULL` as distinct from every other value,
+  so rows without a key, e.g. from lower-level tests, don't collide). A create retried with the
+  same challenger, same key, and the same opponent/format/ruleset/(resolved-or-requested) version/
+  information-policy returns the originally created series unchanged; the same key reused for a
+  materially different request is `409`/`conflict`. No separate fingerprint is persisted - the
+  comparison is made directly against the already-persisted series' own fields
+  (`CreateChallengeUseCase.EnsureMatchesExistingRequest`), since everything needed for the
+  comparison is already part of the aggregate. A missing `clientRequestId` is rejected outright
+  (`400`/`validation_failed`) rather than silently accepted as non-idempotent, since there is no
+  established convention in this codebase yet for exempting a create endpoint from retry-safety.
+  This is deliberately local to challenge creation, not a generic cross-API idempotency platform.
+- **Accept retry-safety**: `VersusSeries.Accept` is idempotent for the opponent once the series is
+  already `Active` (the only way to reach `Active` is that same opponent's own prior `Accept`), so
+  a retried accept call (e.g. a lost HTTP response) returns the current view instead of a
+  `409`/`illegal_transition`. The challenger and any non-participant are still rejected regardless
+  of status (`403`), and every other terminal state (`Declined`/`Cancelled`/`Completed`) still
+  conflicts. Decline/cancel were **not** made idempotent in this slice - deliberate, not an
+  oversight: nothing in issue #10's required behavior calls for it, and the existing
+  revision-based optimistic-concurrency conflict already gives a well-defined `409` for a repeated
+  decline/cancel; extending idempotency there is deferred until a concrete need appears.
+- **Completed list**: `GET /api/v2/series/completed`
+  (`ListCompletedSeriesUseCase`/`IVersusSeriesStore.ListCompletedSeriesAsync`) returns the same
+  sparse `SeriesSummaryDto` shape as `incoming`/`outgoing`/`active`, scoped to
+  `SeriesStatus.Completed` only - `Declined`/`Cancelled` series never played out and are excluded,
+  since this issue does not add a separate "all history" endpoint.
+- **List isolation**: `incoming`/`outgoing`/`active`/`completed` are each scoped to the
+  authenticated player only; an unrelated third player sees none of another pair's series through
+  any of the four (`CorrespondenceFlowTests`).
+- **Status naming**: the public API still exposes the Backend's own status names
+  (`PendingAcceptance`/`Active`/`Completed`/`Declined`/`Cancelled`) verbatim, not Unity's `Invited`
+  terminology - no explicit Protocol V1/API requirement demands a rename, and Competition Protocol
+  V1 §3 already documents the name mapping for a future Unity adapter to consume, so renaming here
+  would only create a second source of truth for that mapping.
+- **Deferred, explicitly (not by omission)**: mid-series `Forfeit` is still not implemented at any
+  layer (Competition Protocol V1 §20 flags this as an open decision for #10/#11) - it is out of
+  this issue's required scope and is left for a future issue if a concrete need appears. Ruleset
+  catalog administration (beyond the existing hardcoded `StaticRulesetCatalog`) is similarly
+  out of scope here.
 
 ## Authentication and sessions
 
@@ -348,6 +418,11 @@ ruleset id, comparison keys, or information policy, so they stay inside the JSON
 issue's "don't prematurely normalize" constraint. See `VersusSeriesRow`, `VersusSeriesStateJson`,
 `VersusSeriesStore`.
 
+Issue #10 adds one more relational column: `client_request_id` (nullable `uuid`), the create
+idempotency key, unique together with `challenger_id`. It is metadata about *how* a series was
+created (a retry-safety concern), not business state, so it lives on the row rather than on the
+domain aggregate itself - `VersusSeries` has no concept of it.
+
 **Schema version is enforced on read, not decorative.** `VersusSeriesStore` reads
 `schemaVersion` from the JSONB document before committing to a full deserialize; any value other
 than the current version (`2`) throws `UnsupportedSeriesSchemaVersionException` rather than being
@@ -427,6 +502,12 @@ native `uuid` comparison (`LEAST`/`GREATEST`), which is not guaranteed to agree 
 rows - safe today only because no V2 environment has ever run with real data (see the migration's
 own comment for what to do before ever applying it against a populated database).
 
+A fourth migration, `AddSeriesCreateIdempotency`, adds `competitive_series.ClientRequestId`
+(nullable `uuid`) and its unique index over `(ChallengerId, ClientRequestId)` for issue #10's
+create-retry-safety - see [Remote challenge API](#remote-challenge-api-issue-10). Also additive;
+no backfill needed since a `NULL` key never collides with anything under Postgres's unique-index
+semantics.
+
 ## Shared competition domain
 
 The prompt driving the original V2 foundation work assumed a pure-C# Unity versus/correspondence
@@ -490,11 +571,13 @@ establish the architecture; adding them now would be scope creep against an unpr
    Its output (`v2/docs/competition-protocol/`) defines the required follow-up slices:
    ~~correspondence persistence (frozen rules, named metrics, information-policy projection)~~ -
    done (issue #9, see [Competition domain: `VersusSeries`](#competition-domain-versusseries) and
-   [Persistence](#persistence) above) - then the remote challenge API (issue #10: finalized
-   `CreateChallenge` DTO, Best-of-`{1,3,5,7}` subset enforcement, client-selectable information
-   policy, ruleset catalog administration, forfeit decision) and the remote attempt API (issue #11:
-   ordered/direction-aware comparison engine, `OpenTarget` issuance gating + partial reveal,
-   identical-vs-conflicting resubmission handling, multi-metric submission).
+   [Persistence](#persistence) above) - ~~remote challenge API (finalized `CreateChallenge`
+   contract, Best-of-`{1,3,5,7}` subset enforcement, create idempotency, completed-series list,
+   accept retry-safety)~~ - done (issue #10, see
+   [Remote challenge API](#remote-challenge-api-issue-10) above; ruleset catalog administration and
+   a mid-series forfeit command remain explicitly deferred, not silently dropped) - then the remote
+   attempt API (issue #11: ordered/direction-aware comparison engine, `OpenTarget` issuance gating
+   + partial reveal, identical-vs-conflicting resubmission handling, multi-metric submission).
 5. **Observability** - correlation/request IDs are not yet wired into `Level5.Api`'s middleware
    pipeline; add them alongside structured logging once there's a log aggregation target to send
    them to.

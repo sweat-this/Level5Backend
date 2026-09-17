@@ -37,3 +37,18 @@ public sealed class ListActiveSeriesUseCase(IVersusSeriesStore seriesStore)
         return [.. series.Select(ListIncomingChallengesUseCase.ToSummary)];
     }
 }
+
+/// <summary>
+/// Completed play history: series that reached <see cref="Domain.Competition.SeriesStatus.Completed"/>
+/// only. <see cref="Domain.Competition.SeriesStatus.Declined"/>/<see cref="Domain.Competition.SeriesStatus.Cancelled"/>
+/// series never played out and are deliberately excluded - issue #10 scopes "completed" to actual
+/// finished play, not every way a challenge can stop being pending.
+/// </summary>
+public sealed class ListCompletedSeriesUseCase(IVersusSeriesStore seriesStore)
+{
+    public async Task<IReadOnlyList<SeriesSummary>> ExecuteAsync(PlayerId actingPlayerId, CancellationToken cancellationToken)
+    {
+        var series = await seriesStore.ListCompletedSeriesAsync(actingPlayerId, cancellationToken);
+        return [.. series.Select(ListIncomingChallengesUseCase.ToSummary)];
+    }
+}

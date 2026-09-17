@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Level5.Api.Controllers;
 
-public sealed record CreateChallengeDto(Guid OpponentId, int TotalGames, string RulesetId, int? RulesetVersion = null);
+public sealed record CreateChallengeDto(
+    Guid OpponentId, int TotalGames, string RulesetId, int? RulesetVersion = null,
+    string? InformationPolicy = null, Guid? ClientRequestId = null);
 
 public sealed record ComparisonKeyDto(string Metric, string Direction);
 
@@ -43,6 +45,7 @@ public sealed class SeriesController(
     ListIncomingChallengesUseCase listIncoming,
     ListOutgoingChallengesUseCase listOutgoing,
     ListActiveSeriesUseCase listActive,
+    ListCompletedSeriesUseCase listCompleted,
     StartAttemptUseCase startAttempt,
     CompleteAttemptUseCase completeAttempt,
     ICurrentPlayerProvider currentPlayer) : ControllerBase
@@ -52,7 +55,10 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var view = await createChallenge.ExecuteAsync(
-            new CreateChallengeRequest(me, new PlayerId(request.OpponentId), request.RulesetId, request.RulesetVersion, request.TotalGames), cancellationToken);
+            new CreateChallengeRequest(
+                me, new PlayerId(request.OpponentId), request.RulesetId, request.RulesetVersion, request.TotalGames,
+                request.InformationPolicy, request.ClientRequestId),
+            cancellationToken);
 
         return Ok(ToDto(view));
     }
@@ -86,6 +92,14 @@ public sealed class SeriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var series = await listActive.ExecuteAsync(me, cancellationToken);
+        return Ok(series.Select(ToDto));
+    }
+
+    [HttpGet("completed")]
+    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListCompleted(CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var series = await listCompleted.ExecuteAsync(me, cancellationToken);
         return Ok(series.Select(ToDto));
     }
 
