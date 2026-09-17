@@ -1,4 +1,5 @@
 using Level5.Application.Abstractions;
+using Level5.Application.Observability;
 using Level5.Domain.Identity;
 using Level5.Domain.Ids;
 
@@ -35,20 +36,30 @@ public sealed class RefreshSessionUseCase(
     public async Task<RefreshSessionResult> ExecuteAsync(RefreshSessionRequest request, CancellationToken cancellationToken)
     {
         var hash = refreshTokenGenerator.Hash(request.RefreshToken);
-        var session = await authSessionStore.FindByRefreshTokenHashAsync(hash, cancellationToken)
-            ?? throw new InvalidRefreshTokenException();
+        var session = await authSessionStore.FindByRefreshTokenHashAsync(hash, cancellationToken);
+        if (session is null)
+        {
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "unknown");
+            throw new InvalidRefreshTokenException();
+        }
 
         var now = clock.UtcNow;
         if (!session.CanRefresh(now))
         {
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, session.RevokedAt is not null ? "revoked" : "expired");
             throw new InvalidRefreshTokenException();
         }
 
-        var account = await accountStore.FindByIdAsync(session.AccountId, cancellationToken)
-            ?? throw new InvalidRefreshTokenException();
+        var account = await accountStore.FindByIdAsync(session.AccountId, cancellationToken);
+        if (account is null)
+        {
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "unknown");
+            throw new InvalidRefreshTokenException();
+        }
 
         if (account.Status != AccountStatus.Active)
         {
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "account_inactive");
             throw new InvalidRefreshTokenException();
         }
 
@@ -65,8 +76,11 @@ public sealed class RefreshSessionUseCase(
             // Someone else already rotated or revoked this exact session between our lookup and
             // our write - the credential we were just handed is no longer current, which is
             // exactly the replay case this method exists to reject, not a generic conflict.
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "replay_conflict");
             throw new InvalidRefreshTokenException();
         }
+
+        ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "success");
 
         var accessToken = tokenIssuer.IssueAccessToken(account.Id);
         return new RefreshSessionResult(account.Id, profile.Id, accessToken, newRefreshToken.RawValue, session.ExpiresAt);

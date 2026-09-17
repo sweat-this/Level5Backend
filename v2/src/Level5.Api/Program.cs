@@ -1,6 +1,7 @@
 using System.Text;
 using Level5.Api.ErrorHandling;
 using Level5.Api.Security;
+using Level5.Api.Telemetry;
 using Level5.Application.Competition;
 using Level5.Application.Identity;
 using Level5.Application.Players;
@@ -66,6 +67,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 builder.Services.AddLevel5Infrastructure(builder.Configuration);
+builder.Services.AddLevel5Telemetry(builder.Configuration);
 
 // Use cases - thin, stateless, one per operation. Registered here (the composition root)
 // rather than via a DI extension inside Application, so Application stays free of any
