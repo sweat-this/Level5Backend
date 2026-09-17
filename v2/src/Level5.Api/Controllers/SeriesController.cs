@@ -31,6 +31,13 @@ public sealed record SeriesSummaryDto(
     Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision, DateTimeOffset CreatedAt);
 
 /// <summary>
+/// The bounded-pagination envelope every correspondence list endpoint returns (issue #21) -
+/// <see cref="NextCursor"/> is <c>null</c> once the caller has reached the end of the result set,
+/// and must be passed back verbatim (never parsed) as the next request's <c>cursor</c>.
+/// </summary>
+public sealed record SeriesSummaryPageDto(IReadOnlyList<SeriesSummaryDto> Items, int Limit, string? NextCursor);
+
+/// <summary>
 /// The Protocol V1 named-metric result payload (Competition Protocol V1 section 10). Metric keys
 /// must be one of the stable <see cref="ResultMetric"/> names, never a positional index - an
 /// unrecognized key is a 400, not a silently ignored field.
@@ -119,35 +126,35 @@ public sealed class SeriesQueriesController(
     }
 
     [HttpGet("incoming")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListIncoming(CancellationToken cancellationToken)
+    public async Task<ActionResult<SeriesSummaryPageDto>> ListIncoming(int? limit, string? cursor, CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listIncoming.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(SeriesDtoMapper.ToDto));
+        var page = await listIncoming.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
     }
 
     [HttpGet("outgoing")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListOutgoing(CancellationToken cancellationToken)
+    public async Task<ActionResult<SeriesSummaryPageDto>> ListOutgoing(int? limit, string? cursor, CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listOutgoing.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(SeriesDtoMapper.ToDto));
+        var page = await listOutgoing.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
     }
 
     [HttpGet("active")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListActive(CancellationToken cancellationToken)
+    public async Task<ActionResult<SeriesSummaryPageDto>> ListActive(int? limit, string? cursor, CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listActive.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(SeriesDtoMapper.ToDto));
+        var page = await listActive.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
     }
 
     [HttpGet("completed")]
-    public async Task<ActionResult<IReadOnlyList<SeriesSummaryDto>>> ListCompleted(CancellationToken cancellationToken)
+    public async Task<ActionResult<SeriesSummaryPageDto>> ListCompleted(int? limit, string? cursor, CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var series = await listCompleted.ExecuteAsync(me, cancellationToken);
-        return Ok(series.Select(SeriesDtoMapper.ToDto));
+        var page = await listCompleted.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
     }
 }
 
@@ -234,6 +241,9 @@ internal static class SeriesDtoMapper
     public static SeriesSummaryDto ToDto(SeriesSummary summary) => new(
         summary.Id.Value, summary.ChallengerId.Value, summary.OpponentId.Value, summary.Status.ToString(),
         summary.CurrentGameNumber, summary.TotalGames, summary.Revision, summary.CreatedAt);
+
+    public static SeriesSummaryPageDto ToDto(PagedResult<SeriesSummary> page, int resolvedLimit) => new(
+        [.. page.Items.Select(ToDto)], resolvedLimit, page.NextCursor);
 
     public static AttemptDescriptorDto ToDto(AttemptDescriptor descriptor) => new(
         descriptor.SeriesId.Value, descriptor.AttemptId.Value, descriptor.GameNumber, descriptor.PlayerId.Value,

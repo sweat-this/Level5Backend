@@ -354,7 +354,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         Assert.Equal(firstId, retriedId);
 
-        var outgoing = await GetArrayAsync(alice, "/api/v2/series/outgoing");
+        var outgoing = await GetPageItemsAsync(alice, "/api/v2/series/outgoing");
         Assert.Single(outgoing.EnumerateArray(), s => s.GetProperty("id").GetGuid() == firstId);
     }
 
@@ -481,16 +481,16 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         await CompleteAttemptAsync(alice, completedSeriesId, 1, completedAliceAttempt, 90);
         await CompleteAttemptAsync(bob, completedSeriesId, 1, completedBobAttempt, 10);
 
-        var bobIncoming = await GetArrayAsync(bob, "/api/v2/series/incoming");
+        var bobIncoming = await GetPageItemsAsync(bob, "/api/v2/series/incoming");
         Assert.Contains(bobIncoming.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
 
-        var aliceOutgoing = await GetArrayAsync(alice, "/api/v2/series/outgoing");
+        var aliceOutgoing = await GetPageItemsAsync(alice, "/api/v2/series/outgoing");
         Assert.Contains(aliceOutgoing.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
 
-        var aliceActive = await GetArrayAsync(alice, "/api/v2/series/active");
+        var aliceActive = await GetPageItemsAsync(alice, "/api/v2/series/active");
         Assert.Contains(aliceActive.EnumerateArray(), s => s.GetProperty("id").GetGuid() == activeSeriesId);
 
-        var bobCompleted = await GetArrayAsync(bob, "/api/v2/series/completed");
+        var bobCompleted = await GetPageItemsAsync(bob, "/api/v2/series/completed");
         Assert.Contains(bobCompleted.EnumerateArray(), s => s.GetProperty("id").GetGuid() == completedSeriesId);
         Assert.DoesNotContain(bobCompleted.EnumerateArray(), s => s.GetProperty("id").GetGuid() == activeSeriesId);
 
@@ -501,7 +501,7 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         foreach (var route in new[] { "incoming", "outgoing", "active", "completed" })
         {
-            var outsiderView = await GetArrayAsync(outsider, $"/api/v2/series/{route}");
+            var outsiderView = await GetPageItemsAsync(outsider, $"/api/v2/series/{route}");
             Assert.DoesNotContain(outsiderView.EnumerateArray(), s =>
                 s.GetProperty("id").GetGuid() == incomingSeriesId ||
                 s.GetProperty("id").GetGuid() == activeSeriesId ||
@@ -509,10 +509,77 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         }
     }
 
-    private static async Task<JsonElement> GetArrayAsync(RegisteredPlayer player, string path)
+    [Fact]
+    public async Task Correspondence_list_pagination_is_bounded_and_covers_every_row_with_no_duplicates_through_http()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AlicePage");
+        var bob = await factory.RegisterNewPlayerAsync("BobPage");
+        await BefriendAsync(alice, bob);
+
+        var expectedIds = new List<Guid>();
+        for (var i = 0; i < 5; i++)
+        {
+            expectedIds.Add(await CreateSeriesAsync(alice, bob, totalGames: 3));
+        }
+
+        var firstPageResponse = await alice.Client.GetAsync("/api/v2/series/outgoing?limit=2");
+        Assert.Equal(HttpStatusCode.OK, firstPageResponse.StatusCode);
+        var firstPage = await firstPageResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(2, firstPage.GetProperty("items").GetArrayLength());
+        Assert.Equal(2, firstPage.GetProperty("limit").GetInt32());
+        var firstCursor = firstPage.GetProperty("nextCursor").GetString();
+        Assert.NotNull(firstCursor);
+
+        var collectedIds = new List<Guid>(firstPage.GetProperty("items").EnumerateArray().Select(s => s.GetProperty("id").GetGuid()));
+        var cursor = firstCursor;
+        while (cursor is not null)
+        {
+            var response = await alice.Client.GetAsync($"/api/v2/series/outgoing?limit=2&cursor={Uri.EscapeDataString(cursor)}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+            collectedIds.AddRange(page.GetProperty("items").EnumerateArray().Select(s => s.GetProperty("id").GetGuid()));
+            cursor = page.TryGetProperty("nextCursor", out var next) && next.ValueKind == JsonValueKind.String ? next.GetString() : null;
+        }
+
+        Assert.Equal(expectedIds.Count, collectedIds.Distinct().Count());
+        Assert.Equal(expectedIds.OrderBy(id => id), collectedIds.OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task A_malformed_pagination_cursor_is_rejected_through_http()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceBadCursor");
+
+        var response = await alice.Client.GetAsync("/api/v2/series/outgoing?cursor=not-a-real-cursor");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_cursor_from_a_different_list_endpoint_is_rejected_through_http()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceScopeMismatch");
+        var bob = await factory.RegisterNewPlayerAsync("BobScopeMismatch");
+        await BefriendAsync(alice, bob);
+        await CreateSeriesAsync(alice, bob, totalGames: 3);
+        await CreateSeriesAsync(alice, bob, totalGames: 3);
+
+        var outgoingResponse = await alice.Client.GetAsync("/api/v2/series/outgoing?limit=1");
+        var outgoingPage = await outgoingResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var outgoingCursor = outgoingPage.GetProperty("nextCursor").GetString();
+        Assert.NotNull(outgoingCursor);
+
+        // A cursor issued by /outgoing must not be silently reinterpreted by /active.
+        var activeResponse = await alice.Client.GetAsync($"/api/v2/series/active?cursor={Uri.EscapeDataString(outgoingCursor)}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, activeResponse.StatusCode);
+    }
+
+    private static async Task<JsonElement> GetPageItemsAsync(RegisteredPlayer player, string path)
     {
         var response = await player.Client.GetAsync(path);
-        return await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        return page.GetProperty("items");
     }
 
     /// <summary>True if <paramref name="value"/> appears as a number (or a whole string) anywhere in the payload.</summary>

@@ -1,3 +1,5 @@
+using Level5.Application.Common;
+using Level5.Application.Competition;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 
@@ -27,13 +29,26 @@ public interface IVersusSeriesStore
     /// </summary>
     Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<VersusSeries>> ListIncomingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Projects directly from relational <c>competitive_series</c> columns - never deserializes
+    /// <c>state_json</c> or reconstructs a <see cref="VersusSeries"/> aggregate (issue #21), so a
+    /// malformed or unsupported-schema-version document on an unrelated row cannot fail this
+    /// player's whole list. <paramref name="cursor"/> is the opaque token from a previous page's
+    /// <see cref="PagedResult{T}.NextCursor"/>, or <c>null</c> for the first page; an invalid
+    /// cursor is rejected with <see cref="Level5.Application.Common.ValidationFailedException"/>.
+    /// <paramref name="limit"/> is resolved against <see cref="SeriesListPaging"/> bounds
+    /// (a null/non-positive value defaults, anything above the max is clamped to it).
+    /// </summary>
+    Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<VersusSeries>> ListOutgoingChallengesAsync(PlayerId playerId, CancellationToken cancellationToken);
+    /// <summary>See <see cref="ListIncomingChallengeSummariesAsync"/> - same projection/pagination contract, scoped to the challenger's own pending outgoing challenges.</summary>
+    Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<VersusSeries>> ListActiveSeriesAsync(PlayerId playerId, CancellationToken cancellationToken);
+    /// <summary>See <see cref="ListIncomingChallengeSummariesAsync"/> - same projection/pagination contract, scoped to active series either participant is in.</summary>
+    Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<VersusSeries>> ListCompletedSeriesAsync(PlayerId playerId, CancellationToken cancellationToken);
+    /// <summary>See <see cref="ListIncomingChallengeSummariesAsync"/> - same projection/pagination contract, scoped to completed series either participant is in, ordered by completion time.</summary>
+    Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
 
     /// <summary>
     /// Persists a mutated series iff the stored revision still equals

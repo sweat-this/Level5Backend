@@ -1,5 +1,8 @@
+using System.Text.Json;
 using Level5.Application.Common;
+using Level5.Application.Competition;
 using Level5.Domain.Competition;
+using Level5.Domain.Ids;
 using Level5.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -216,7 +219,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task ListIncomingChallengesAsync_only_returns_pending_challenges_for_the_opponent()
+    public async Task ListIncomingChallengeSummariesAsync_only_returns_pending_challenges_for_the_opponent()
     {
         await using var db = fixture.CreateDbContext();
         var challenger = await PlayerSeeding.CreatePlayerAsync(db, "Challenger", Now);
@@ -230,14 +233,14 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         await store.AddAsync(pending, clientRequestId: null, CancellationToken.None);
         await store.AddAsync(forSomeoneElse, clientRequestId: null, CancellationToken.None);
 
-        var incoming = await store.ListIncomingChallengesAsync(opponent, CancellationToken.None);
+        var incoming = await store.ListIncomingChallengeSummariesAsync(opponent, limit: null, cursor: null, CancellationToken.None);
 
-        var result = Assert.Single(incoming);
+        var result = Assert.Single(incoming.Items);
         Assert.Equal(pending.Id, result.Id);
     }
 
     [Fact]
-    public async Task ListCompletedSeriesAsync_only_returns_completed_series_for_a_participant()
+    public async Task ListCompletedSeriesSummariesAsync_only_returns_completed_series_for_a_participant()
     {
         await using var db = fixture.CreateDbContext();
         var challenger = await PlayerSeeding.CreatePlayerAsync(db, "Challenger", Now);
@@ -267,8 +270,8 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         await store.AddAsync(declined, clientRequestId: null, CancellationToken.None);
         await store.AddAsync(forSomeoneElse, clientRequestId: null, CancellationToken.None);
 
-        var opponentCompleted = await store.ListCompletedSeriesAsync(opponent, CancellationToken.None);
-        var result = Assert.Single(opponentCompleted);
+        var opponentCompleted = await store.ListCompletedSeriesSummariesAsync(opponent, limit: null, cursor: null, CancellationToken.None);
+        var result = Assert.Single(opponentCompleted.Items);
         Assert.Equal(completed.Id, result.Id);
     }
 
@@ -310,5 +313,198 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         Assert.NotNull(foundForChallengerA);
         Assert.Equal(seriesA.Id, foundForChallengerA.Id);
         Assert.Null(foundForChallengerB);
+    }
+
+    [Fact]
+    public async Task A_malformed_state_json_row_does_not_break_summary_listing_but_still_fails_detail_read()
+    {
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "MalformedChallenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "MalformedOpponent", Now);
+        var healthy = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        var malformed = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(1));
+
+        var store = new VersusSeriesStore(writeDb);
+        await store.AddAsync(healthy, clientRequestId: null, CancellationToken.None);
+        await store.AddAsync(malformed, clientRequestId: null, CancellationToken.None);
+
+        // jsonb enforces syntactically valid JSON, so "malformed" here means structurally invalid
+        // for the current schema, not unparseable text - "Rules" is a required member
+        // VersusSeriesStateJson cannot deserialize without.
+        const string malformedStateJson = """{"SchemaVersion":2}""";
+        await writeDb.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE competitive_series SET "StateJson" = {malformedStateJson}::jsonb WHERE "Id" = {malformed.Id.Value}""");
+
+        await using var readDb = fixture.CreateDbContext();
+        var readStore = new VersusSeriesStore(readDb);
+
+        var outgoing = await readStore.ListOutgoingChallengeSummariesAsync(challenger, limit: null, cursor: null, CancellationToken.None);
+        Assert.Equal(2, outgoing.Items.Count);
+        Assert.Contains(outgoing.Items, s => s.Id == healthy.Id);
+        Assert.Contains(outgoing.Items, s => s.Id == malformed.Id);
+
+        await Assert.ThrowsAsync<JsonException>(() => readStore.FindByIdAsync(malformed.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task An_unsupported_schema_version_row_does_not_break_summary_listing()
+    {
+        await using var writeDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(writeDb, "UnsupportedChallenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(writeDb, "UnsupportedOpponent", Now);
+        var healthy = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        var legacy = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(1));
+
+        var store = new VersusSeriesStore(writeDb);
+        await store.AddAsync(healthy, clientRequestId: null, CancellationToken.None);
+        await store.AddAsync(legacy, clientRequestId: null, CancellationToken.None);
+
+        const string legacyStateJson = """{"SchemaVersion":1,"Rounds":[]}""";
+        await writeDb.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE competitive_series SET "StateJson" = {legacyStateJson}::jsonb WHERE "Id" = {legacy.Id.Value}""");
+
+        await using var readDb = fixture.CreateDbContext();
+        var readStore = new VersusSeriesStore(readDb);
+
+        var outgoing = await readStore.ListOutgoingChallengeSummariesAsync(challenger, limit: null, cursor: null, CancellationToken.None);
+        Assert.Equal(2, outgoing.Items.Count);
+        Assert.Contains(outgoing.Items, s => s.Id == healthy.Id);
+        Assert.Contains(outgoing.Items, s => s.Id == legacy.Id);
+
+        await Assert.ThrowsAsync<UnsupportedSeriesSchemaVersionException>(() => readStore.FindByIdAsync(legacy.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ListActiveSeriesSummariesAsync_orders_deterministically_by_CreatedAt_then_Id_descending()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "OrderA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "OrderB", Now);
+        var store = new VersusSeriesStore(db);
+
+        var created = new List<VersusSeries>();
+        for (var i = 0; i < 4; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(i));
+            series.Accept(b, Now.AddSeconds(i));
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            created.Add(series);
+        }
+
+        var page = await store.ListActiveSeriesSummariesAsync(a, limit: null, cursor: null, CancellationToken.None);
+
+        var expectedOrder = created.OrderByDescending(s => s.CreatedAt).Select(s => s.Id).ToList();
+        Assert.Equal(expectedOrder, page.Items.Select(i => i.Id).ToList());
+    }
+
+    [Fact]
+    public async Task ListActiveSeriesSummariesAsync_defaults_to_a_bounded_page_when_no_limit_is_supplied()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "DefaultPageA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "DefaultPageB", Now);
+        var store = new VersusSeriesStore(db);
+
+        for (var i = 0; i < SeriesListPaging.DefaultLimit + 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(i));
+            series.Accept(b, Now.AddSeconds(i));
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+        }
+
+        var page = await store.ListActiveSeriesSummariesAsync(a, limit: null, cursor: null, CancellationToken.None);
+
+        Assert.Equal(SeriesListPaging.DefaultLimit, page.Items.Count);
+        Assert.NotNull(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task ListActiveSeriesSummariesAsync_clamps_a_requested_limit_above_the_maximum()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "MaxPageA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "MaxPageB", Now);
+        var store = new VersusSeriesStore(db);
+
+        for (var i = 0; i < SeriesListPaging.MaxLimit + 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(i));
+            series.Accept(b, Now.AddSeconds(i));
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+        }
+
+        var page = await store.ListActiveSeriesSummariesAsync(a, limit: 1000, cursor: null, CancellationToken.None);
+
+        Assert.Equal(SeriesListPaging.MaxLimit, page.Items.Count);
+        Assert.NotNull(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task Paginating_through_every_page_returns_each_row_exactly_once_with_no_gaps_or_duplicates()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "PageBoundaryA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "PageBoundaryB", Now);
+        var store = new VersusSeriesStore(db);
+
+        const int total = 25;
+        var expectedIds = new List<VersusSeriesId>();
+        for (var i = 0; i < total; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(i));
+            series.Accept(b, Now.AddSeconds(i));
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            expectedIds.Add(series.Id);
+        }
+
+        var collected = new List<VersusSeriesId>();
+        var pageSizes = new List<int>();
+        string? cursor = null;
+        do
+        {
+            var page = await store.ListActiveSeriesSummariesAsync(a, limit: 10, cursor, CancellationToken.None);
+            pageSizes.Add(page.Items.Count);
+            collected.AddRange(page.Items.Select(i => i.Id));
+            cursor = page.NextCursor;
+        } while (cursor is not null);
+
+        Assert.Equal(new[] { 10, 10, 5 }, pageSizes);
+        Assert.Equal(expectedIds.Count, collected.Distinct().Count());
+        Assert.Equal(expectedIds.OrderBy(id => id.Value), collected.OrderBy(id => id.Value));
+    }
+
+    [Fact]
+    public async Task An_invalid_pagination_cursor_is_rejected_with_a_validation_error()
+    {
+        await using var db = fixture.CreateDbContext();
+        var player = await PlayerSeeding.CreatePlayerAsync(db, "InvalidCursorPlayer", Now);
+        var store = new VersusSeriesStore(db);
+
+        await Assert.ThrowsAsync<ValidationFailedException>(
+            () => store.ListActiveSeriesSummariesAsync(player, limit: null, cursor: "not-a-real-cursor", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_cursor_issued_by_one_list_query_is_rejected_by_a_different_one()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "ScopeMismatchA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "ScopeMismatchB", Now);
+        var store = new VersusSeriesStore(db);
+
+        for (var i = 0; i < 2; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(i));
+            series.Accept(b, Now.AddSeconds(i));
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+        }
+
+        var activeFirstPage = await store.ListActiveSeriesSummariesAsync(a, limit: 1, cursor: null, CancellationToken.None);
+        Assert.NotNull(activeFirstPage.NextCursor);
+
+        // A well-formed cursor from ListActiveSeriesSummariesAsync must not be silently accepted
+        // by ListOutgoingChallengeSummariesAsync - each list query's cursor is scoped to that query.
+        await Assert.ThrowsAsync<ValidationFailedException>(
+            () => store.ListOutgoingChallengeSummariesAsync(a, limit: 1, activeFirstPage.NextCursor, CancellationToken.None));
     }
 }
