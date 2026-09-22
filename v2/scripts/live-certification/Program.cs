@@ -19,6 +19,7 @@ using System.Threading.Tasks;
 
 string baseUri = "https://localhost:7029/";
 string statePath = Path.Combine(Path.GetTempPath(), "level5_backendv2_live_cert_state.json");
+string unityCounterpartStatePath = Path.Combine(Path.GetTempPath(), "level5_unity_live_cert_b_state.json");
 var jsonOpts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
 string phase = args.Length > 0 ? args[0] : "phase1";
@@ -184,9 +185,31 @@ try
     {
         await Phase2();
     }
+    else if (phase == "unity-counterpart")
+    {
+        string subAction = args.Length > 1 ? args[1] : "";
+        if (subAction == "friend")
+        {
+            if (args.Length < 3)
+            {
+                Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart friend <tagOfUnityDrivenAccount>");
+                Environment.Exit(1);
+            }
+            await UnityCounterpartFriend(args[2]);
+        }
+        else if (subAction == "challenge")
+        {
+            await UnityCounterpartChallenge();
+        }
+        else
+        {
+            Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart [friend <tag>|challenge]");
+            Environment.Exit(1);
+        }
+    }
     else
     {
-        Console.Error.WriteLine("Usage: dotnet run -- [phase1|phase2]");
+        Console.Error.WriteLine("Usage: dotnet run -- [phase1|phase2|unity-counterpart ...]");
         Environment.Exit(1);
     }
 
@@ -533,6 +556,112 @@ async Task RunPhase2(
         "accounts use fully independent HttpClients, sharing only the live server as their source of truth).");
 
     Log("=== Phase 2 complete ===");
+}
+
+// ---------------------------------------------------------------------
+// Unity-driven Account A counterpart (issue #159 Unity-client-side certification slice, see
+// docs/backend-v2-correspondence-certification.md). This plays "Account B" via the same real
+// backend contract as phase1/phase2 above, but timed to act as the second human player opposite a
+// live Unity Editor session driving Account A for real (BackendV2LiveCertificationRunner in the
+// level5 repo, Assets/Level5/Editor/). Run as two separate steps because the challenge step
+// requires the friendship Unity/Account A accepted in between to already be Accepted server-side:
+//   dotnet run -- unity-counterpart friend <tagOfUnityAccountA>
+//   <Unity accepts the friend request live>
+//   dotnet run -- unity-counterpart challenge
+//   <Unity accepts the challenge and plays its turn live>
+// ---------------------------------------------------------------------
+async Task UnityCounterpartFriend(string tagA)
+{
+    string suffix = Guid.NewGuid().ToString("N").Substring(0, 10);
+    string usernameB = "unityCertB" + suffix;
+    const string password = "CertPass123!";
+    string displayNameB = "Unity Cert Account B " + suffix;
+
+    Log($"=== unity-counterpart friend start === usernameB={usernameB} tagOfUnityAccountA={tagA}");
+
+    using HttpClient httpB = NewClient();
+    Account b = await Register(httpB, usernameB, password, displayNameB);
+    await DiscoverTag(httpB, b);
+    Record("unityCounterpart.playerIdB", b.PlayerId);
+    Record("unityCounterpart.tagB", b.Tag!);
+
+    var resolveA = await SendAsync(httpB, HttpMethod.Get, $"api/v2/players/by-tag/{Uri.EscapeDataString(tagA)}", null, b.AccessToken);
+    Log($"UnityCert.ResolveUnityAccountAByTag: {Describe(resolveA)}");
+    Expect(resolveA.status == 200, $"ResolveUnityAccountAByTag expected 200, got {Describe(resolveA)}");
+    Guid playerIdA = resolveA.doc!.Value.GetProperty("playerId").GetGuid();
+    Record("unityCounterpart.playerIdA", playerIdA);
+
+    var sendReq = await SendAsync(httpB, HttpMethod.Post, "api/v2/friends/requests", new { toPlayerId = playerIdA }, b.AccessToken);
+    Log($"UnityCert.SendFriendRequestToUnityAccountA: {Describe(sendReq)}");
+    Expect(sendReq.status == 200, $"SendFriendRequestToUnityAccountA expected 200, got {Describe(sendReq)}");
+    Guid friendRequestId = sendReq.doc!.Value.GetProperty("id").GetGuid();
+    Record("unityCounterpart.friendRequestId", friendRequestId);
+
+    var state = new { usernameB, password, displayNameB, playerIdB = b.PlayerId, tagB = b.Tag, playerIdA, tagA, friendRequestId };
+    File.WriteAllText(unityCounterpartStatePath, JsonSerializer.Serialize(state, jsonOpts));
+    Log($"=== unity-counterpart friend complete === friend request sent live to the Unity-driven account; state written to {unityCounterpartStatePath}");
+}
+
+async Task UnityCounterpartChallenge()
+{
+    if (!File.Exists(unityCounterpartStatePath))
+    {
+        throw new InvalidOperationException(
+            $"unity-counterpart friend state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' first");
+    }
+
+    // The state file carries a plaintext password for a live (if throwaway) backend account - same
+    // rule Phase2() already follows for its own state file - never leave it behind, whether this
+    // step succeeds or an assertion/exception aborts it partway through. Nothing downstream of this
+    // command reads unityCounterpartStatePath again.
+    try
+    {
+        await RunUnityCounterpartChallenge();
+    }
+    finally
+    {
+        if (File.Exists(unityCounterpartStatePath))
+        {
+            File.Delete(unityCounterpartStatePath);
+        }
+    }
+}
+
+async Task RunUnityCounterpartChallenge()
+{
+    string usernameB, password, displayNameB;
+    Guid playerIdB, playerIdA;
+    using (JsonDocument stateDoc = JsonDocument.Parse(File.ReadAllText(unityCounterpartStatePath)))
+    {
+        JsonElement state = stateDoc.RootElement;
+        usernameB = state.GetProperty("usernameB").GetString()!;
+        password = state.GetProperty("password").GetString()!;
+        displayNameB = state.GetProperty("displayNameB").GetString()!;
+        playerIdB = state.GetProperty("playerIdB").GetGuid();
+        playerIdA = state.GetProperty("playerIdA").GetGuid();
+    }
+
+    Log($"=== unity-counterpart challenge start === usernameB={usernameB} unityAccountAPlayerId={playerIdA}");
+    using HttpClient httpB = NewClient();
+    Account b = await Login(httpB, usernameB, password, displayNameB, playerIdB);
+
+    // Confirm the Unity-driven account has already accepted the friend request live before trying
+    // to challenge it - a clear failure here means the Unity Accept step has not run yet (or failed).
+    var friendsB = await SendAsync(httpB, HttpMethod.Get, "api/v2/friends", null, b.AccessToken);
+    Expect(friendsB.status == 200, $"ListFriendsOnB expected 200, got {Describe(friendsB)}");
+    Expect(friendsB.doc!.Value.EnumerateArray().Any(x => x.GetProperty("playerId").GetGuid() == playerIdA),
+        "the Unity-driven account must already be an accepted friend before a challenge can be created - " +
+        "has the live Unity Accept-friend-request step run yet?");
+
+    Guid clientRequestId = Guid.NewGuid();
+    object createBody = new { opponentId = playerIdA, totalGames = 3, rulesetId = "score-only", clientRequestId };
+    var createResult = await SendAsync(httpB, HttpMethod.Post, "api/v2/series", createBody, b.AccessToken);
+    Log($"UnityCert.CreateChallengeToUnityAccountA: {Describe(createResult)}");
+    Expect(createResult.status == 200, $"CreateChallengeToUnityAccountA expected 200, got {Describe(createResult)}");
+    Guid seriesId = createResult.doc!.Value.GetProperty("id").GetGuid();
+    Record("unityCounterpart.seriesId", seriesId);
+
+    Log($"=== unity-counterpart challenge complete === seriesId={seriesId} sent live to the Unity-driven account");
 }
 
 sealed class Account
