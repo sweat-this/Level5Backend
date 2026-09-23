@@ -51,6 +51,10 @@ public sealed class MatchResult
             throw new InvalidMatchResultException("A clientResultId is required to submit a match result.");
         }
 
+        // modeId/levelId must be positive: Unity's GameModeId.None sentinel is 0, meaning "no mode
+        // resolved yet" - a submission carrying it means the client never resolved a real mode, so
+        // it is rejected rather than persisted as a result for a non-existent mode. Authored level
+        // ids start at 1.
         return new MatchResult(
             MatchResultId.New(), playerId, clientResultId,
             RequirePositive(modeId, "modeId"), RequirePositive(levelId, "levelId"),

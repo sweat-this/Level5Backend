@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Level5.Application.Leaderboards;
 using Xunit;
 
 namespace Level5.Api.IntegrationTests;
@@ -18,11 +19,25 @@ public sealed class LeaderboardsFlowTests(ApiFactory factory)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
+    // Only the caller-specified metric carries the ranking value; every other recognized metric is
+    // set to a decoy value far outside any value a test asserts on. That lets this one helper submit
+    // a rankable result to any board-backed mode without callers needing to think about which other
+    // metric names exist, while still failing loudly if the leaderboard query ever reads the wrong
+    // metric key - a wrong-key read would surface the decoy, not a value that happens to coincide.
+    private const double DecoyMetricValue = 999_999;
+
+    private static readonly string[] AllMetricNames =
+    [
+        "TotalPoints", "ShotsMade", "TotalDistance", "CompletionTimeSeconds", "LongestStreak", "EnemiesKilled"
+    ];
+
     private static async Task SubmitAsync(
-        RegisteredPlayer player, int modeId, double totalPoints,
+        RegisteredPlayer player, int modeId, double totalPoints, string metric = "TotalPoints",
         bool hardcore = false, bool traffic = false, bool enemies = false, bool sniper = false,
         string characterId = "hero", int levelId = 1)
     {
+        var metrics = AllMetricNames.ToDictionary(name => name, name => name == metric ? totalPoints : DecoyMetricValue);
+
         var response = await player.Client.PostAsJsonAsync("/api/v2/match-results", new
         {
             clientResultId = Guid.NewGuid(),
@@ -31,7 +46,7 @@ public sealed class LeaderboardsFlowTests(ApiFactory factory)
             characterId,
             clientVersion = "1.0.0",
             platform = "ios",
-            metrics = new Dictionary<string, double> { ["TotalPoints"] = totalPoints },
+            metrics,
             modifiers = new { hardcore, trafficEnabled = traffic, enemiesEnabled = enemies, sniperEnabled = sniper }
         });
         response.EnsureSuccessStatusCode();
@@ -141,6 +156,121 @@ public sealed class LeaderboardsFlowTests(ApiFactory factory)
 
         var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         Assert.Equal(2, page.GetProperty("items").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task The_traffic_filter_matches_exactly()
+    {
+        const int modeId = 2; // ShotsMade board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBTrafficAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 10, metric: "ShotsMade", traffic: true);
+        await SubmitAsync(alice, modeId, totalPoints: 20, metric: "ShotsMade", traffic: false);
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}?traffic=true");
+
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var values = page.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("value").GetDouble()).ToList();
+        Assert.Equal([10], values);
+    }
+
+    [Fact]
+    public async Task The_enemies_filter_matches_exactly()
+    {
+        const int modeId = 3; // ShotsMade board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBEnemiesAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 10, metric: "ShotsMade", enemies: true);
+        await SubmitAsync(alice, modeId, totalPoints: 20, metric: "ShotsMade", enemies: false);
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}?enemies=true");
+
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var values = page.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("value").GetDouble()).ToList();
+        Assert.Equal([10], values);
+    }
+
+    [Fact]
+    public async Task The_sniper_filter_matches_exactly()
+    {
+        const int modeId = 4; // ShotsMade board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBSniperAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 10, metric: "ShotsMade", sniper: true);
+        await SubmitAsync(alice, modeId, totalPoints: 20, metric: "ShotsMade", sniper: false);
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}?sniper=true");
+
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var values = page.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("value").GetDouble()).ToList();
+        Assert.Equal([10], values);
+    }
+
+    [Fact]
+    public async Task The_board_ranks_ascending_when_the_policy_direction_is_lower_wins_through_http()
+    {
+        const int modeId = 7; // CompletionTimeSeconds / LowerWins, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBLowerWinsAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 90, metric: "CompletionTimeSeconds");
+        await SubmitAsync(alice, modeId, totalPoints: 10, metric: "CompletionTimeSeconds");
+        await SubmitAsync(alice, modeId, totalPoints: 50, metric: "CompletionTimeSeconds");
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("CompletionTimeSeconds", page.GetProperty("metric").GetString());
+        Assert.Equal("LowerWins", page.GetProperty("direction").GetString());
+        var values = page.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("value").GetDouble()).ToList();
+        Assert.Equal([10, 50, 90], values);
+    }
+
+    [Fact]
+    public async Task The_terminal_page_has_no_next_cursor_through_http()
+    {
+        const int modeId = 9; // CompletionTimeSeconds board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBTerminalAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 1, metric: "CompletionTimeSeconds");
+        await SubmitAsync(alice, modeId, totalPoints: 2, metric: "CompletionTimeSeconds");
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}?limit=5");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(2, page.GetProperty("items").GetArrayLength());
+        var hasStringCursor = page.TryGetProperty("nextCursor", out var nextCursor) && nextCursor.ValueKind == JsonValueKind.String;
+        Assert.False(hasStringCursor);
+    }
+
+    [Fact]
+    public async Task Omitting_limit_defaults_to_the_bounded_default_page_size_through_http()
+    {
+        const int modeId = 14; // LongestStreak board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBDefaultLimitAlice");
+        for (var i = 0; i < LeaderboardPaging.DefaultLimit + 1; i++)
+        {
+            await SubmitAsync(alice, modeId, totalPoints: i, metric: "LongestStreak");
+        }
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(LeaderboardPaging.DefaultLimit, page.GetProperty("limit").GetInt32());
+        Assert.Equal(LeaderboardPaging.DefaultLimit, page.GetProperty("items").GetArrayLength());
+        var hasStringCursor = page.TryGetProperty("nextCursor", out var nextCursor) && nextCursor.ValueKind == JsonValueKind.String;
+        Assert.True(hasStringCursor);
+    }
+
+    [Fact]
+    public async Task A_limit_above_the_maximum_is_clamped_through_http()
+    {
+        const int modeId = 6; // TotalDistance board, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBMaxLimitAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 1, metric: "TotalDistance");
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}?limit=99999");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(LeaderboardPaging.MaxLimit, page.GetProperty("limit").GetInt32());
     }
 
     [Fact]
