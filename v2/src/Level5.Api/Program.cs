@@ -22,7 +22,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // Without this, Swashbuckle ignores this project's <Nullable>enable</Nullable> annotations
+    // entirely and emits every property as optional/nullable - e.g. AccessTokenResponseDto's
+    // AccessToken would be indistinguishable in the OpenAPI document from an actually-optional
+    // field. This makes the generated contract (issue #4) match what the DTOs actually
+    // guarantee, with no change to runtime (de)serialization behavior.
+    options.SupportNonNullableReferenceTypes();
+});
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();

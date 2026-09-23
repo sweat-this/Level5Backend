@@ -39,3 +39,9 @@ jobs:
       # ephemeral Postgres containers via Testcontainers - ubuntu-latest runners have Docker
       # preinstalled, so this needs no extra service containers configured.
       - run: dotnet test v2/Level5BackendV2.sln
+
+      # Fails if v2/openapi/level5-v2.openapi.json doesn't match what the current API code
+      # actually generates - i.e. a controller/route/DTO changed without regenerating the
+      # committed contract that sweat-this/level5frontend pins to (issue #4). See
+      # v2/openapi/README.md.
+      - run: v2/scripts/openapi/check-drift.sh
