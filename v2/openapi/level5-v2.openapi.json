@@ -711,6 +711,35 @@
         }
       }
     },
+    "/api/v2/players/me/profile": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/series": {
       "post": {
         "tags": [
