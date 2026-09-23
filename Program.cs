@@ -103,6 +103,20 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+    // UsersApiController.PostUser hashes every submitted password with the same deliberately-expensive
+    // PBKDF2 call as login, and was the only mutating unauthenticated endpoint with no rate limit at
+    // all - a flood of signups is the same resource-exhaustion shape login is already guarded against.
+    // A separate policy (rather than reusing LoginPolicy) keeps the two counters independent per IP,
+    // so hammering registration doesn't also lock that IP out of logging in, and vice versa.
+    options.AddPolicy("RegisterPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 var app = builder.Build();

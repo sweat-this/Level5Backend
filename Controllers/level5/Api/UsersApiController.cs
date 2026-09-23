@@ -4,13 +4,14 @@ using System.Linq;
 using System.Threading.Tasks;
 using Level5Backend.Models;
 using Level5Backend.Models.Dto;
-using level5Server.Controllers.Utility;
+using Level5Backend.Utility;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
-namespace level5Server.Models.level5
+namespace Level5Backend.Controllers
 {
     [EnableCors("ApiCors")]
     [Route("api/users")]
@@ -29,8 +30,10 @@ namespace level5Server.Models.level5
         // get all users
         /// <summary>
         /// Get all users in database, paginated (defaults to the first 50, capped at 200 per page).
+        /// Admin-only: this is a full directory listing (userid + username per account), not
+        /// something every logged-in player should be able to page through.
         /// </summary>
-        [Authorize]
+        [Authorize(Policy = "RequireDev")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<User>>> GetAllUsers(int page = 0, int results = 50)
         {
@@ -53,9 +56,10 @@ namespace level5Server.Models.level5
         //--------------------- HTTP GET Userid ---------------------------------------------------
         // GET: /api/highscores/userid/{userid}
         /// <summary>
-        /// Get user by user id
+        /// Get user by user id. Admin-only: lets a caller look up an arbitrary account by id,
+        /// which regular players have no legitimate need for.
         /// </summary>
-        [Authorize]
+        [Authorize(Policy = "RequireDev")]
         [HttpGet("userid/{userid}")]
         // GET: Users by userid
         // get user by user id
@@ -97,25 +101,20 @@ namespace level5Server.Models.level5
         }
 
         //--------------------- HTTP GET Username ---------------------------------------------------
-        // GET: /api/users/username/{userid}
+        // GET: /api/users/email/{email}
         /// <summary>
-        /// Get username by user id
+        /// Check whether an email is already registered. Used pre-registration (the game's
+        /// EmailExists helper calls this anonymously and only ever looks at the 200-vs-404 status
+        /// code - never the response body, unlike GetUserByUserName's equivalent), so this must
+        /// stay anonymous. Returns no body at all (not even a masked User, unlike
+        /// GetUserByUsername) - nothing about the matched account needs to be, or is, disclosed.
         /// </summary>
-        [Authorize]
         [ApiExplorerSettings(IgnoreApi = true)]
         [HttpGet("email/{email}")]
-        public async Task<ActionResult<User>> GetUserByEmail(string email)
+        public async Task<IActionResult> GetUserByEmail(string email)
         {
-            var user = await _context.Users.AsNoTracking()
-                .FirstOrDefaultAsync(m => m.Email == email);
-            if (user == null)
-            {
-                return NotFound();
-            }
-
-            HideUserDetails(user);
-
-            return user;
+            bool exists = await _context.Users.AsNoTracking().AnyAsync(m => m.Email == email);
+            return exists ? NoContent() : NotFound();
         }
 
         //--------------------- HTTP PUT ---------------------------------------------------
@@ -157,6 +156,7 @@ namespace level5Server.Models.level5
         /// </summary>
         // Binds a UserRegisterDto rather than the User entity - Isdev must never be settable at
         // signup either, or any account could self-grant the RequireDev authorization policy.
+        [EnableRateLimiting("RegisterPolicy")]
         [HttpPost]
         public async Task<ActionResult<User>> PostUser(UserRegisterDto dto)
         {

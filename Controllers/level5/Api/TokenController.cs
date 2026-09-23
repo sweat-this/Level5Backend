@@ -3,9 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
-using level5Server.Controllers.Utility;
-using level5Server.Models;
-using level5Server.Models.level5;
+using Level5Backend.Utility;
 using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -16,7 +14,7 @@ using Level5Backend.Models.Dto;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.RateLimiting;
 
-namespace level5Server.Controllers.level5.Api
+namespace Level5Backend.Controllers
 {
     [EnableCors("ApiCors")]
     [Route("api/token")]

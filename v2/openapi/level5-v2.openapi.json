@@ -1,0 +1,2062 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "Level5.Api",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/v2/me": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentAccountResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentAccountResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentAccountResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/friends": {
+      "get": {
+        "tags": [
+          "Friends"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendSummaryDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendSummaryDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendSummaryDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/friends/{playerId}": {
+      "delete": {
+        "tags": [
+          "Friends"
+        ],
+        "parameters": [
+          {
+            "name": "playerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests": {
+      "post": {
+        "tags": [
+          "Friends"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendFriendRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendFriendRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/SendFriendRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FriendRequestResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests/incoming": {
+      "get": {
+        "tags": [
+          "Friends"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests/outgoing": {
+      "get": {
+        "tags": [
+          "Friends"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FriendRequestListItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests/{requestId}/accept": {
+      "post": {
+        "tags": [
+          "Friends"
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests/{requestId}/decline": {
+      "post": {
+        "tags": [
+          "Friends"
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/friends/requests/{requestId}/cancel": {
+      "post": {
+        "tags": [
+          "Friends"
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/leaderboards/{modeId}": {
+      "get": {
+        "tags": [
+          "Leaderboards"
+        ],
+        "parameters": [
+          {
+            "name": "modeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hardcore",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "traffic",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "enemies",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sniper",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/match-results": {
+      "post": {
+        "tags": [
+          "MatchResults"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/players/by-tag/{tag}": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/players/me": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Players"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlayerProfileRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlayerProfileRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlayerProfileRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/players/me/profile": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerProfileResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series": {
+      "post": {
+        "tags": [
+          "Series"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChallengeDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChallengeDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChallengeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}/accept": {
+      "post": {
+        "tags": [
+          "Series"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}/decline": {
+      "post": {
+        "tags": [
+          "Series"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}/cancel": {
+      "post": {
+        "tags": [
+          "Series"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}/games/{gameNumber}/attempts/start": {
+      "post": {
+        "tags": [
+          "SeriesAttempts"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "gameNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptDescriptorDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptDescriptorDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptDescriptorDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}/games/{gameNumber}/attempts/{attemptId}/complete": {
+      "post": {
+        "tags": [
+          "SeriesAttempts"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "gameNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "attemptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteAttemptDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteAttemptDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteAttemptDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/{seriesId}": {
+      "get": {
+        "tags": [
+          "SeriesQueries"
+        ],
+        "parameters": [
+          {
+            "name": "seriesId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesDetailResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesDetailResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesDetailResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/incoming": {
+      "get": {
+        "tags": [
+          "SeriesQueries"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/outgoing": {
+      "get": {
+        "tags": [
+          "SeriesQueries"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/active": {
+      "get": {
+        "tags": [
+          "SeriesQueries"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/series/completed": {
+      "get": {
+        "tags": [
+          "SeriesQueries"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesSummaryPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccessTokenResponseDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttemptDescriptorDto": {
+        "type": "object",
+        "properties": {
+          "seriesId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "gameNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "competitionProtocolVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rulesetId": {
+            "type": "string"
+          },
+          "rulesetVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minimumCompatibleVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modeId": {
+            "type": "string"
+          },
+          "informationPolicy": {
+            "type": "string"
+          },
+          "totalGames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "gamesToWin": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "comparisonKeys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComparisonKeySummaryDto"
+            }
+          },
+          "requiredResultMetrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttemptViewDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ComparisonKeyDto": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ComparisonKeySummaryDto": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompleteAttemptDto": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateChallengeDto": {
+        "type": "object",
+        "properties": {
+          "opponentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totalGames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rulesetId": {
+            "type": "string"
+          },
+          "rulesetVersion": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "informationPolicy": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientRequestId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurrentAccountResponseDto": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FriendRequestListItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fromPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "otherPlayer": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FriendRequestResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fromPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FriendSummaryDto": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "friendsSince": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FrozenRulesDto": {
+        "type": "object",
+        "properties": {
+          "competitionProtocolVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rulesetId": {
+            "type": "string"
+          },
+          "rulesetVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minimumCompatibleVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modeId": {
+            "type": "string"
+          },
+          "informationPolicy": {
+            "type": "string"
+          },
+          "alternatesFirstAttempt": {
+            "type": "boolean"
+          },
+          "comparisonKeys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComparisonKeyDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameRoundViewDto": {
+        "type": "object",
+        "properties": {
+          "gameNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "yourAttempt": {
+            "$ref": "#/components/schemas/AttemptViewDto"
+          },
+          "opponentAttempt": {
+            "$ref": "#/components/schemas/AttemptViewDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaderboardEntryDto": {
+        "type": "object",
+        "properties": {
+          "matchResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "levelId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaderboardPageDto": {
+        "type": "object",
+        "properties": {
+          "modeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntryDto"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "LoginRequestDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LogoutRequestDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MatchResultModifiersDto": {
+        "type": "object",
+        "properties": {
+          "hardcore": {
+            "type": "boolean"
+          },
+          "trafficEnabled": {
+            "type": "boolean"
+          },
+          "enemiesEnabled": {
+            "type": "boolean"
+          },
+          "sniperEnabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MatchResultResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "levelId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "clientVersion": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlayerProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicPlayerSummaryDto": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefreshRequestDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegisterRequestDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SendFriendRequestDto": {
+        "type": "object",
+        "properties": {
+          "toPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeriesDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "challengerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "opponentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalGames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "gamesToWin": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentGameNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "winnerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rules": {
+            "$ref": "#/components/schemas/FrozenRulesDto"
+          },
+          "games": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameRoundViewDto"
+            }
+          },
+          "challenger": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeriesResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "challengerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "opponentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalGames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "gamesToWin": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "currentGameNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "winnerId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rules": {
+            "$ref": "#/components/schemas/FrozenRulesDto"
+          },
+          "games": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameRoundViewDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeriesSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "challengerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "opponentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "currentGameNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalGames": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "challenger": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeriesSummaryPageDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesSummaryDto"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SubmitMatchResultDto": {
+        "type": "object",
+        "properties": {
+          "clientResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "levelId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "clientVersion": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatePlayerProfileRequestDto": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Account"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Friends"
+    },
+    {
+      "name": "Leaderboards"
+    },
+    {
+      "name": "MatchResults"
+    },
+    {
+      "name": "Players"
+    },
+    {
+      "name": "Series"
+    },
+    {
+      "name": "SeriesAttempts"
+    },
+    {
+      "name": "SeriesQueries"
+    }
+  ]
+}

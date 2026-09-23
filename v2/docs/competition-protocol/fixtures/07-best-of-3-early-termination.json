@@ -1,0 +1,35 @@
+{
+  "fixtureId": "best-of-3-early-termination",
+  "protocolVersion": 1,
+  "description": "A Best-of-3 series completes as soon as one participant wins 2 games; the 3rd game is never activated/played.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 3 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "startAttempt", "by": "opponent", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 1, "result": { "Score": 10 } },
+    { "op": "startAttempt", "by": "challenger", "game": 2 },
+    { "op": "startAttempt", "by": "opponent", "game": 2 },
+    { "op": "completeAttempt", "by": "challenger", "game": 2, "result": { "Score": 100 } },
+    { "op": "completeAttempt", "by": "opponent", "game": 2, "result": { "Score": 10 } },
+    { "op": "startAttemptExpectRejected", "by": "challenger", "game": 3 }
+  ],
+  "expected": {
+    "seriesStatus": "Completed",
+    "winner": "challenger",
+    "gamesPlayed": 2,
+    "game3EverActivated": false
+  },
+  "notes": "Locks the clinch-and-stop behavior that both Unity (VersusSeries.Advance, tests BestOf3EndsAtTwoNilAndNeverActivatesGameThree) and the Backend (VersusSeries.AdvanceAfterRoundResolved, test Winning_enough_games_completes_the_series) already implement identically."
+}

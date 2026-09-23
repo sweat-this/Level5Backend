@@ -1,0 +1,28 @@
+{
+  "fixtureId": "conflicting-result-replay",
+  "protocolVersion": 1,
+  "description": "Submitting a DIFFERENT result payload for an attempt that already has an accepted result must be rejected as a conflict, not silently accepted and not silently discarded.",
+  "backendExecutable": true,
+  "requiresDownstream": [],
+  "seriesFormat": { "totalGames": 1 },
+  "ruleset": {
+    "rulesetId": "score-only",
+    "rulesetVersion": 1,
+    "informationPolicy": "SealedAttempt",
+    "alternatesFirstAttempt": false,
+    "comparisonKeys": [{ "metric": "Score", "direction": "HigherWins" }]
+  },
+  "commands": [
+    { "op": "createChallenge", "by": "challenger" },
+    { "op": "accept", "by": "opponent" },
+    { "op": "startAttempt", "by": "challenger", "game": 1 },
+    { "op": "completeAttempt", "by": "challenger", "game": 1, "result": { "Score": 50 } },
+    { "op": "completeAttemptExpectRejected", "by": "challenger", "game": 1, "result": { "Score": 999 } }
+  ],
+  "expected": {
+    "secondCallOutcome": "conflictRejected",
+    "acceptedResult": { "Score": 50 },
+    "resultUnchanged": true
+  },
+  "notes": "Implemented by issue #11: VersusSeries.CompleteAttempt now compares the incoming result to the already-accepted one before returning early - an equal payload takes fixture 10's idempotent-success path; a different payload throws ConflictingAttemptResultException (mapped to HTTP 409), leaving the originally accepted result untouched. Unity's Attempt.Complete does not special-case 'was the resubmission identical' - it always throws - so this remains a protocol-level (transport-retry) distinction the Backend alone needs, per issue #8 section 13."
+}

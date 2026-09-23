@@ -3,8 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Level5Backend.Models;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Authorization;
+using System.Dynamic;
 
-namespace level5Server.Models.level5.Api
+namespace Level5Backend.Controllers
 {
     //[Authorize]
     [ApiController]
@@ -43,18 +44,22 @@ namespace level5Server.Models.level5.Api
         }
 
         //--------------------- HTTP GET  Platform ---------------------------------------------------
-        // GET: /api/highscores/modeid/1
+        // GET: /api/highscores/platform/{platform}?page=0&results=50
         /// <summary>
-        /// Get high scores by platfoem. [handheld, desktop]
+        /// Get high scores by platform [handheld, desktop], paginated (defaults to the first 50, capped at 200 per page).
         /// </summary>
-        /// 
         [EnableCors("ApiCors")]
         [HttpGet("platform/{platform}")]
-        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByPlatform(string platform)
+        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByPlatform(string platform, int page = 0, int results = 50)
         {
+            int take = Math.Clamp(results, 1, 200);
+            int skip = Math.Max(page, 0) * take;
+
             var highscores = await _context.Highscores.AsNoTracking()
                 .Where(x => x.Platform == platform)
                 .OrderByDescending(x => x.Id)
+                .Skip(skip)
+                .Take(take)
                 .ToListAsync();
             HideHighScoreDetails(highscores);
 
@@ -62,16 +67,21 @@ namespace level5Server.Models.level5.Api
         }
 
         //--------------------- HTTP GET  Modeid by Userid ---------------------------------------------------
-        // GET: /api/highscores/modeid/1/userid/1
+        // GET: /api/highscores/modeid/1/userid/1?page=0&results=50
         /// <summary>
-        /// Get high scores by mode id and user id. 
+        /// Get high scores by mode id and user id, paginated (defaults to the first 50, capped at 200 per page).
         /// </summary>
         [HttpGet("modeid/{modeid}/userid/{userid}")]
-        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByModeIdUserId(int modeid, int userid)
+        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByModeIdUserId(int modeid, int userid, int page = 0, int results = 50)
         {
+            int take = Math.Clamp(results, 1, 200);
+            int skip = Math.Max(page, 0) * take;
+
             var highscores = await _context.Highscores.AsNoTracking()
                 .Where(x => x.Modeid == modeid && x.Userid == userid)
                 .OrderByDescending(x => x.Id)
+                .Skip(skip)
+                .Take(take)
                 .ToListAsync();
 
             HideHighScoreDetails(highscores);
@@ -79,16 +89,21 @@ namespace level5Server.Models.level5.Api
             return highscores;
         }
         //--------------------- HTTP GET Modeid by Platform ---------------------------------------------------
-        // GET: /api/highscores/modeid/1/platform/1
+        // GET: /api/highscores/modeid/1/platform/1?page=0&results=50
         /// <summary>
-        /// Get high scores by mode id and platform. 
+        /// Get high scores by mode id and platform, paginated (defaults to the first 50, capped at 200 per page).
         /// </summary>
         [HttpGet("modeid/{modeid}/platform/{platform}")]
-        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByModeIdPlatform(int modeid, string platform)
+        public async Task<ActionResult<IEnumerable<Highscore>>> GetHighScoreByModeIdPlatform(int modeid, string platform, int page = 0, int results = 50)
         {
+            int take = Math.Clamp(results, 1, 200);
+            int skip = Math.Max(page, 0) * take;
+
             var highscores = await _context.Highscores.AsNoTracking()
                 .Where(x => x.Modeid == modeid && x.Platform == platform)
                 .OrderByDescending(x => x.Id)
+                .Skip(skip)
+                .Take(take)
                 .ToListAsync();
 
             HideHighScoreDetails(highscores);
@@ -134,7 +149,7 @@ namespace level5Server.Models.level5.Api
             // could go negative into Skip() - both directly attacker-controlled on an unauthenticated
             // endpoint. Clamped the same way GetAllHighscores already is.
             int take = Math.Clamp(results, 1, 200);
-            int skip = Math.Max(page, 0) * 10;
+            int skip = Math.Max(page, 0) * take;
 
             var task = QueryHighScoresByMetric(modeid, hardcore, traffic, sniper, enemies, skip, take);
             if (task == null)
@@ -156,7 +171,7 @@ namespace level5Server.Models.level5.Api
             int results)
         {
             int take = Math.Clamp(results, 1, 200);
-            int skip = Math.Max(page, 0) * 10;
+            int skip = Math.Max(page, 0) * take;
 
             var task = QueryHighScoresByMetric(modeid, null, null, null, null, skip, take);
             if (task == null)
@@ -171,16 +186,13 @@ namespace level5Server.Models.level5.Api
         // from the "Filtered" endpoint. Returns null when modeid doesn't map to any known metric.
         private Task<List<object>>? QueryHighScoresByMetric(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
         {
-            return GetScoreMetric(modeid) switch
+            var metric = GetScoreMetric(modeid);
+            if (metric == null)
             {
-                ScoreMetric.TotalPoints => GetByTotalPoints(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                ScoreMetric.MaxShotMade => GetByMaxShotMade(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                ScoreMetric.TotalDistance => GetByTotalDistance(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                ScoreMetric.Time => GetByTime(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                ScoreMetric.ConsecutiveShots => GetByConsecutiveShots(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                ScoreMetric.EnemiesKilled => GetByEnemiesKilled(modeid, hardcore, traffic, sniper, enemies, skip, take),
-                _ => null
-            };
+                return null;
+            }
+
+            return GetByMetric(metric.Value, modeid, hardcore, traffic, sniper, enemies, skip, take);
         }
 
         private static IQueryable<Highscore> ApplyOptionalFilters(IQueryable<Highscore> query, int? hardcore, int? traffic, int? sniper, int? enemies)
@@ -192,94 +204,38 @@ namespace level5Server.Models.level5.Api
             return query;
         }
 
-        private async Task<List<object>> GetByTotalPoints(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
+        // Replaces what used to be six near-identical GetByXxx methods (one per ScoreMetric) that
+        // only differed in which field they sorted/labeled as "Score". Ordering/filtering/paging
+        // still happen server-side in SQL exactly as before - only the final per-row shaping (which
+        // varies by metric) moves into memory, over just the `take` rows already fetched.
+        private async Task<List<object>> GetByMetric(ScoreMetric metric, int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
         {
-            var query = ApplyOptionalFilters(_context.Highscores.Where(x => x.Modeid == modeid), hardcore, traffic, sniper, enemies);
-            var highscores = await query
-                .Select(x => new
-                {
-                    Score = x.TotalPoints.ToString(),
-                    x.Character,
-                    x.Level,
-                    x.Date,
-                    Time = x.Time.ToString(),
-                    UserId = x.Userid.ToString(),
-                    x.TotalPoints,
-                    x.Username,
-                    x.HardcoreEnabled,
-                    x.EnemiesEnabled,
-                    x.TrafficEnabled,
-                    x.EnemiesKilled,
-                    x.Platform
-                })
-                .OrderByDescending(x => x.TotalPoints)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-            return highscores.Cast<object>().ToList();
-        }
+            IQueryable<Highscore> query = _context.Highscores.Where(x => x.Modeid == modeid);
 
-        private async Task<List<object>> GetByMaxShotMade(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
-        {
-            var query = ApplyOptionalFilters(_context.Highscores.Where(x => x.Modeid == modeid), hardcore, traffic, sniper, enemies);
-            var highscores = await query
-                .Select(x => new
-                {
-                    Score = x.MaxShotMade.ToString(),
-                    x.Character,
-                    x.Level,
-                    x.Date,
-                    Time = x.Time.ToString(),
-                    UserId = x.Userid.ToString(),
-                    x.MaxShotMade,
-                    x.Username,
-                    x.HardcoreEnabled,
-                    x.EnemiesEnabled,
-                    x.TrafficEnabled,
-                    x.EnemiesKilled,
-                    x.Platform
-                })
-                .OrderByDescending(x => x.MaxShotMade)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-            return highscores.Cast<object>().ToList();
-        }
+            // Mirrors GetByEnemiesKilled's original behavior exactly: for that metric, hardcore==0
+            // (the Filtered endpoint's default) only filters by modeid; any other hardcore value -
+            // including null, which the "All" endpoint always passes - applies the rest of the
+            // filters too. Every other metric always applies whatever filters were given.
+            bool applyFilters = metric != ScoreMetric.EnemiesKilled || (hardcore.HasValue && hardcore.Value != 0);
+            if (applyFilters)
+            {
+                query = ApplyOptionalFilters(query, hardcore, traffic, sniper, enemies);
+            }
 
-        private async Task<List<object>> GetByTotalDistance(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
-        {
-            var query = ApplyOptionalFilters(_context.Highscores.Where(x => x.Modeid == modeid), hardcore, traffic, sniper, enemies);
-            var highscores = await query
-                .Select(x => new
-                {
-                    Score = x.TotalDistance.ToString(),
-                    x.Character,
-                    x.Level,
-                    x.Date,
-                    Time = x.Time.ToString(),
-                    UserId = x.Userid.ToString(),
-                    x.TotalDistance,
-                    x.Username,
-                    x.HardcoreEnabled,
-                    x.EnemiesEnabled,
-                    x.TrafficEnabled,
-                    x.EnemiesKilled,
-                    x.Platform
-                })
-                .OrderByDescending(x => x.TotalDistance)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-            return highscores.Cast<object>().ToList();
-        }
+            query = metric switch
+            {
+                ScoreMetric.TotalPoints => query.OrderByDescending(x => x.TotalPoints),
+                ScoreMetric.MaxShotMade => query.OrderByDescending(x => x.MaxShotMade),
+                ScoreMetric.TotalDistance => query.OrderByDescending(x => x.TotalDistance),
+                ScoreMetric.Time => query.OrderBy(x => x.Time),
+                ScoreMetric.ConsecutiveShots => query.OrderByDescending(x => x.ConsecutiveShots),
+                ScoreMetric.EnemiesKilled => query.OrderByDescending(x => x.EnemiesKilled),
+                _ => query
+            };
 
-        private async Task<List<object>> GetByTime(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
-        {
-            var query = ApplyOptionalFilters(_context.Highscores.Where(x => x.Modeid == modeid), hardcore, traffic, sniper, enemies);
-            var highscores = await query
+            var rows = await query
                 .Select(x => new
                 {
-                    Score = x.Time.ToString(),
                     x.Character,
                     x.Level,
                     x.Date,
@@ -290,75 +246,63 @@ namespace level5Server.Models.level5.Api
                     x.EnemiesEnabled,
                     x.TrafficEnabled,
                     x.EnemiesKilled,
-                    x.Platform
+                    x.Platform,
+                    x.TotalPoints,
+                    x.MaxShotMade,
+                    x.TotalDistance,
+                    x.ConsecutiveShots
                 })
-                .OrderBy(x => x.Time)
                 .Skip(skip)
                 .Take(take)
                 .ToListAsync();
-            return highscores.Cast<object>().ToList();
-        }
 
-        private async Task<List<object>> GetByConsecutiveShots(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
-        {
-            var query = ApplyOptionalFilters(_context.Highscores.Where(x => x.Modeid == modeid), hardcore, traffic, sniper, enemies);
-            var highscores = await query
-                .Select(x => new
-                {
-                    Score = x.ConsecutiveShots.ToString(),
-                    x.Character,
-                    x.Level,
-                    x.Date,
-                    Time = x.Time.ToString(),
-                    UserId = x.Userid.ToString(),
-                    x.ConsecutiveShots,
-                    x.Username,
-                    x.EnemiesEnabled,
-                    x.HardcoreEnabled,
-                    x.TrafficEnabled,
-                    x.EnemiesKilled,
-                    x.Platform
-                })
-                .OrderByDescending(x => x.ConsecutiveShots)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-            return highscores.Cast<object>().ToList();
-        }
-
-        private async Task<List<object>> GetByEnemiesKilled(int modeid, int? hardcore, int? traffic, int? sniper, int? enemies, int skip, int take)
-        {
-            IQueryable<Highscore> query = _context.Highscores.Where(x => x.Modeid == modeid);
-
-            // Mirrors the original behavior exactly: hardcore==0 (the Filtered endpoint's default)
-            // only filters by modeid; any other hardcore value applies the rest of the filters too.
-            // The "All" endpoint passes hardcore: null and always gets the unfiltered query.
-            if (hardcore.HasValue && hardcore.Value != 0)
+            // Built as a dictionary rather than a single fixed anonymous type because each metric's
+            // original shape differs: TotalPoints/MaxShotMade/TotalDistance/ConsecutiveShots each
+            // add one extra field named after themselves, Time and EnemiesKilled don't (they're
+            // already present in the common fields below), and Time is a raw number only for the
+            // Time metric - a string everywhere else. This preserves each metric's exact original
+            // wire shape instead of changing what existing clients parse.
+            //
+            // Keys are written in camelCase explicitly - unlike the anonymous types this replaces,
+            // a Dictionary's keys are literal JSON property names that ASP.NET Core's default
+            // PropertyNamingPolicy (CamelCase) does NOT rewrite, so a PascalCase key here would
+            // silently change the wire format every existing client parses.
+            return rows.Select(x =>
             {
-                query = ApplyOptionalFilters(query, hardcore, traffic, sniper, enemies);
-            }
-
-            var highscores = await query
-                .Select(x => new
+                IDictionary<string, object?> row = new ExpandoObject();
+                row["score"] = metric switch
                 {
-                    Score = x.EnemiesKilled.ToString(),
-                    x.Character,
-                    x.Level,
-                    x.Date,
-                    Time = x.Time.ToString(),
-                    UserId = x.Userid.ToString(),
-                    x.Username,
-                    x.HardcoreEnabled,
-                    x.EnemiesEnabled,
-                    x.TrafficEnabled,
-                    x.EnemiesKilled,
-                    x.Platform
-                })
-                .OrderByDescending(x => x.EnemiesKilled)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-            return highscores.Cast<object>().ToList();
+                    ScoreMetric.TotalPoints => x.TotalPoints.ToString(),
+                    ScoreMetric.MaxShotMade => x.MaxShotMade.ToString(),
+                    ScoreMetric.TotalDistance => x.TotalDistance.ToString(),
+                    ScoreMetric.Time => x.Time.ToString(),
+                    ScoreMetric.ConsecutiveShots => x.ConsecutiveShots.ToString(),
+                    ScoreMetric.EnemiesKilled => x.EnemiesKilled.ToString(),
+                    _ => string.Empty
+                };
+                row["character"] = x.Character;
+                row["level"] = x.Level;
+                row["date"] = x.Date;
+                row["time"] = metric == ScoreMetric.Time ? x.Time : x.Time.ToString();
+                row["userId"] = x.UserId;
+                row["username"] = x.Username;
+                row["hardcoreEnabled"] = x.HardcoreEnabled;
+                row["enemiesEnabled"] = x.EnemiesEnabled;
+                row["trafficEnabled"] = x.TrafficEnabled;
+                row["enemiesKilled"] = x.EnemiesKilled;
+                row["platform"] = x.Platform;
+
+                switch (metric)
+                {
+                    case ScoreMetric.TotalPoints: row["totalPoints"] = x.TotalPoints; break;
+                    case ScoreMetric.MaxShotMade: row["maxShotMade"] = x.MaxShotMade; break;
+                    case ScoreMetric.TotalDistance: row["totalDistance"] = x.TotalDistance; break;
+                    case ScoreMetric.ConsecutiveShots: row["consecutiveShots"] = x.ConsecutiveShots; break;
+                        // Time and EnemiesKilled: no extra field, matching the original per-metric shapes.
+                }
+
+                return (object)row;
+            }).ToList();
         }
 
         //--------------------- HTTP PUT ---------------------------------------------------

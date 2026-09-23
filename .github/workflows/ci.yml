@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # No .sln file - built as two separate project invocations rather than one `dotnet build`
+      # at the repo root, which would only pick up Level5Backend.csproj (the sole .csproj directly
+      # in the working directory) and skip Level5Backend.Tests entirely.
+      - run: dotnet build Level5Backend.csproj
+
+      # Level5Backend.Tests runs entirely against EF Core's InMemory provider - no Postgres
+      # connection string (and therefore no secrets) needed to run it in CI.
+      - run: dotnet test Level5Backend.Tests/Level5Backend.Tests.csproj
+
+  build-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - run: dotnet build v2/Level5BackendV2.sln
+
+      # Level5.Infrastructure.IntegrationTests and Level5.Api.IntegrationTests spin up real,
+      # ephemeral Postgres containers via Testcontainers - ubuntu-latest runners have Docker
+      # preinstalled, so this needs no extra service containers configured.
+      - run: dotnet test v2/Level5BackendV2.sln
+
+      # Fails if v2/openapi/level5-v2.openapi.json doesn't match what the current API code
+      # actually generates - i.e. a controller/route/DTO changed without regenerating the
+      # committed contract that sweat-this/level5frontend pins to (issue #4). See
+      # v2/openapi/README.md.
+      - run: v2/scripts/openapi/check-drift.sh

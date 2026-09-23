@@ -1,8 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using level5Server.Models;
-using level5Server.Models.level5;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +8,7 @@ using System.Threading.Tasks;
 using Level5Backend.Models;
 using Microsoft.AspNetCore.Cors;
 
-namespace level5Server.Controllers.level5.Api
+namespace Level5Backend.Controllers
 {
     [EnableCors("ApiCors")]
     [ApiExplorerSettings(IgnoreApi = true)]

@@ -1,7 +1,7 @@
 using Level5Backend.Models;
 using Microsoft.AspNetCore.Identity;
 
-namespace level5Server.Controllers.Utility
+namespace Level5Backend.Utility
 {
     // Wraps ASP.NET Core's PBKDF2-based PasswordHasher so user passwords are never stored or
     // compared in plaintext. HashPassword's output is self-contained (format marker, iteration
