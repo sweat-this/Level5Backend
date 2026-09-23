@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Not shipped, not tested - a dev/CI-only generator, so it doesn't belong in a "tests" or
+         "src" solution folder. -->
+    <RootNamespace>Level5.Api.OpenApiExport</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Boots the real Api host in-process (no socket bound) to read its generated OpenAPI
+         document, the same mechanism the Api.IntegrationTests project already relies on for
+         WebApplicationFactory<Program>. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Level5.Api\Level5.Api.csproj" />
+  </ItemGroup>
+
+</Project>
