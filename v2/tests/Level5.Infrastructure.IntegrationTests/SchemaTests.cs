@@ -26,6 +26,50 @@ public sealed class SchemaTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Migrations_create_the_match_results_table()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var tables = await db.Database.SqlQuery<string>(
+                $"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+            .ToListAsync();
+
+        Assert.Contains("match_results", tables);
+    }
+
+    [Fact]
+    public async Task Match_results_has_a_unique_index_on_player_and_client_result_id()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var indexDefs = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT indexdef FROM pg_indexes
+                 WHERE tablename = 'match_results' AND indexname = 'IX_match_results_PlayerId_ClientResultId'
+                 """)
+            .ToListAsync();
+
+        var indexDef = Assert.Single(indexDefs);
+        Assert.Contains("UNIQUE", indexDef);
+    }
+
+    [Fact]
+    public async Task Match_results_stores_metrics_and_modifiers_as_jsonb()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var columnTypes = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT data_type FROM information_schema.columns
+                 WHERE table_name = 'match_results' AND column_name IN ('MetricsJson', 'ModifiersJson')
+                 """)
+            .ToListAsync();
+
+        Assert.Equal(2, columnTypes.Count);
+        Assert.All(columnTypes, type => Assert.Equal("jsonb", type));
+    }
+
+    [Fact]
     public async Task Auth_sessions_has_a_restrictive_foreign_key_to_accounts()
     {
         await using var db = fixture.CreateDbContext();
@@ -131,6 +175,7 @@ public sealed class SchemaTests(PostgresFixture fixture)
     [InlineData("competitive_series", "ChallengerId")]
     [InlineData("competitive_series", "OpponentId")]
     [InlineData("competitive_series", "WinnerId")]
+    [InlineData("match_results", "PlayerId")]
     public async Task Player_reference_column_has_a_restrictive_foreign_key_to_player_profiles(string table, string column)
     {
         await using var db = fixture.CreateDbContext();
