@@ -1,6 +1,7 @@
 using Level5.Api.Security;
 using Level5.Application.Common;
 using Level5.Application.Competition;
+using Level5.Application.Players;
 using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 using Microsoft.AspNetCore.Authorization;
@@ -27,8 +28,26 @@ public sealed record SeriesResponseDto(
     int CurrentGameNumber, long Revision, Guid? WinnerId, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
     FrozenRulesDto Rules, IReadOnlyList<GameRoundViewDto> Games);
 
+/// <summary>
+/// <see cref="SeriesResponseDto"/> plus both participants' public identity (issue #29), returned
+/// only from <c>GET /api/v2/series/{seriesId}</c> - command endpoints (create/accept/decline/
+/// cancel/complete) keep returning the plain <see cref="SeriesResponseDto"/> unchanged.
+/// </summary>
+public sealed record SeriesDetailResponseDto(
+    Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int TotalGames, int GamesToWin,
+    int CurrentGameNumber, long Revision, Guid? WinnerId, DateTimeOffset CreatedAt, DateTimeOffset? CompletedAt,
+    FrozenRulesDto Rules, IReadOnlyList<GameRoundViewDto> Games,
+    PublicPlayerSummaryDto Challenger, PublicPlayerSummaryDto Opponent);
+
+/// <summary>
+/// <see cref="ChallengerId"/>/<see cref="OpponentId"/> are kept for backward compatibility (Unity's
+/// existing Backend V2 client) alongside the additive <see cref="Challenger"/>/<see cref="Opponent"/>
+/// public identity (issue #29), so a correspondence list is directly renderable without a per-row
+/// player lookup.
+/// </summary>
 public sealed record SeriesSummaryDto(
-    Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision, DateTimeOffset CreatedAt);
+    Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision, DateTimeOffset CreatedAt,
+    PublicPlayerSummaryDto Challenger, PublicPlayerSummaryDto Opponent);
 
 /// <summary>
 /// The bounded-pagination envelope every correspondence list endpoint returns (issue #21) -
@@ -118,11 +137,11 @@ public sealed class SeriesQueriesController(
     ICurrentPlayerProvider currentPlayer) : ControllerBase
 {
     [HttpGet("{seriesId:guid}")]
-    public async Task<ActionResult<SeriesResponseDto>> GetSeries(Guid seriesId, CancellationToken cancellationToken)
+    public async Task<ActionResult<SeriesDetailResponseDto>> GetSeries(Guid seriesId, CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
-        var view = await getSeries.ExecuteAsync(new GetSeriesRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
-        return Ok(SeriesDtoMapper.ToDto(view));
+        var detail = await getSeries.ExecuteAsync(new GetSeriesRequest(me, new VersusSeriesId(seriesId)), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(detail));
     }
 
     [HttpGet("incoming")]
@@ -229,6 +248,13 @@ internal static class SeriesDtoMapper
         view.CreatedAt, view.CompletedAt, ToDto(view.Rules),
         [.. view.Games.Select(g => new GameRoundViewDto(g.GameNumber, ToDto(g.YourAttempt), ToDto(g.OpponentAttempt)))]);
 
+    public static SeriesDetailResponseDto ToDto(SeriesDetailView detail) => new(
+        detail.Series.Id.Value, detail.Series.ChallengerId.Value, detail.Series.OpponentId.Value, detail.Series.Status.ToString(),
+        detail.Series.TotalGames, detail.Series.GamesToWin, detail.Series.CurrentGameNumber, detail.Series.Revision, detail.Series.WinnerId?.Value,
+        detail.Series.CreatedAt, detail.Series.CompletedAt, ToDto(detail.Series.Rules),
+        [.. detail.Series.Games.Select(g => new GameRoundViewDto(g.GameNumber, ToDto(g.YourAttempt), ToDto(g.OpponentAttempt)))],
+        ToDto(detail.Challenger), ToDto(detail.Opponent));
+
     private static FrozenRulesDto ToDto(FrozenRules rules) => new(
         rules.CompetitionProtocolVersion, rules.RulesetId, rules.RulesetVersion, rules.MinimumCompatibleVersion,
         rules.ModeId, rules.InformationPolicy.ToString(), rules.AlternatesFirstAttempt,
@@ -238,12 +264,15 @@ internal static class SeriesDtoMapper
         ? null
         : new AttemptViewDto(attempt.Id.Value, attempt.Status.ToString(), attempt.Result?.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value));
 
-    public static SeriesSummaryDto ToDto(SeriesSummary summary) => new(
+    public static SeriesSummaryDto ToDto(SeriesSummaryView summary) => new(
         summary.Id.Value, summary.ChallengerId.Value, summary.OpponentId.Value, summary.Status.ToString(),
-        summary.CurrentGameNumber, summary.TotalGames, summary.Revision, summary.CreatedAt);
+        summary.CurrentGameNumber, summary.TotalGames, summary.Revision, summary.CreatedAt,
+        ToDto(summary.Challenger), ToDto(summary.Opponent));
 
-    public static SeriesSummaryPageDto ToDto(PagedResult<SeriesSummary> page, int resolvedLimit) => new(
+    public static SeriesSummaryPageDto ToDto(PagedResult<SeriesSummaryView> page, int resolvedLimit) => new(
         [.. page.Items.Select(ToDto)], resolvedLimit, page.NextCursor);
+
+    private static PublicPlayerSummaryDto ToDto(PublicPlayerSummary summary) => new(summary.PlayerId.Value, summary.DisplayName, summary.Tag);
 
     public static AttemptDescriptorDto ToDto(AttemptDescriptor descriptor) => new(
         descriptor.SeriesId.Value, descriptor.AttemptId.Value, descriptor.GameNumber, descriptor.PlayerId.Value,

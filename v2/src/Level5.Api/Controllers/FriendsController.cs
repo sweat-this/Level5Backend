@@ -1,4 +1,5 @@
 using Level5.Api.Security;
+using Level5.Application.Players;
 using Level5.Application.Social;
 using Level5.Domain.Ids;
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +12,16 @@ public sealed record SendFriendRequestDto(Guid ToPlayerId);
 public sealed record FriendRequestResponseDto(Guid Id, Guid FromPlayerId, Guid ToPlayerId, string Status);
 
 public sealed record FriendSummaryDto(Guid PlayerId, string DisplayName, string Tag, DateTimeOffset FriendsSince);
+
+/// <summary>The only public player identity fields (issue #29) - never AccountId or other private account fields.</summary>
+public sealed record PublicPlayerSummaryDto(Guid PlayerId, string DisplayName, string Tag);
+
+/// <summary>
+/// A friend request list row plus the other party's public identity, so a portal can render
+/// "Patrick#4827 sent you a friend request" without a per-row player lookup (issue #29).
+/// <see cref="OtherPlayer"/> is the sender on the incoming list, the recipient on the outgoing list.
+/// </summary>
+public sealed record FriendRequestListItemDto(Guid Id, Guid FromPlayerId, Guid ToPlayerId, string Status, PublicPlayerSummaryDto OtherPlayer);
 
 [ApiController]
 [Route("api/v2/friends")]
@@ -53,19 +64,19 @@ public sealed class FriendsController(
     }
 
     [HttpGet("requests/incoming")]
-    public async Task<ActionResult<IReadOnlyList<FriendRequestResponseDto>>> ListIncoming(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<FriendRequestListItemDto>>> ListIncoming(CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var requests = await listIncoming.ExecuteAsync(me, cancellationToken);
-        return Ok(requests.Select(r => new FriendRequestResponseDto(r.Id.Value, r.FromPlayerId.Value, r.ToPlayerId.Value, r.Status.ToString())));
+        return Ok(requests.Select(ToDto));
     }
 
     [HttpGet("requests/outgoing")]
-    public async Task<ActionResult<IReadOnlyList<FriendRequestResponseDto>>> ListOutgoing(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<FriendRequestListItemDto>>> ListOutgoing(CancellationToken cancellationToken)
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var requests = await listOutgoing.ExecuteAsync(me, cancellationToken);
-        return Ok(requests.Select(r => new FriendRequestResponseDto(r.Id.Value, r.FromPlayerId.Value, r.ToPlayerId.Value, r.Status.ToString())));
+        return Ok(requests.Select(ToDto));
     }
 
     [HttpPost("requests/{requestId:guid}/accept")]
@@ -91,4 +102,9 @@ public sealed class FriendsController(
         await cancelFriendRequest.ExecuteAsync(new CancelFriendRequestRequest(me, new FriendRequestId(requestId)), cancellationToken);
         return NoContent();
     }
+
+    private static FriendRequestListItemDto ToDto(FriendRequestListItem item) => new(
+        item.Id.Value, item.FromPlayerId.Value, item.ToPlayerId.Value, item.Status.ToString(), ToDto(item.OtherPlayer));
+
+    private static PublicPlayerSummaryDto ToDto(PublicPlayerSummary summary) => new(summary.PlayerId.Value, summary.DisplayName, summary.Tag);
 }

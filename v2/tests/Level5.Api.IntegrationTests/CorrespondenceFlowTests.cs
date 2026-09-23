@@ -38,6 +38,16 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
 
         Assert.Equal("Completed", final.GetProperty("status").GetString());
         Assert.Equal(alice.PlayerId, final.GetProperty("winnerId").GetGuid());
+
+        // GET series detail carries both participants' public identity (issue #29), resolvable
+        // against winnerId without a separate lookup.
+        var detailResponse = await alice.Client.GetAsync($"/api/v2/series/{seriesId}");
+        var detail = await detailResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(alice.PlayerId, detail.GetProperty("challenger").GetProperty("playerId").GetGuid());
+        Assert.Equal("Alice", detail.GetProperty("challenger").GetProperty("displayName").GetString());
+        Assert.Equal(bob.PlayerId, detail.GetProperty("opponent").GetProperty("playerId").GetGuid());
+        Assert.Equal("Bob", detail.GetProperty("opponent").GetProperty("displayName").GetString());
+        Assert.False(detail.GetProperty("challenger").TryGetProperty("accountId", out _));
     }
 
     [Fact]
@@ -482,7 +492,11 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         await CompleteAttemptAsync(bob, completedSeriesId, 1, completedBobAttempt, 10);
 
         var bobIncoming = await GetPageItemsAsync(bob, "/api/v2/series/incoming");
-        Assert.Contains(bobIncoming.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
+        var bobIncomingEntry = Assert.Single(bobIncoming.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
+        Assert.Equal(alice.PlayerId, bobIncomingEntry.GetProperty("challenger").GetProperty("playerId").GetGuid());
+        Assert.Equal("Alice12", bobIncomingEntry.GetProperty("challenger").GetProperty("displayName").GetString());
+        Assert.Equal(bob.PlayerId, bobIncomingEntry.GetProperty("opponent").GetProperty("playerId").GetGuid());
+        Assert.Equal("Bob12", bobIncomingEntry.GetProperty("opponent").GetProperty("displayName").GetString());
 
         var aliceOutgoing = await GetPageItemsAsync(alice, "/api/v2/series/outgoing");
         Assert.Contains(aliceOutgoing.EnumerateArray(), s => s.GetProperty("id").GetGuid() == incomingSeriesId);
@@ -494,10 +508,13 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         Assert.Contains(bobCompleted.EnumerateArray(), s => s.GetProperty("id").GetGuid() == completedSeriesId);
         Assert.DoesNotContain(bobCompleted.EnumerateArray(), s => s.GetProperty("id").GetGuid() == activeSeriesId);
 
-        // A completed-list summary is sparse - it must never carry attempt/result data.
+        // A completed-list summary is sparse - it must never carry attempt/result data, but must
+        // still carry both participants' public identity (issue #29).
         var completedEntry = bobCompleted.EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == completedSeriesId);
         Assert.False(completedEntry.TryGetProperty("games", out _));
         Assert.False(completedEntry.TryGetProperty("rules", out _));
+        Assert.Equal(alice.PlayerId, completedEntry.GetProperty("challenger").GetProperty("playerId").GetGuid());
+        Assert.Equal(bob.PlayerId, completedEntry.GetProperty("opponent").GetProperty("playerId").GetGuid());
 
         foreach (var route in new[] { "incoming", "outgoing", "active", "completed" })
         {

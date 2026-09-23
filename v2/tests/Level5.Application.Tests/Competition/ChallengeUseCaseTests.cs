@@ -2,7 +2,9 @@ using Level5.Application.Common;
 using Level5.Application.Competition;
 using Level5.Application.Tests.Fakes;
 using Level5.Domain.Competition;
+using Level5.Domain.Identity;
 using Level5.Domain.Ids;
+using Level5.Domain.Players;
 using Level5.Domain.Social;
 using Xunit;
 
@@ -12,6 +14,7 @@ public class ChallengeUseCaseTests
 {
     private readonly InMemoryVersusSeriesStore _series = new();
     private readonly InMemoryFriendshipStore _friendships = new();
+    private readonly InMemoryPlayerProfileStore _profiles = new();
     private readonly FakeRulesetCatalog _catalog = new();
     private readonly FakeClock _clock = new();
     private readonly CreateChallengeUseCase _create;
@@ -27,14 +30,21 @@ public class ChallengeUseCaseTests
         _accept = new AcceptChallengeUseCase(_series, _clock);
         _decline = new DeclineChallengeUseCase(_series, _clock);
         _cancel = new CancelChallengeUseCase(_series, _clock);
-        _get = new GetSeriesUseCase(_series);
-        _listCompleted = new ListCompletedSeriesUseCase(_series);
+        _get = new GetSeriesUseCase(_series, _profiles);
+        _listCompleted = new ListCompletedSeriesUseCase(_series, _profiles);
     }
 
     private async Task MakeFriendsAsync(PlayerId a, PlayerId b)
     {
         var friendship = Friendship.Between(a, b, _clock.UtcNow);
         await _friendships.AddFriendshipAsync(friendship, CancellationToken.None);
+    }
+
+    private async Task<PlayerId> SeedPlayerAsync(string tag)
+    {
+        var profile = PlayerProfile.Create(AccountId.New(), tag, PlayerTag.Create($"{tag}#0001"), _clock.UtcNow);
+        await _profiles.AddAsync(profile, CancellationToken.None);
+        return profile.Id;
     }
 
     private static CreateChallengeRequest Request(
@@ -206,15 +216,15 @@ public class ChallengeUseCaseTests
     [Fact]
     public async Task Create_retry_does_not_create_a_second_series()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
+        var challenger = await SeedPlayerAsync("RetryChallenger");
+        var opponent = await SeedPlayerAsync("RetryOpponent");
         await MakeFriendsAsync(challenger, opponent);
         var clientRequestId = Guid.NewGuid();
 
         await _create.ExecuteAsync(Request(challenger, opponent, clientRequestId: clientRequestId), CancellationToken.None);
         await _create.ExecuteAsync(Request(challenger, opponent, clientRequestId: clientRequestId), CancellationToken.None);
 
-        var outgoing = await new ListOutgoingChallengesUseCase(_series).ExecuteAsync(new ListSeriesPageRequest(challenger, null, null), CancellationToken.None);
+        var outgoing = await new ListOutgoingChallengesUseCase(_series, _profiles).ExecuteAsync(new ListSeriesPageRequest(challenger, null, null), CancellationToken.None);
         Assert.Single(outgoing.Items);
     }
 
@@ -274,6 +284,20 @@ public class ChallengeUseCaseTests
 
         await Assert.ThrowsAsync<NotFoundException>(() =>
             _get.ExecuteAsync(new GetSeriesRequest(PlayerId.New(), view.Id), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Getting_a_series_whose_participant_has_no_registered_profile_fails_explicitly()
+    {
+        // Unlike a list row, series detail has no "drop this row" fallback - a missing participant
+        // profile must fail the whole response rather than return a detail view with a gap in it.
+        var challenger = await SeedPlayerAsync("DetailChallenger");
+        var ghostOpponent = PlayerId.New(); // never registered - simulates an FK-backed inconsistency
+        await MakeFriendsAsync(challenger, ghostOpponent);
+        var view = await _create.ExecuteAsync(Request(challenger, ghostOpponent), CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _get.ExecuteAsync(new GetSeriesRequest(challenger, view.Id), CancellationToken.None));
     }
 
     [Fact]
@@ -401,9 +425,9 @@ public class ChallengeUseCaseTests
     [Fact]
     public async Task Completed_list_contains_only_series_that_actually_finished_play()
     {
-        var challenger = PlayerId.New();
-        var opponent = PlayerId.New();
-        var bystander = PlayerId.New();
+        var challenger = await SeedPlayerAsync("CompletedChallenger");
+        var opponent = await SeedPlayerAsync("CompletedOpponent");
+        var bystander = await SeedPlayerAsync("CompletedBystander");
         await MakeFriendsAsync(challenger, opponent);
         await MakeFriendsAsync(challenger, bystander);
 

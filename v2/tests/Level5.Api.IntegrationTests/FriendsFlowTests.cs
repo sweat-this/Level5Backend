@@ -23,10 +23,22 @@ public sealed class FriendsFlowTests(ApiFactory factory)
         var requestId = request.GetProperty("id").GetGuid();
 
         var aliceOutgoing = await GetArrayAsync(alice, "/api/v2/friends/requests/outgoing");
-        Assert.Contains(aliceOutgoing.EnumerateArray(), r => r.GetProperty("id").GetGuid() == requestId);
+        var aliceOutgoingEntry = Assert.Single(aliceOutgoing.EnumerateArray(), r => r.GetProperty("id").GetGuid() == requestId);
+        // Outgoing: otherPlayer is the recipient, not the sender.
+        Assert.Equal(bob.PlayerId, aliceOutgoingEntry.GetProperty("otherPlayer").GetProperty("playerId").GetGuid());
+        Assert.Equal("FBob", aliceOutgoingEntry.GetProperty("otherPlayer").GetProperty("displayName").GetString());
+        Assert.False(string.IsNullOrEmpty(aliceOutgoingEntry.GetProperty("otherPlayer").GetProperty("tag").GetString()));
 
         var bobIncoming = await GetArrayAsync(bob, "/api/v2/friends/requests/incoming");
-        Assert.Contains(bobIncoming.EnumerateArray(), r => r.GetProperty("id").GetGuid() == requestId);
+        var bobIncomingEntry = Assert.Single(bobIncoming.EnumerateArray(), r => r.GetProperty("id").GetGuid() == requestId);
+        // Incoming: otherPlayer is the sender, not the recipient.
+        Assert.Equal(alice.PlayerId, bobIncomingEntry.GetProperty("otherPlayer").GetProperty("playerId").GetGuid());
+        Assert.Equal("FAlice", bobIncomingEntry.GetProperty("otherPlayer").GetProperty("displayName").GetString());
+
+        // Never leak private account fields alongside the public player summary.
+        Assert.False(bobIncomingEntry.GetProperty("otherPlayer").TryGetProperty("accountId", out _));
+        Assert.False(bobIncomingEntry.GetProperty("otherPlayer").TryGetProperty("email", out _));
+        Assert.False(bobIncomingEntry.GetProperty("otherPlayer").TryGetProperty("username", out _));
 
         var carolIncoming = await GetArrayAsync(carol, "/api/v2/friends/requests/incoming");
         var carolOutgoing = await GetArrayAsync(carol, "/api/v2/friends/requests/outgoing");
