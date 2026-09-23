@@ -11,6 +11,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
+    public DbSet<MatchResultRow> MatchResults => Set<MatchResultRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -173,6 +174,30 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasOne<PlayerProfileRow>()
                 .WithMany()
                 .HasForeignKey(e => e.WinnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MatchResultRow>(entity =>
+        {
+            entity.ToTable("match_results");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ModeId).HasMaxLength(64);
+            entity.Property(e => e.LevelId).HasMaxLength(64);
+            entity.Property(e => e.CharacterId).HasMaxLength(64);
+            entity.Property(e => e.ClientVersion).HasMaxLength(32);
+            entity.Property(e => e.Platform).HasMaxLength(32);
+            entity.Property(e => e.MetricsJson).HasColumnType("jsonb");
+            entity.Property(e => e.ModifiersJson).HasColumnType("jsonb");
+            // Submission idempotency: a duplicate (PlayerId, ClientResultId) pair fails this
+            // unique index and is translated to ConflictException - SubmitMatchResultUseCase
+            // reloads and resolves it as a replay/conflict exactly like a sequential retry.
+            entity.HasIndex(e => new { e.PlayerId, e.ClientResultId }).IsUnique();
+            // Restrict, not cascade - match results are immutable history, same reasoning as
+            // competitive_series/friend_requests above; a stray delete must fail loudly rather
+            // than silently orphan or prune result history.
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.PlayerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

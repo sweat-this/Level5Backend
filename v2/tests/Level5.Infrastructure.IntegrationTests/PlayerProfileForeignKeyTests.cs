@@ -41,6 +41,21 @@ public sealed class PlayerProfileForeignKeyTests(PostgresFixture fixture)
         StateJson = "{}"
     };
 
+    private static MatchResultRow ValidMatchResultRow(Guid playerId) => new()
+    {
+        Id = Guid.NewGuid(),
+        PlayerId = playerId,
+        ClientResultId = Guid.NewGuid(),
+        ModeId = "mode",
+        LevelId = "level",
+        CharacterId = "character",
+        ClientVersion = "1.0",
+        Platform = "pc",
+        MetricsJson = """{"TotalPoints":1}""",
+        ModifiersJson = """{"Hardcore":false,"TrafficEnabled":false,"EnemiesEnabled":false,"SniperEnabled":false}""",
+        CreatedAt = Now
+    };
+
     [Fact]
     public async Task Friend_request_with_a_nonexistent_FromPlayerId_is_rejected()
     {
@@ -241,6 +256,31 @@ public sealed class PlayerProfileForeignKeyTests(PostgresFixture fixture)
 
         await using var deleteDb = fixture.CreateDbContext();
         var profileRow = await deleteDb.PlayerProfiles.SingleAsync(p => p.Id == challenger);
+        deleteDb.PlayerProfiles.Remove(profileRow);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => deleteDb.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Match_result_with_a_nonexistent_PlayerId_is_rejected()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        db.MatchResults.Add(ValidMatchResultRow(Guid.NewGuid()));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Deleting_a_player_profile_referenced_by_a_match_result_is_restricted()
+    {
+        await using var seedDb = fixture.CreateDbContext();
+        var player = (await PlayerSeeding.CreatePlayerAsync(seedDb, "ResultOwner", Now)).Value;
+        seedDb.MatchResults.Add(ValidMatchResultRow(player));
+        await seedDb.SaveChangesAsync();
+
+        await using var deleteDb = fixture.CreateDbContext();
+        var profileRow = await deleteDb.PlayerProfiles.SingleAsync(p => p.Id == player);
         deleteDb.PlayerProfiles.Remove(profileRow);
 
         await Assert.ThrowsAsync<DbUpdateException>(() => deleteDb.SaveChangesAsync());

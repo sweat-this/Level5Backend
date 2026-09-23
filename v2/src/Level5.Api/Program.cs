@@ -5,6 +5,7 @@ using Level5.Api.Telemetry;
 using Level5.Application.Competition;
 using Level5.Application.Identity;
 using Level5.Application.Players;
+using Level5.Application.Results;
 using Level5.Application.Social;
 using Level5.Infrastructure.DependencyInjection;
 using Level5.Infrastructure.Identity;
@@ -106,6 +107,7 @@ builder.Services.AddScoped<ListActiveSeriesUseCase>();
 builder.Services.AddScoped<ListCompletedSeriesUseCase>();
 builder.Services.AddScoped<StartAttemptUseCase>();
 builder.Services.AddScoped<CompleteAttemptUseCase>();
+builder.Services.AddScoped<SubmitMatchResultUseCase>();
 
 builder.Services.AddScoped<ICurrentAccountAccessor, CurrentAccountAccessor>();
 builder.Services.AddScoped<ICurrentPlayerProvider, CurrentPlayerProvider>();

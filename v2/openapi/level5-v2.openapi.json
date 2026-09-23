@@ -463,6 +463,54 @@
         }
       }
     },
+    "/api/v2/match-results": {
+      "post": {
+        "tags": [
+          "MatchResults"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitMatchResultDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResultResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/players/by-tag/{tag}": {
       "get": {
         "tags": [
@@ -1439,6 +1487,71 @@
         },
         "additionalProperties": false
       },
+      "MatchResultModifiersDto": {
+        "type": "object",
+        "properties": {
+          "hardcore": {
+            "type": "boolean"
+          },
+          "trafficEnabled": {
+            "type": "boolean"
+          },
+          "enemiesEnabled": {
+            "type": "boolean"
+          },
+          "sniperEnabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MatchResultResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modeId": {
+            "type": "string"
+          },
+          "levelId": {
+            "type": "string"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "clientVersion": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
       "PlayerProfileResponseDto": {
         "type": "object",
         "properties": {
@@ -1694,6 +1807,41 @@
         },
         "additionalProperties": false
       },
+      "SubmitMatchResultDto": {
+        "type": "object",
+        "properties": {
+          "clientResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modeId": {
+            "type": "string"
+          },
+          "levelId": {
+            "type": "string"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "clientVersion": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdatePlayerProfileRequestDto": {
         "type": "object",
         "properties": {
@@ -1714,6 +1862,9 @@
     },
     {
       "name": "Friends"
+    },
+    {
+      "name": "MatchResults"
     },
     {
       "name": "Players"
