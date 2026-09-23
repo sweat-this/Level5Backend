@@ -23,6 +23,7 @@ public sealed record UpdatePlayerProfileRequestDto(string DisplayName);
 public sealed class PlayersController(
     ResolvePlayerByTagUseCase resolvePlayerByTag,
     UpdateMyPlayerProfileUseCase updateMyPlayerProfile,
+    GetMyPlayerProfileUseCase getMyPlayerProfile,
     ICurrentPlayerProvider currentPlayer,
     ICurrentAccountAccessor currentAccount) : ControllerBase
 {
@@ -33,11 +34,25 @@ public sealed class PlayersController(
         return Ok(new PlayerProfileResponseDto(profile.Id.Value, profile.DisplayName, profile.Tag));
     }
 
+    // Preserved unchanged - the Unity client already depends on this bare-GUID contract (see
+    // PlayersApiClient.GetMe() => ApiResponse<Guid>). GetMyProfile below is the additive,
+    // richer-shaped sibling for the web portal; this endpoint is deliberately untouched.
     [HttpGet("me")]
     public async Task<ActionResult<Guid>> GetMyPlayerId(CancellationToken cancellationToken)
     {
         var playerId = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         return Ok(playerId.Value);
+    }
+
+    // Additive self-profile read (issue #7): the web portal's /account/profile needs its own
+    // Display Name and Tag alongside PlayerId, and GET /me above can't grow that shape without
+    // breaking the Unity client's existing Guid contract.
+    [HttpGet("me/profile")]
+    public async Task<ActionResult<PlayerProfileResponseDto>> GetMyProfile(CancellationToken cancellationToken)
+    {
+        var accountId = currentAccount.GetCurrentAccountId();
+        var profile = await getMyPlayerProfile.ExecuteAsync(new GetMyPlayerProfileRequest(accountId), cancellationToken);
+        return Ok(new PlayerProfileResponseDto(profile.Id.Value, profile.DisplayName, profile.Tag));
     }
 
     // The profile updated is always the authenticated account's own - derived from the JWT `sub`

@@ -197,6 +197,71 @@ public sealed class PlayersFlowTests(ApiFactory factory)
         Assert.Equal(new HashSet<string> { "playerid", "displayname", "tag" }, propertyNames);
     }
 
+    [Fact]
+    public async Task Getting_my_profile_without_a_token_is_rejected()
+    {
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/v2/players/me/profile");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authenticated_player_can_read_their_own_profile()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Mona");
+        var expectedTag = await GetTagAsync(player.PlayerId);
+        var expectedDisplayName = await GetDisplayNameAsync(player.PlayerId);
+
+        var response = await player.Client.GetAsync("/api/v2/players/me/profile");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(player.PlayerId, body.GetProperty("playerId").GetGuid());
+        Assert.Equal(expectedDisplayName, body.GetProperty("displayName").GetString());
+        Assert.Equal(expectedTag, body.GetProperty("tag").GetString());
+    }
+
+    [Fact]
+    public async Task My_profile_reflects_a_prior_display_name_update()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Nora");
+        await player.Client.PatchAsJsonAsync("/api/v2/players/me", new { displayName = "Nora Updated" });
+
+        var response = await player.Client.GetAsync("/api/v2/players/me/profile");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Nora Updated", body.GetProperty("displayName").GetString());
+    }
+
+    [Fact]
+    public async Task My_profile_response_exposes_only_public_fields_never_account_identity()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Oscar");
+
+        var response = await player.Client.GetAsync("/api/v2/players/me/profile");
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var propertyNames = body.EnumerateObject().Select(p => p.Name.ToLowerInvariant()).ToHashSet();
+
+        Assert.Equal(new HashSet<string> { "playerid", "displayname", "tag" }, propertyNames);
+    }
+
+    [Fact]
+    public async Task GET_players_me_still_returns_a_bare_guid_unaffected_by_the_new_profile_endpoint()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Petra");
+
+        var response = await player.Client.GetAsync("/api/v2/players/me");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var raw = await response.Content.ReadAsStringAsync();
+        var parsed = Guid.Parse(raw.Trim('"'));
+        Assert.Equal(player.PlayerId, parsed);
+    }
+
     private async Task<string> GetTagAsync(Guid playerId)
     {
         await using var scope = factory.Services.CreateAsyncScope();

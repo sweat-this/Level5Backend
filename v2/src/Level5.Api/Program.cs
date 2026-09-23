@@ -89,6 +89,7 @@ builder.Services.AddScoped<LogoutUseCase>();
 builder.Services.AddScoped<GetCurrentAccountUseCase>();
 builder.Services.AddScoped<ResolvePlayerByTagUseCase>();
 builder.Services.AddScoped<UpdateMyPlayerProfileUseCase>();
+builder.Services.AddScoped<GetMyPlayerProfileUseCase>();
 builder.Services.AddScoped<SendFriendRequestUseCase>();
 builder.Services.AddScoped<AcceptFriendRequestUseCase>();
 builder.Services.AddScoped<DeclineFriendRequestUseCase>();
