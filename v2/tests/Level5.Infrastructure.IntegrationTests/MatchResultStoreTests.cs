@@ -28,7 +28,7 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
             [MatchResultMetric.CompletionTimeSeconds] = 42.5
         });
         var modifiers = MatchResultModifiers.Of(hardcore: true, trafficEnabled: false, enemiesEnabled: true, sniperEnabled: false);
-        var result = MatchResult.Submit(player, Guid.NewGuid(), "arcade", "level-1", "hero", "1.2.3", "ios", metrics, modifiers, Now);
+        var result = MatchResult.Submit(player, Guid.NewGuid(), 1, 1, "hero", "1.2.3", "ios", metrics, modifiers, Now);
 
         await new MatchResultStore(writeDb).AddAsync(result, CancellationToken.None);
 
@@ -38,8 +38,8 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
         Assert.NotNull(reloaded);
         Assert.Equal(result.Id, reloaded.Id);
         Assert.Equal(player, reloaded.PlayerId);
-        Assert.Equal("arcade", reloaded.ModeId);
-        Assert.Equal("level-1", reloaded.LevelId);
+        Assert.Equal(1, reloaded.ModeId);
+        Assert.Equal(1, reloaded.LevelId);
         Assert.Equal("hero", reloaded.CharacterId);
         Assert.Equal("1.2.3", reloaded.ClientVersion);
         Assert.Equal("ios", reloaded.Platform);
@@ -58,7 +58,7 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
             [MatchResultMetric.EnemiesKilled] = 3,
             [MatchResultMetric.LongestStreak] = 5
         });
-        var result = MatchResult.Submit(player, Guid.NewGuid(), "mode", "level", "character", "1.0", "pc", metrics, DefaultModifiers, Now);
+        var result = MatchResult.Submit(player, Guid.NewGuid(), 1, 1, "character", "1.0", "pc", metrics, DefaultModifiers, Now);
 
         await new MatchResultStore(writeDb).AddAsync(result, CancellationToken.None);
 
@@ -79,7 +79,7 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
     {
         await using var writeDb = fixture.CreateDbContext();
         var player = await PlayerSeeding.CreatePlayerAsync(writeDb, "CreatedAt", Now);
-        var result = MatchResult.Submit(player, Guid.NewGuid(), "mode", "level", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var result = MatchResult.Submit(player, Guid.NewGuid(), 1, 1, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
 
         await new MatchResultStore(writeDb).AddAsync(result, CancellationToken.None);
 
@@ -98,7 +98,7 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
         var playerA = await PlayerSeeding.CreatePlayerAsync(db, "ScopeA", Now);
         var playerB = await PlayerSeeding.CreatePlayerAsync(db, "ScopeB", Now);
         var sharedKey = Guid.NewGuid();
-        var resultA = MatchResult.Submit(playerA, sharedKey, "mode", "level", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var resultA = MatchResult.Submit(playerA, sharedKey, 1, 1, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
 
         var store = new MatchResultStore(db);
         await store.AddAsync(resultA, CancellationToken.None);
@@ -117,8 +117,8 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
         await using var db = fixture.CreateDbContext();
         var player = await PlayerSeeding.CreatePlayerAsync(db, "DupKey", Now);
         var clientResultId = Guid.NewGuid();
-        var first = MatchResult.Submit(player, clientResultId, "mode", "level-a", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
-        var second = MatchResult.Submit(player, clientResultId, "mode", "level-b", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var first = MatchResult.Submit(player, clientResultId, 1, 1, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var second = MatchResult.Submit(player, clientResultId, 1, 2, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
 
         var store = new MatchResultStore(db);
         await store.AddAsync(first, CancellationToken.None);
@@ -135,8 +135,8 @@ public sealed class MatchResultStoreTests(PostgresFixture fixture)
         var playerA = await PlayerSeeding.CreatePlayerAsync(db, "MultiA", Now);
         var playerB = await PlayerSeeding.CreatePlayerAsync(db, "MultiB", Now);
         var sharedKey = Guid.NewGuid();
-        var resultA = MatchResult.Submit(playerA, sharedKey, "mode", "level", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
-        var resultB = MatchResult.Submit(playerB, sharedKey, "mode", "level", "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var resultA = MatchResult.Submit(playerA, sharedKey, 1, 1, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
+        var resultB = MatchResult.Submit(playerB, sharedKey, 1, 1, "character", "1.0", "pc", DefaultMetrics(), DefaultModifiers, Now);
 
         var store = new MatchResultStore(db);
         await store.AddAsync(resultA, CancellationToken.None);

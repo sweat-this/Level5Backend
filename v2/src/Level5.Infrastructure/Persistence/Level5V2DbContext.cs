@@ -1,3 +1,4 @@
+using Level5.Domain.Results;
 using Level5.Infrastructure.Persistence.Rows;
 using Microsoft.EntityFrameworkCore;
 
@@ -181,17 +182,21 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
         {
             entity.ToTable("match_results");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.ModeId).HasMaxLength(64);
-            entity.Property(e => e.LevelId).HasMaxLength(64);
-            entity.Property(e => e.CharacterId).HasMaxLength(64);
-            entity.Property(e => e.ClientVersion).HasMaxLength(32);
-            entity.Property(e => e.Platform).HasMaxLength(32);
+            entity.Property(e => e.CharacterId).HasMaxLength(MatchResultFieldLimits.CharacterIdMaxLength);
+            entity.Property(e => e.ClientVersion).HasMaxLength(MatchResultFieldLimits.ClientVersionMaxLength);
+            entity.Property(e => e.Platform).HasMaxLength(MatchResultFieldLimits.PlatformMaxLength);
             entity.Property(e => e.MetricsJson).HasColumnType("jsonb");
             entity.Property(e => e.ModifiersJson).HasColumnType("jsonb");
             // Submission idempotency: a duplicate (PlayerId, ClientResultId) pair fails this
             // unique index and is translated to ConflictException - SubmitMatchResultUseCase
             // reloads and resolves it as a replay/conflict exactly like a sequential retry.
             entity.HasIndex(e => new { e.PlayerId, e.ClientResultId }).IsUnique();
+            // Measured, not speculative (issue: leaderboard reads, section 16): EXPLAIN ANALYZE
+            // against ~60k rows spread evenly across 21 modes showed a plain B-tree index on ModeId
+            // cuts the leaderboard query from a full sequential scan (~5.8ms) to a bitmap index scan
+            // (~3.2ms) - see LeaderboardQueryPlanTests. No JSON-expression index on the ranking
+            // metric was added; ModeId alone was enough to justify itself at this scale.
+            entity.HasIndex(e => e.ModeId);
             // Restrict, not cascade - match results are immutable history, same reasoning as
             // competitive_series/friend_requests above; a stray delete must fail loudly rather
             // than silently orphan or prune result history.

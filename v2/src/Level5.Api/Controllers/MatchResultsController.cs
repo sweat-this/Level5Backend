@@ -22,11 +22,11 @@ public sealed record MatchResultModifiersDto(
 /// derived ranking/leaderboard data are never accepted from the client.
 /// </summary>
 public sealed record SubmitMatchResultDto(
-    Guid ClientResultId, string ModeId, string LevelId, string CharacterId, string ClientVersion, string Platform,
+    Guid ClientResultId, int ModeId, int LevelId, string CharacterId, string ClientVersion, string Platform,
     IReadOnlyDictionary<string, double> Metrics, MatchResultModifiersDto? Modifiers = null);
 
 public sealed record MatchResultResponseDto(
-    Guid Id, Guid PlayerId, Guid ClientResultId, string ModeId, string LevelId, string CharacterId,
+    Guid Id, Guid PlayerId, Guid ClientResultId, int ModeId, int LevelId, string CharacterId,
     string ClientVersion, string Platform, IReadOnlyDictionary<string, double> Metrics, MatchResultModifiersDto Modifiers,
     DateTimeOffset CreatedAt);
 

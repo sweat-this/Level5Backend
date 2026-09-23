@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Level5.Domain.Results;
 using Xunit;
 
 namespace Level5.Api.IntegrationTests;
@@ -13,8 +14,8 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
     private static object ValidPayload(Guid clientResultId, double totalPoints = 90, object? modifiers = null) => new
     {
         clientResultId,
-        modeId = "arcade",
-        levelId = "level-1",
+        modeId = 1,
+        levelId = 1,
         characterId = "hero",
         clientVersion = "1.0.0",
         platform = "ios",
@@ -42,7 +43,7 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         Assert.Equal(alice.PlayerId, body.GetProperty("playerId").GetGuid());
-        Assert.Equal("arcade", body.GetProperty("modeId").GetString());
+        Assert.Equal(1, body.GetProperty("modeId").GetInt32());
         Assert.Equal(90d, body.GetProperty("metrics").GetProperty("TotalPoints").GetDouble());
         Assert.NotEqual(Guid.Empty, body.GetProperty("id").GetGuid());
     }
@@ -57,8 +58,8 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
         {
             playerId = bob.PlayerId, // not an accepted field - must be ignored, never trusted
             clientResultId = Guid.NewGuid(),
-            modeId = "arcade",
-            levelId = "level-1",
+            modeId = 1,
+            levelId = 1,
             characterId = "hero",
             clientVersion = "1.0.0",
             platform = "ios",
@@ -125,8 +126,8 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
         var payload = new
         {
             clientResultId = Guid.NewGuid(),
-            modeId = "arcade",
-            levelId = "level-1",
+            modeId = 1,
+            levelId = 1,
             characterId = "hero",
             clientVersion = "1.0.0",
             platform = "ios",
@@ -155,12 +156,117 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
         var payload = new
         {
             clientResultId = Guid.NewGuid(),
-            modeId = "arcade",
-            levelId = "level-1",
+            modeId = 1,
+            levelId = 1,
             characterId = "hero",
             clientVersion = "1.0.0",
             platform = "ios",
             metrics = new Dictionary<string, double>()
+        };
+
+        var response = await alice.Client.PostAsJsonAsync("/api/v2/match-results", payload);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static object PayloadWith(Guid clientResultId, string characterId, string clientVersion, string platform) => new
+    {
+        clientResultId,
+        modeId = 1,
+        levelId = 1,
+        characterId,
+        clientVersion,
+        platform,
+        metrics = new Dictionary<string, double> { ["TotalPoints"] = 90 }
+    };
+
+    [Fact]
+    public async Task A_characterId_at_exactly_the_maximum_length_is_accepted()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRCharMax");
+        var characterId = new string('c', MatchResultFieldLimits.CharacterIdMaxLength);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), characterId, "1.0.0", "ios"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_characterId_one_over_the_maximum_length_is_rejected_with_400_not_500()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRCharOver");
+        var characterId = new string('c', MatchResultFieldLimits.CharacterIdMaxLength + 1);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), characterId, "1.0.0", "ios"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_clientVersion_at_exactly_the_maximum_length_is_accepted()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRVerMax");
+        var clientVersion = new string('v', MatchResultFieldLimits.ClientVersionMaxLength);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", clientVersion, "ios"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_clientVersion_one_over_the_maximum_length_is_rejected_with_400_not_500()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRVerOver");
+        var clientVersion = new string('v', MatchResultFieldLimits.ClientVersionMaxLength + 1);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", clientVersion, "ios"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_platform_at_exactly_the_maximum_length_is_accepted()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRPlatMax");
+        var platform = new string('p', MatchResultFieldLimits.PlatformMaxLength);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", "1.0.0", platform));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_platform_one_over_the_maximum_length_is_rejected_with_400_not_500()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRPlatOver");
+        var platform = new string('p', MatchResultFieldLimits.PlatformMaxLength + 1);
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", "1.0.0", platform));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task A_non_positive_modeId_is_rejected(int modeId)
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRModeNonPos");
+        var payload = new
+        {
+            clientResultId = Guid.NewGuid(),
+            modeId,
+            levelId = 1,
+            characterId = "hero",
+            clientVersion = "1.0.0",
+            platform = "ios",
+            metrics = new Dictionary<string, double> { ["TotalPoints"] = 90 }
         };
 
         var response = await alice.Client.PostAsJsonAsync("/api/v2/match-results", payload);

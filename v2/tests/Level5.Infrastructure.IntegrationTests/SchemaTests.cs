@@ -54,6 +54,21 @@ public sealed class SchemaTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Match_results_has_an_index_on_ModeId()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var indexNames = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT indexname FROM pg_indexes
+                 WHERE tablename = 'match_results' AND indexname = 'IX_match_results_ModeId'
+                 """)
+            .ToListAsync();
+
+        Assert.Single(indexNames);
+    }
+
+    [Fact]
     public async Task Match_results_stores_metrics_and_modifiers_as_jsonb()
     {
         await using var db = fixture.CreateDbContext();

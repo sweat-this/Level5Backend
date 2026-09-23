@@ -10,8 +10,8 @@ public sealed class MatchResultRow
     public Guid Id { get; set; }
     public Guid PlayerId { get; set; }
     public Guid ClientResultId { get; set; }
-    public required string ModeId { get; set; }
-    public required string LevelId { get; set; }
+    public int ModeId { get; set; }
+    public int LevelId { get; set; }
     public required string CharacterId { get; set; }
     public required string ClientVersion { get; set; }
     public required string Platform { get; set; }
