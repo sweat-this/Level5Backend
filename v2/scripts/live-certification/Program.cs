@@ -201,9 +201,26 @@ try
         {
             await UnityCounterpartChallenge();
         }
+        else if (subAction == "playturn")
+        {
+            if (args.Length < 4)
+            {
+                Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart playturn <gameNumber> <win|lose>");
+                Environment.Exit(1);
+            }
+            await UnityCounterpartPlayTurn(int.Parse(args[2]), args[3] == "win");
+        }
+        else if (subAction == "cleanup")
+        {
+            if (File.Exists(unityCounterpartStatePath))
+            {
+                File.Delete(unityCounterpartStatePath);
+            }
+            Log($"=== unity-counterpart cleanup complete === {unityCounterpartStatePath} removed");
+        }
         else
         {
-            Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart [friend <tag>|challenge]");
+            Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart [friend <tag>|challenge|playturn <gameNumber> <win|lose>|cleanup]");
             Environment.Exit(1);
         }
     }
@@ -610,21 +627,11 @@ async Task UnityCounterpartChallenge()
             $"unity-counterpart friend state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' first");
     }
 
-    // The state file carries a plaintext password for a live (if throwaway) backend account - same
-    // rule Phase2() already follows for its own state file - never leave it behind, whether this
-    // step succeeds or an assertion/exception aborts it partway through. Nothing downstream of this
-    // command reads unityCounterpartStatePath again.
-    try
-    {
-        await RunUnityCounterpartChallenge();
-    }
-    finally
-    {
-        if (File.Exists(unityCounterpartStatePath))
-        {
-            File.Delete(unityCounterpartStatePath);
-        }
-    }
+    // Unlike Phase2()'s state file, this one is NOT deleted here: 'unity-counterpart playturn' (run
+    // once per game, potentially across a Unity process restart) still needs it after this step.
+    // Callers must run 'unity-counterpart cleanup' once the whole session is over - it carries a
+    // plaintext password for a live (if throwaway) backend account, same rule Phase2() follows.
+    await RunUnityCounterpartChallenge();
 }
 
 async Task RunUnityCounterpartChallenge()
@@ -654,14 +661,68 @@ async Task RunUnityCounterpartChallenge()
         "has the live Unity Accept-friend-request step run yet?");
 
     Guid clientRequestId = Guid.NewGuid();
-    object createBody = new { opponentId = playerIdA, totalGames = 3, rulesetId = "score-only", clientRequestId };
+    // "most-points" (not "score-only"): the only Backend V2 ruleset id that also exists in the
+    // Unity client's own ruleset registry, so RemoteAttemptDescriptorMapper.Map can actually resolve
+    // it and launch a real gameplay scene - see StaticRulesetCatalog's doc comment on that entry.
+    object createBody = new { opponentId = playerIdA, totalGames = 3, rulesetId = "most-points", clientRequestId };
     var createResult = await SendAsync(httpB, HttpMethod.Post, "api/v2/series", createBody, b.AccessToken);
     Log($"UnityCert.CreateChallengeToUnityAccountA: {Describe(createResult)}");
     Expect(createResult.status == 200, $"CreateChallengeToUnityAccountA expected 200, got {Describe(createResult)}");
     Guid seriesId = createResult.doc!.Value.GetProperty("id").GetGuid();
     Record("unityCounterpart.seriesId", seriesId);
 
+    // Merge seriesId into the persisted state file (rather than overwrite it) so
+    // 'unity-counterpart playturn' - run later, possibly by a freshly-restarted Unity process - can
+    // still find usernameB/password/playerIdB alongside it.
+    Dictionary<string, JsonElement> merged;
+    using (JsonDocument stateDoc = JsonDocument.Parse(File.ReadAllText(unityCounterpartStatePath)))
+    {
+        merged = stateDoc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+    }
+    var updatedState = new Dictionary<string, object?>();
+    foreach (var kvp in merged) updatedState[kvp.Key] = kvp.Value;
+    updatedState["seriesId"] = seriesId;
+    File.WriteAllText(unityCounterpartStatePath, JsonSerializer.Serialize(updatedState, jsonOpts));
+
     Log($"=== unity-counterpart challenge complete === seriesId={seriesId} sent live to the Unity-driven account");
+}
+
+async Task UnityCounterpartPlayTurn(int gameNumber, bool winning)
+{
+    if (!File.Exists(unityCounterpartStatePath))
+    {
+        throw new InvalidOperationException(
+            $"unity-counterpart state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' then 'challenge' first");
+    }
+
+    string usernameB, password, displayNameB;
+    Guid playerIdB, seriesId;
+    using (JsonDocument stateDoc = JsonDocument.Parse(File.ReadAllText(unityCounterpartStatePath)))
+    {
+        JsonElement state = stateDoc.RootElement;
+        usernameB = state.GetProperty("usernameB").GetString()!;
+        password = state.GetProperty("password").GetString()!;
+        displayNameB = state.GetProperty("displayNameB").GetString()!;
+        playerIdB = state.GetProperty("playerIdB").GetGuid();
+        seriesId = state.GetProperty("seriesId").GetGuid();
+    }
+
+    Log($"=== unity-counterpart playturn start === usernameB={usernameB} seriesId={seriesId} game={gameNumber} winning={winning}");
+    using HttpClient httpB = NewClient();
+    Account b = await Login(httpB, usernameB, password, displayNameB, playerIdB);
+
+    var start = await SendAsync(httpB, HttpMethod.Post, $"api/v2/series/{seriesId}/games/{gameNumber}/attempts/start", null, b.AccessToken);
+    Log($"UnityCert.StartAttemptB(game{gameNumber}): {Describe(start)}");
+    Expect(start.status == 200, $"StartAttemptB(game{gameNumber}) expected 200, got {Describe(start)}");
+    Guid attemptId = start.doc!.Value.GetProperty("attemptId").GetGuid();
+
+    var metrics = BuildMetrics(start.doc!.Value, winning);
+    var complete = await SendAsync(httpB, HttpMethod.Post,
+        $"api/v2/series/{seriesId}/games/{gameNumber}/attempts/{attemptId}/complete", new { metrics }, b.AccessToken);
+    Log($"UnityCert.CompleteAttemptB(game{gameNumber}): {Describe(complete)}");
+    Expect(complete.status == 200, $"CompleteAttemptB(game{gameNumber}) expected 200, got {Describe(complete)}");
+
+    Log($"=== unity-counterpart playturn complete === game={gameNumber} B's attempt {attemptId} submitted live ({(winning ? "won" : "lost")})");
 }
 
 sealed class Account

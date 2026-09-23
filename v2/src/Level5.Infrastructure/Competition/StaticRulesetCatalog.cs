@@ -29,6 +29,25 @@ public sealed class StaticRulesetCatalog : IRulesetCatalog
             ModeId: "mode-score-only",
             InformationPolicy: InformationPolicy.SealedAttempt,
             AlternatesFirstAttempt: false,
+            ComparisonKeys: [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]),
+
+        // "score-only" above has no counterpart in the Unity client's own ruleset registry
+        // (Assets/Scripts/versus/Level5Versus/DefaultCompetitiveRulesets.cs) - discovered during
+        // issue #159 live Unity-client certification: RemoteAttemptDescriptorMapper.Map resolves a
+        // remote attempt's ruleset by looking the server's RulesetId up in Unity's own
+        // VersusCatalogs.Rulesets, which has never had a "score-only" entry, so no client build
+        // could ever actually launch a match for the server's only advertised ruleset - contrary to
+        // this class's own doc comment ("every entry mirrors a real, already-shipped Unity
+        // ruleset"). "most-points" is that real, already-shipped Unity ruleset (id/comparison shape
+        // match DefaultCompetitiveRulesets.Score("most-points", GameModeId.TotalPoints, ...)
+        // exactly), added here rather than renaming "score-only" so the existing catalog entry and
+        // everything that already depends on its id (tests, fixtures) is left untouched.
+        ["most-points"] = new CatalogEntry(
+            CurrentVersion: 1,
+            MinimumCompatibleVersion: 1,
+            ModeId: "mode-most-points",
+            InformationPolicy: InformationPolicy.SealedAttempt,
+            AlternatesFirstAttempt: false,
             ComparisonKeys: [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)])
     };
 
