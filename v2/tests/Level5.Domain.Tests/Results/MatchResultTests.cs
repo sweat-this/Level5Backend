@@ -14,7 +14,7 @@ public class MatchResultTests
     private static readonly MatchResultModifiers DefaultModifiers = MatchResultModifiers.Of(false, false, false, false);
 
     private static MatchResult ValidResult(
-        PlayerId? playerId = null, Guid? clientResultId = null, string modeId = "arcade", string levelId = "level-1",
+        PlayerId? playerId = null, Guid? clientResultId = null, int modeId = 1, int levelId = 1,
         string characterId = "hero", string clientVersion = "1.0.0", string platform = "ios",
         MatchResultMetrics? metrics = null, MatchResultModifiers? modifiers = null)
         => MatchResult.Submit(
@@ -42,17 +42,17 @@ public class MatchResultTests
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Submit_rejects_an_empty_modeId(string modeId)
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Submit_rejects_a_non_positive_modeId(int modeId)
     {
         Assert.Throws<InvalidMatchResultException>(() => ValidResult(modeId: modeId));
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Submit_rejects_an_empty_levelId(string levelId)
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Submit_rejects_a_non_positive_levelId(int levelId)
     {
         Assert.Throws<InvalidMatchResultException>(() => ValidResult(levelId: levelId));
     }
@@ -82,6 +82,60 @@ public class MatchResultTests
     }
 
     [Fact]
+    public void Submit_accepts_characterId_at_exactly_the_maximum_length()
+    {
+        var characterId = new string('c', MatchResultFieldLimits.CharacterIdMaxLength);
+
+        var result = ValidResult(characterId: characterId);
+
+        Assert.Equal(characterId, result.CharacterId);
+    }
+
+    [Fact]
+    public void Submit_rejects_characterId_one_over_the_maximum_length()
+    {
+        var characterId = new string('c', MatchResultFieldLimits.CharacterIdMaxLength + 1);
+
+        Assert.Throws<InvalidMatchResultException>(() => ValidResult(characterId: characterId));
+    }
+
+    [Fact]
+    public void Submit_accepts_clientVersion_at_exactly_the_maximum_length()
+    {
+        var clientVersion = new string('v', MatchResultFieldLimits.ClientVersionMaxLength);
+
+        var result = ValidResult(clientVersion: clientVersion);
+
+        Assert.Equal(clientVersion, result.ClientVersion);
+    }
+
+    [Fact]
+    public void Submit_rejects_clientVersion_one_over_the_maximum_length()
+    {
+        var clientVersion = new string('v', MatchResultFieldLimits.ClientVersionMaxLength + 1);
+
+        Assert.Throws<InvalidMatchResultException>(() => ValidResult(clientVersion: clientVersion));
+    }
+
+    [Fact]
+    public void Submit_accepts_platform_at_exactly_the_maximum_length()
+    {
+        var platform = new string('p', MatchResultFieldLimits.PlatformMaxLength);
+
+        var result = ValidResult(platform: platform);
+
+        Assert.Equal(platform, result.Platform);
+    }
+
+    [Fact]
+    public void Submit_rejects_platform_one_over_the_maximum_length()
+    {
+        var platform = new string('p', MatchResultFieldLimits.PlatformMaxLength + 1);
+
+        Assert.Throws<InvalidMatchResultException>(() => ValidResult(platform: platform));
+    }
+
+    [Fact]
     public void Two_distinct_submissions_get_distinct_ids()
     {
         var a = ValidResult();
@@ -93,9 +147,9 @@ public class MatchResultTests
     [Fact]
     public void MatchesRequest_is_true_for_an_identical_replay()
     {
-        var result = ValidResult(modeId: "arcade", levelId: "level-1", characterId: "hero", clientVersion: "1.0.0", platform: "ios");
+        var result = ValidResult(modeId: 1, levelId: 1, characterId: "hero", clientVersion: "1.0.0", platform: "ios");
 
-        var same = result.MatchesRequest("arcade", "level-1", "hero", "1.0.0", "ios", DefaultMetrics(), DefaultModifiers);
+        var same = result.MatchesRequest(1, 1, "hero", "1.0.0", "ios", DefaultMetrics(), DefaultModifiers);
 
         Assert.True(same);
     }
@@ -105,7 +159,7 @@ public class MatchResultTests
     {
         var result = ValidResult(metrics: DefaultMetrics(90));
 
-        var same = result.MatchesRequest("arcade", "level-1", "hero", "1.0.0", "ios", DefaultMetrics(91), DefaultModifiers);
+        var same = result.MatchesRequest(1, 1, "hero", "1.0.0", "ios", DefaultMetrics(91), DefaultModifiers);
 
         Assert.False(same);
     }
@@ -116,22 +170,23 @@ public class MatchResultTests
         var result = ValidResult(modifiers: DefaultModifiers);
 
         var same = result.MatchesRequest(
-            "arcade", "level-1", "hero", "1.0.0", "ios", DefaultMetrics(),
+            1, 1, "hero", "1.0.0", "ios",
+            DefaultMetrics(),
             MatchResultModifiers.Of(true, false, false, false));
 
         Assert.False(same);
     }
 
     [Theory]
-    [InlineData("other-mode", "level-1", "hero", "1.0.0", "ios")]
-    [InlineData("arcade", "other-level", "hero", "1.0.0", "ios")]
-    [InlineData("arcade", "level-1", "other-hero", "1.0.0", "ios")]
-    [InlineData("arcade", "level-1", "hero", "2.0.0", "ios")]
-    [InlineData("arcade", "level-1", "hero", "1.0.0", "android")]
+    [InlineData(2, 1, "hero", "1.0.0", "ios")]
+    [InlineData(1, 2, "hero", "1.0.0", "ios")]
+    [InlineData(1, 1, "other-hero", "1.0.0", "ios")]
+    [InlineData(1, 1, "hero", "2.0.0", "ios")]
+    [InlineData(1, 1, "hero", "1.0.0", "android")]
     public void MatchesRequest_is_false_when_any_client_field_differs(
-        string modeId, string levelId, string characterId, string clientVersion, string platform)
+        int modeId, int levelId, string characterId, string clientVersion, string platform)
     {
-        var result = ValidResult(modeId: "arcade", levelId: "level-1", characterId: "hero", clientVersion: "1.0.0", platform: "ios");
+        var result = ValidResult(modeId: 1, levelId: 1, characterId: "hero", clientVersion: "1.0.0", platform: "ios");
 
         var same = result.MatchesRequest(modeId, levelId, characterId, clientVersion, platform, DefaultMetrics(), DefaultModifiers);
 
@@ -148,13 +203,13 @@ public class MatchResultTests
         var modifiers = MatchResultModifiers.Of(true, true, false, false);
 
         var result = MatchResult.Rehydrate(
-            id, playerId, clientResultId, "mode", "level", "character", "1.2.3", "pc", metrics, modifiers, Now);
+            id, playerId, clientResultId, 1, 2, "character", "1.2.3", "pc", metrics, modifiers, Now);
 
         Assert.Equal(id, result.Id);
         Assert.Equal(playerId, result.PlayerId);
         Assert.Equal(clientResultId, result.ClientResultId);
-        Assert.Equal("mode", result.ModeId);
-        Assert.Equal("level", result.LevelId);
+        Assert.Equal(1, result.ModeId);
+        Assert.Equal(2, result.LevelId);
         Assert.Equal("character", result.CharacterId);
         Assert.Equal("1.2.3", result.ClientVersion);
         Assert.Equal("pc", result.Platform);

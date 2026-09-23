@@ -16,8 +16,8 @@ public sealed class MatchResult
     public MatchResultId Id { get; }
     public PlayerId PlayerId { get; }
     public Guid ClientResultId { get; }
-    public string ModeId { get; }
-    public string LevelId { get; }
+    public int ModeId { get; }
+    public int LevelId { get; }
     public string CharacterId { get; }
     public string ClientVersion { get; }
     public string Platform { get; }
@@ -26,7 +26,7 @@ public sealed class MatchResult
     public DateTimeOffset CreatedAt { get; }
 
     private MatchResult(
-        MatchResultId id, PlayerId playerId, Guid clientResultId, string modeId, string levelId, string characterId,
+        MatchResultId id, PlayerId playerId, Guid clientResultId, int modeId, int levelId, string characterId,
         string clientVersion, string platform, MatchResultMetrics metrics, MatchResultModifiers modifiers, DateTimeOffset createdAt)
     {
         Id = id;
@@ -43,7 +43,7 @@ public sealed class MatchResult
     }
 
     public static MatchResult Submit(
-        PlayerId playerId, Guid clientResultId, string modeId, string levelId, string characterId,
+        PlayerId playerId, Guid clientResultId, int modeId, int levelId, string characterId,
         string clientVersion, string platform, MatchResultMetrics metrics, MatchResultModifiers modifiers, DateTimeOffset now)
     {
         if (clientResultId == Guid.Empty)
@@ -53,8 +53,10 @@ public sealed class MatchResult
 
         return new MatchResult(
             MatchResultId.New(), playerId, clientResultId,
-            RequireNonEmpty(modeId, "modeId"), RequireNonEmpty(levelId, "levelId"), RequireNonEmpty(characterId, "characterId"),
-            RequireNonEmpty(clientVersion, "clientVersion"), RequireNonEmpty(platform, "platform"),
+            RequirePositive(modeId, "modeId"), RequirePositive(levelId, "levelId"),
+            RequireWithinLength(characterId, "characterId", MatchResultFieldLimits.CharacterIdMaxLength),
+            RequireWithinLength(clientVersion, "clientVersion", MatchResultFieldLimits.ClientVersionMaxLength),
+            RequireWithinLength(platform, "platform", MatchResultFieldLimits.PlatformMaxLength),
             metrics ?? throw new InvalidMatchResultException("Metrics are required."),
             modifiers ?? throw new InvalidMatchResultException("Modifiers are required."),
             now);
@@ -62,7 +64,7 @@ public sealed class MatchResult
 
     /// <summary>Reconstitutes a result from persisted state. Infrastructure only.</summary>
     public static MatchResult Rehydrate(
-        MatchResultId id, PlayerId playerId, Guid clientResultId, string modeId, string levelId, string characterId,
+        MatchResultId id, PlayerId playerId, Guid clientResultId, int modeId, int levelId, string characterId,
         string clientVersion, string platform, MatchResultMetrics metrics, MatchResultModifiers modifiers, DateTimeOffset createdAt)
         => new(id, playerId, clientResultId, modeId, levelId, characterId, clientVersion, platform, metrics, modifiers, createdAt);
 
@@ -74,7 +76,7 @@ public sealed class MatchResult
     /// via lookup before calling this.
     /// </summary>
     public bool MatchesRequest(
-        string modeId, string levelId, string characterId, string clientVersion, string platform,
+        int modeId, int levelId, string characterId, string clientVersion, string platform,
         MatchResultMetrics metrics, MatchResultModifiers modifiers) =>
         ModeId == modeId
         && LevelId == levelId
@@ -84,11 +86,26 @@ public sealed class MatchResult
         && Metrics.Equals(metrics)
         && Modifiers.Equals(modifiers);
 
-    private static string RequireNonEmpty(string value, string fieldName)
+    private static int RequirePositive(int value, string fieldName)
+    {
+        if (value <= 0)
+        {
+            throw new InvalidMatchResultException($"'{fieldName}' must be a positive integer.");
+        }
+
+        return value;
+    }
+
+    private static string RequireWithinLength(string value, string fieldName, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new InvalidMatchResultException($"'{fieldName}' cannot be empty.");
+        }
+
+        if (value.Length > maxLength)
+        {
+            throw new InvalidMatchResultException($"'{fieldName}' cannot exceed {maxLength} characters.");
         }
 
         return value;

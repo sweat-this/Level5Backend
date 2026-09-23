@@ -463,6 +463,89 @@
         }
       }
     },
+    "/api/v2/leaderboards/{modeId}": {
+      "get": {
+        "tags": [
+          "Leaderboards"
+        ],
+        "parameters": [
+          {
+            "name": "modeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hardcore",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "traffic",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "enemies",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "sniper",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardPageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/match-results": {
       "post": {
         "tags": [
@@ -1466,6 +1549,67 @@
         },
         "additionalProperties": false
       },
+      "LeaderboardEntryDto": {
+        "type": "object",
+        "properties": {
+          "matchResultId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "player": {
+            "$ref": "#/components/schemas/PublicPlayerSummaryDto"
+          },
+          "characterId": {
+            "type": "string"
+          },
+          "levelId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modifiers": {
+            "$ref": "#/components/schemas/MatchResultModifiersDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaderboardPageDto": {
+        "type": "object",
+        "properties": {
+          "modeId": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntryDto"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "LoginRequestDto": {
         "type": "object",
         "properties": {
@@ -1521,10 +1665,12 @@
             "format": "uuid"
           },
           "modeId": {
-            "type": "string"
+            "type": "integer",
+            "format": "int32"
           },
           "levelId": {
-            "type": "string"
+            "type": "integer",
+            "format": "int32"
           },
           "characterId": {
             "type": "string"
@@ -1815,10 +1961,12 @@
             "format": "uuid"
           },
           "modeId": {
-            "type": "string"
+            "type": "integer",
+            "format": "int32"
           },
           "levelId": {
-            "type": "string"
+            "type": "integer",
+            "format": "int32"
           },
           "characterId": {
             "type": "string"
@@ -1862,6 +2010,9 @@
     },
     {
       "name": "Friends"
+    },
+    {
+      "name": "Leaderboards"
     },
     {
       "name": "MatchResults"

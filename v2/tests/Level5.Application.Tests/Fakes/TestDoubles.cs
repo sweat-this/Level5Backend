@@ -5,6 +5,8 @@ using Level5.Application.Competition;
 using Level5.Domain.Competition;
 using Level5.Domain.Identity;
 using Level5.Domain.Ids;
+using Level5.Domain.Leaderboards;
+using Level5.Domain.Results;
 
 namespace Level5.Application.Tests.Fakes;
 
@@ -38,6 +40,13 @@ public sealed class FakeRulesetCatalog : IRulesetCatalog
             InformationPolicy.SealedAttempt, AlternatesFirstAttempt: false,
             [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]);
     }
+}
+
+/// <summary>Mirrors the real Infrastructure catalog (<c>StaticLeaderboardPolicyCatalog</c>)'s mode-1 entry so use-case tests exercise the same required-metric rule without depending on Infrastructure.</summary>
+public sealed class FakeLeaderboardPolicyCatalog : ILeaderboardPolicyCatalog
+{
+    public LeaderboardPolicy? TryResolve(int modeId) =>
+        modeId == 1 ? new LeaderboardPolicy(1, MatchResultMetric.TotalPoints, RankingDirection.HigherWins) : null;
 }
 
 /// <summary>Not a real hash - deterministic and reversible so tests can assert on it directly.</summary>

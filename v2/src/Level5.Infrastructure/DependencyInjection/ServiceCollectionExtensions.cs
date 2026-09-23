@@ -2,6 +2,7 @@ using Level5.Application.Abstractions;
 using Level5.Infrastructure.Competition;
 using Level5.Infrastructure.Health;
 using Level5.Infrastructure.Identity;
+using Level5.Infrastructure.Leaderboards;
 using Level5.Infrastructure.Persistence;
 using Level5.Infrastructure.Persistence.Repositories;
 using Level5.Infrastructure.Time;
@@ -48,6 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFriendshipStore, FriendshipStore>();
         services.AddScoped<IVersusSeriesStore, VersusSeriesStore>();
         services.AddScoped<IMatchResultStore, MatchResultStore>();
+        services.AddScoped<ILeaderboardQuery, LeaderboardQuery>();
         services.AddScoped<IAuthSessionStore, AuthSessionStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
@@ -58,6 +60,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IRulesetCatalog, StaticRulesetCatalog>();
+        services.AddSingleton<ILeaderboardPolicyCatalog, StaticLeaderboardPolicyCatalog>();
 
         services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
