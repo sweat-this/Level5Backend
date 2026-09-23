@@ -274,6 +274,67 @@ public sealed class MatchResultsFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task A_non_positive_levelId_is_rejected(int levelId)
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRLevelNonPos");
+        var payload = new
+        {
+            clientResultId = Guid.NewGuid(),
+            modeId = 1,
+            levelId,
+            characterId = "hero",
+            clientVersion = "1.0.0",
+            platform = "ios",
+            metrics = new Dictionary<string, double> { ["TotalPoints"] = 90 }
+        };
+
+        var response = await alice.Client.PostAsJsonAsync("/api/v2/match-results", payload);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_or_whitespace_characterId_is_rejected(string characterId)
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRCharEmpty");
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), characterId, "1.0.0", "ios"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_or_whitespace_clientVersion_is_rejected(string clientVersion)
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRVerEmpty");
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", clientVersion, "ios"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task An_empty_or_whitespace_platform_is_rejected(string platform)
+    {
+        var alice = await factory.RegisterNewPlayerAsync("MRPlatEmpty");
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/match-results", PayloadWith(Guid.NewGuid(), "hero", "1.0.0", platform));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task Modifiers_round_trip_and_default_to_false_when_omitted()
     {

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -136,6 +137,65 @@ public sealed class MatchResultsMigrationUpgradeTests
 
                 var pending = await db.Database.GetPendingMigrationsAsync();
                 Assert.Empty(pending);
+            }
+        }
+        finally
+        {
+            await container.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Proves the ConvertMatchResultModeAndLevelIdsToInteger migration fails loudly on a legacy
+    /// varchar ModeId/LevelId value that isn't a base-10 integer, rather than silently coercing it
+    /// to 0 or dropping the row - the migration's own explicit `::integer` cast is what enforces
+    /// this, so this test proves that cast actually rejects bad data at migration time.
+    /// </summary>
+    [Fact]
+    public async Task Upgrading_from_the_varchar_ModeId_LevelId_schema_fails_loudly_on_a_non_numeric_value()
+    {
+        var container = new PostgreSqlBuilder()
+            .WithImage("postgres:18-alpine")
+            .WithDatabase("level5_v2_modeid_upgrade_bad_data_test")
+            .WithUsername("level5")
+            .WithPassword("test-password")
+            .Build();
+        await container.StartAsync();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<Level5V2DbContext>().UseNpgsql(container.GetConnectionString()).Options;
+
+            await using (var db = new Level5V2DbContext(options))
+            {
+                var migrator = db.Database.GetInfrastructure().GetRequiredService<IMigrator>();
+                await migrator.MigrateAsync(AddMatchResultsMigrationId);
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            await using (var db = new Level5V2DbContext(options))
+            {
+                var playerId = (await PlayerSeeding.CreatePlayerAsync(db, "PreConvertBadData", now)).Value;
+
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                     INSERT INTO match_results
+                         ("Id", "PlayerId", "ClientResultId", "ModeId", "LevelId", "CharacterId", "ClientVersion", "Platform", "MetricsJson", "ModifiersJson", "CreatedAt")
+                     VALUES
+                         ({Guid.NewGuid()}, {playerId}, {Guid.NewGuid()}, {"not-a-number"}, {"3"}, {"hero"}, {"1.0.0"}, {"ios"},
+                          {"{\"TotalPoints\":90}"}::jsonb, {"{\"Hardcore\":false,\"TrafficEnabled\":false,\"EnemiesEnabled\":false,\"SniperEnabled\":false}"}::jsonb, {now})
+                     """);
+            }
+
+            await using (var db = new Level5V2DbContext(options))
+            {
+                await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync());
+            }
+
+            await using (var db = new Level5V2DbContext(options))
+            {
+                var pending = await db.Database.GetPendingMigrationsAsync();
+                Assert.NotEmpty(pending);
             }
         }
         finally
