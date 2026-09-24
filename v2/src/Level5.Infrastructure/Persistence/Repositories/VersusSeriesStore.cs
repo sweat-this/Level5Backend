@@ -22,7 +22,18 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
         var row = ToRow(series);
         row.ClientRequestId = clientRequestId;
         db.VersusSeries.Add(row);
-        await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
+
+        try
+        {
+            await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
+        }
+        catch (ConflictException)
+        {
+            // CreateChallengeUseCase resolves a lost insert race by reloading on this same
+            // context; stop tracking the rejected row so no later save retries the insert.
+            db.Entry(row).State = EntityState.Detached;
+            throw;
+        }
     }
 
     public async Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken)

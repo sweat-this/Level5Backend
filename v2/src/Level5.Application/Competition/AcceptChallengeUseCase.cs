@@ -6,16 +6,11 @@ namespace Level5.Application.Competition;
 
 public sealed record AcceptChallengeRequest(PlayerId ActingPlayerId, VersusSeriesId SeriesId);
 
+/// <summary>Retry- and race-safe per <see cref="SeriesLookup.ApplyChallengeTransitionAsync"/> (issue #10).</summary>
 public sealed class AcceptChallengeUseCase(IVersusSeriesStore seriesStore, IClock clock)
 {
-    public async Task<SeriesView> ExecuteAsync(AcceptChallengeRequest request, CancellationToken cancellationToken)
-    {
-        var series = await SeriesLookup.LoadForParticipantAsync(seriesStore, request.SeriesId, request.ActingPlayerId, cancellationToken);
-        var expectedRevision = series.Revision;
-
-        series.Accept(request.ActingPlayerId, clock.UtcNow);
-
-        await SeriesLookup.SaveOrThrowAsync(seriesStore, series, expectedRevision, cancellationToken);
-        return series.ToView(request.ActingPlayerId);
-    }
+    public Task<SeriesView> ExecuteAsync(AcceptChallengeRequest request, CancellationToken cancellationToken)
+        => SeriesLookup.ApplyChallengeTransitionAsync(
+            seriesStore, request.SeriesId, request.ActingPlayerId, "accept_challenge",
+            series => series.Accept(request.ActingPlayerId, clock.UtcNow), cancellationToken);
 }

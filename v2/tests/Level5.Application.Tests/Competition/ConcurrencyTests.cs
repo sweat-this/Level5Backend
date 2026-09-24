@@ -56,11 +56,64 @@ internal sealed class FailFirstNSavesVersusSeriesStore(InMemoryVersusSeriesStore
 }
 
 /// <summary>
+/// Reproduces "another request committed between my read and my write" deterministically: the
+/// optional hooks run a competing request against <paramref name="inner"/> immediately before
+/// this caller's first write reaches it, after this caller has already loaded (or looked up)
+/// stale state. Also counts writes so tests can prove a replay issues none, and that
+/// reconciliation is bounded.
+/// </summary>
+internal sealed class InterceptingVersusSeriesStore(InMemoryVersusSeriesStore inner) : IVersusSeriesStore
+{
+    public Func<Task>? BeforeFirstSave { get; set; }
+    public Func<Task>? BeforeFirstAdd { get; set; }
+    public Exception? AddFailure { get; set; }
+    public bool LoseEverySave { get; set; }
+    public int SaveCalls { get; private set; }
+
+    public Task<VersusSeries?> FindByIdAsync(VersusSeriesId id, CancellationToken cancellationToken) => inner.FindByIdAsync(id, cancellationToken);
+    public Task<VersusSeries?> FindByIdempotencyKeyAsync(PlayerId challengerId, Guid clientRequestId, CancellationToken cancellationToken) => inner.FindByIdempotencyKeyAsync(challengerId, clientRequestId, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListIncomingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListIncomingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListOutgoingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListActiveSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
+    public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListCompletedSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
+
+    public async Task AddAsync(VersusSeries series, Guid? clientRequestId, CancellationToken cancellationToken)
+    {
+        if (BeforeFirstAdd is { } competitor)
+        {
+            BeforeFirstAdd = null;
+            await competitor();
+        }
+
+        if (AddFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        await inner.AddAsync(series, clientRequestId, cancellationToken);
+    }
+
+    public async Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken)
+    {
+        SaveCalls++;
+
+        if (BeforeFirstSave is { } competitor)
+        {
+            BeforeFirstSave = null;
+            await competitor();
+        }
+
+        return !LoseEverySave && await inner.TrySaveAsync(series, expectedRevision, cancellationToken);
+    }
+}
+
+/// <summary>
 /// Exercises the races the ADR calls out explicitly. The store-level "which write actually wins
 /// a stale-revision race" behavior is proven against real Postgres in the Infrastructure
 /// integration tests; this layer's own job is narrower and just as important: every mutating use
-/// case must turn a lost race (TrySaveAsync returning false) into a client-visible conflict
-/// response instead of silently discarding the loser's request.
+/// case must resolve a lost race (TrySaveAsync returning false) against authoritative state -
+/// converging when the identical command won, and otherwise surfacing a client-visible conflict -
+/// instead of silently discarding the loser's request or overwriting the winner.
 /// </summary>
 public class ConcurrencyTests
 {
@@ -69,14 +122,14 @@ public class ConcurrencyTests
     private readonly FakeRulesetCatalog _catalog = new();
     private readonly FakeClock _clock = new();
 
-    private async Task<(VersusSeriesId SeriesId, PlayerId Challenger, PlayerId Opponent)> SeedPendingChallengeAsync()
+    private async Task<(VersusSeriesId SeriesId, PlayerId Challenger, PlayerId Opponent)> SeedPendingChallengeAsync(int totalGames = 3)
     {
         var challenger = PlayerId.New();
         var opponent = PlayerId.New();
         await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
 
         var view = await new CreateChallengeUseCase(_seriesStore, _friendships, _catalog, _clock)
-            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, Guid.NewGuid()), CancellationToken.None);
+            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, totalGames, null, Guid.NewGuid()), CancellationToken.None);
 
         return (view.Id, challenger, opponent);
     }
@@ -175,5 +228,175 @@ public class ConcurrencyTests
         var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
         var attempt = persisted!.Rounds.Single(r => r.GameNumber == 1).AttemptFor(challenger);
         Assert.Equal(50d, attempt!.Result!.ValueOf(ResultMetric.Score));
+    }
+
+    /// <summary>Runs one challenge transition as its only authorized actor (opponent for accept/decline, challenger for cancel).</summary>
+    private Task<SeriesView> RunTransition(string command, IVersusSeriesStore store, VersusSeriesId seriesId, PlayerId challenger, PlayerId opponent) => command switch
+    {
+        "accept" => new AcceptChallengeUseCase(store, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None),
+        "decline" => new DeclineChallengeUseCase(store, _clock).ExecuteAsync(new DeclineChallengeRequest(opponent, seriesId), CancellationToken.None),
+        "cancel" => new CancelChallengeUseCase(store, _clock).ExecuteAsync(new CancelChallengeRequest(challenger, seriesId), CancellationToken.None),
+        _ => throw new ArgumentOutOfRangeException(nameof(command))
+    };
+
+    private static SeriesStatus StatusAfter(string command) => command switch
+    {
+        "accept" => SeriesStatus.Active,
+        "decline" => SeriesStatus.Declined,
+        "cancel" => SeriesStatus.Cancelled,
+        _ => throw new ArgumentOutOfRangeException(nameof(command))
+    };
+
+    [Theory]
+    [InlineData("accept")]
+    [InlineData("decline")]
+    [InlineData("cancel")]
+    public async Task An_already_applied_transition_replays_without_writing(string command)
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await RunTransition(command, _seriesStore, seriesId, challenger, opponent);
+        var store = new InterceptingVersusSeriesStore(_seriesStore);
+
+        var replayed = await RunTransition(command, store, seriesId, challenger, opponent);
+
+        Assert.Equal(StatusAfter(command), replayed.Status);
+        Assert.Equal(1, replayed.Revision);
+        Assert.Equal(0, store.SaveCalls);
+    }
+
+    [Fact]
+    public async Task Accept_replay_after_the_series_completed_returns_the_completed_view_without_writing()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync(totalGames: 1);
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        foreach (var (player, score) in new[] { (challenger, 90), (opponent, 10) })
+        {
+            var started = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(player, seriesId, 1), CancellationToken.None);
+            await new CompleteAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new CompleteAttemptRequest(player, seriesId, 1, started.AttemptId, AttemptResult.OfScore(score)), CancellationToken.None);
+        }
+
+        var store = new InterceptingVersusSeriesStore(_seriesStore);
+        var replayed = await new AcceptChallengeUseCase(store, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+
+        Assert.Equal(SeriesStatus.Completed, replayed.Status);
+        Assert.Equal(challenger, replayed.WinnerId);
+        Assert.Equal(0, store.SaveCalls);
+    }
+
+    [Theory]
+    [InlineData("accept")]
+    [InlineData("decline")]
+    [InlineData("cancel")]
+    public async Task A_duplicate_transition_that_loses_the_save_race_converges_on_the_identical_winner(string command)
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        // Both requests load revision 0; the duplicate commits first, so this request's save loses.
+        var store = new InterceptingVersusSeriesStore(_seriesStore)
+        {
+            BeforeFirstSave = () => RunTransition(command, _seriesStore, seriesId, challenger, opponent)
+        };
+
+        var view = await RunTransition(command, store, seriesId, challenger, opponent);
+
+        Assert.Equal(StatusAfter(command), view.Status);
+        Assert.Equal(1, store.SaveCalls);
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        Assert.Equal(StatusAfter(command), persisted!.Status);
+        Assert.Equal(1, persisted.Revision); // exactly one committed transition, not two
+    }
+
+    [Theory]
+    [InlineData("cancel", "accept")]
+    [InlineData("accept", "cancel")]
+    [InlineData("decline", "accept")]
+    [InlineData("accept", "decline")]
+    [InlineData("cancel", "decline")]
+    [InlineData("decline", "cancel")]
+    public async Task An_incompatible_transition_that_loses_the_save_race_is_a_conflict_and_never_overwrites_the_winner(string winner, string loser)
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        var store = new InterceptingVersusSeriesStore(_seriesStore)
+        {
+            BeforeFirstSave = () => RunTransition(winner, _seriesStore, seriesId, challenger, opponent)
+        };
+
+        await Assert.ThrowsAsync<IllegalSeriesTransitionException>(() => RunTransition(loser, store, seriesId, challenger, opponent));
+
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        Assert.Equal(StatusAfter(winner), persisted!.Status);
+        Assert.Equal(1, persisted.Revision);
+    }
+
+    [Fact]
+    public async Task Transition_reconciliation_reloads_once_and_never_retries_the_write()
+    {
+        // Every save loses but the reload still shows PendingAcceptance - nothing explains the
+        // lost write, so the use case must surface a conflict instead of writing again or looping.
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        var store = new InterceptingVersusSeriesStore(_seriesStore) { LoseEverySave = true };
+
+        await Assert.ThrowsAsync<ConflictException>(() => RunTransition("accept", store, seriesId, challenger, opponent));
+
+        Assert.Equal(1, store.SaveCalls);
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        Assert.Equal(SeriesStatus.PendingAcceptance, persisted!.Status);
+    }
+
+    [Fact]
+    public async Task A_create_that_loses_the_insert_race_to_an_identical_request_returns_the_winners_series()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
+        var request = new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, Guid.NewGuid());
+        SeriesView? winner = null;
+        // Commits the identical request after this caller's idempotency lookup missed but before its insert.
+        var store = new InterceptingVersusSeriesStore(_seriesStore)
+        {
+            BeforeFirstAdd = async () => winner = await new CreateChallengeUseCase(_seriesStore, _friendships, _catalog, _clock).ExecuteAsync(request, CancellationToken.None)
+        };
+
+        var view = await new CreateChallengeUseCase(store, _friendships, _catalog, _clock).ExecuteAsync(request, CancellationToken.None);
+
+        Assert.Equal(winner!.Id, view.Id);
+        var outgoing = await _seriesStore.ListOutgoingChallengeSummariesAsync(challenger, null, null, CancellationToken.None);
+        Assert.Single(outgoing.Items);
+    }
+
+    [Fact]
+    public async Task A_create_that_loses_the_insert_race_to_a_different_request_under_the_same_key_conflicts()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        var otherOpponent = PlayerId.New();
+        await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
+        await _friendships.AddFriendshipAsync(Friendship.Between(challenger, otherOpponent, _clock.UtcNow), CancellationToken.None);
+        var key = Guid.NewGuid();
+        var store = new InterceptingVersusSeriesStore(_seriesStore)
+        {
+            BeforeFirstAdd = () => new CreateChallengeUseCase(_seriesStore, _friendships, _catalog, _clock)
+                .ExecuteAsync(new CreateChallengeRequest(challenger, otherOpponent, "score-only", null, 3, null, key), CancellationToken.None)
+        };
+
+        await Assert.ThrowsAsync<ConflictException>(() => new CreateChallengeUseCase(store, _friendships, _catalog, _clock)
+            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, key), CancellationToken.None));
+
+        var stored = await _seriesStore.FindByIdempotencyKeyAsync(challenger, key, CancellationToken.None);
+        Assert.Equal(otherOpponent, stored!.OpponentId);
+    }
+
+    [Fact]
+    public async Task A_create_insert_conflict_with_no_row_under_the_key_is_not_swallowed_as_a_replay()
+    {
+        var challenger = PlayerId.New();
+        var opponent = PlayerId.New();
+        await _friendships.AddFriendshipAsync(Friendship.Between(challenger, opponent, _clock.UtcNow), CancellationToken.None);
+        var unrelated = new ConflictException("Some other unique constraint.");
+        var store = new InterceptingVersusSeriesStore(_seriesStore) { AddFailure = unrelated };
+
+        var thrown = await Assert.ThrowsAsync<ConflictException>(() => new CreateChallengeUseCase(store, _friendships, _catalog, _clock)
+            .ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, Guid.NewGuid()), CancellationToken.None));
+
+        Assert.Same(unrelated, thrown);
     }
 }

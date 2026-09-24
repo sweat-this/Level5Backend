@@ -1407,6 +1407,9 @@
         "additionalProperties": false
       },
       "CreateChallengeDto": {
+        "required": [
+          "clientRequestId"
+        ],
         "type": "object",
         "properties": {
           "opponentId": {
@@ -1431,8 +1434,7 @@
           },
           "clientRequestId": {
             "type": "string",
-            "format": "uuid",
-            "nullable": true
+            "format": "uuid"
           }
         },
         "additionalProperties": false

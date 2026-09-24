@@ -48,9 +48,10 @@ public static class ApplicationMetrics
     /// <summary>
     /// A series mutation exhausted its bounded reload-and-reevaluate retries
     /// (<see cref="Level5.Application.Competition.StartAttemptUseCase"/>/
-    /// <see cref="Level5.Application.Competition.CompleteAttemptUseCase"/>) under persistent
-    /// optimistic-concurrency contention. Tag <c>operation</c>: <c>start_attempt</c>,
-    /// <c>complete_attempt</c>.
+    /// <see cref="Level5.Application.Competition.CompleteAttemptUseCase"/>, or the single
+    /// reconciliation reload of an Accept/Decline/Cancel) under persistent optimistic-concurrency
+    /// contention. Tag <c>operation</c>: <c>start_attempt</c>, <c>complete_attempt</c>,
+    /// <c>accept_challenge</c>, <c>decline_challenge</c>, <c>cancel_challenge</c>.
     /// </summary>
     public static readonly Counter<long> SeriesConcurrencyConflicts =
         Meter.CreateCounter<long>("series.concurrency.conflict", description: "Optimistic-concurrency retries exhausted on a series mutation, by operation.");

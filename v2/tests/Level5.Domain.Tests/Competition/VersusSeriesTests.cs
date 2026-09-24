@@ -138,15 +138,123 @@ public class VersusSeriesTests
         Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Now));
     }
 
-    [Fact]
-    public void Accept_on_a_completed_series_is_an_illegal_transition()
+    /// <summary>Drives a fresh best-of-1 series into <paramref name="status"/> through its legal transitions only.</summary>
+    private VersusSeries SeriesIn(SeriesStatus status)
     {
         var series = CreateBestOf(1);
-        series.Accept(_opponent, Now);
-        PlayScores(series, gameNumber: 1, challengerScore: 10, opponentScore: 10);
-        Assert.Equal(SeriesStatus.Completed, series.Status);
+        switch (status)
+        {
+            case SeriesStatus.Active:
+                series.Accept(_opponent, Now);
+                break;
+            case SeriesStatus.Completed:
+                series.Accept(_opponent, Now);
+                PlayScores(series, gameNumber: 1, challengerScore: 10, opponentScore: 10);
+                break;
+            case SeriesStatus.Declined:
+                series.Decline(_opponent, Now);
+                break;
+            case SeriesStatus.Cancelled:
+                series.Cancel(_challenger, Now);
+                break;
+        }
 
-        Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Now));
+        Assert.Equal(status, series.Status);
+        return series;
+    }
+
+    /// <summary>A replayed command must be a pure no-op: no revision bump (so callers skip the write) and no timestamp change.</summary>
+    private static void AssertReplayIsNoOp(VersusSeries series, Action replay)
+    {
+        var (status, revision, updatedAt, completedAt) = (series.Status, series.Revision, series.UpdatedAt, series.CompletedAt);
+
+        replay();
+
+        Assert.Equal(status, series.Status);
+        Assert.Equal(revision, series.Revision);
+        Assert.Equal(updatedAt, series.UpdatedAt);
+        Assert.Equal(completedAt, series.CompletedAt);
+    }
+
+    private static readonly DateTimeOffset Later = Now.AddMinutes(5);
+
+    [Theory]
+    [InlineData(SeriesStatus.Active)]
+    [InlineData(SeriesStatus.Completed)] // Completed is only reachable from Active, i.e. after this same Accept won.
+    public void Accept_replay_by_the_opponent_is_a_no_op(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+
+        AssertReplayIsNoOp(series, () => series.Accept(_opponent, Later));
+    }
+
+    [Theory]
+    [InlineData(SeriesStatus.Declined)]
+    [InlineData(SeriesStatus.Cancelled)]
+    public void Accept_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Accept(_opponent, Later));
+    }
+
+    [Fact]
+    public void Decline_replay_by_the_opponent_is_a_no_op()
+    {
+        var series = SeriesIn(SeriesStatus.Declined);
+
+        AssertReplayIsNoOp(series, () => series.Decline(_opponent, Later));
+    }
+
+    [Theory]
+    [InlineData(SeriesStatus.Active)]
+    [InlineData(SeriesStatus.Completed)]
+    [InlineData(SeriesStatus.Cancelled)]
+    public void Decline_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Decline(_opponent, Later));
+    }
+
+    [Fact]
+    public void Cancel_replay_by_the_challenger_is_a_no_op()
+    {
+        var series = SeriesIn(SeriesStatus.Cancelled);
+
+        AssertReplayIsNoOp(series, () => series.Cancel(_challenger, Later));
+    }
+
+    [Theory]
+    [InlineData(SeriesStatus.Active)]
+    [InlineData(SeriesStatus.Completed)]
+    [InlineData(SeriesStatus.Declined)]
+    public void Cancel_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Cancel(_challenger, Later));
+    }
+
+    /// <summary>Replay tolerance never widens authorization: the wrong actor is rejected in every state, including the one where the right actor would replay.</summary>
+    [Theory]
+    [InlineData(SeriesStatus.PendingAcceptance)]
+    [InlineData(SeriesStatus.Active)]
+    [InlineData(SeriesStatus.Completed)]
+    [InlineData(SeriesStatus.Declined)]
+    [InlineData(SeriesStatus.Cancelled)]
+    public void Wrong_actors_are_rejected_for_every_challenge_transition_in_every_state(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+        var stranger = PlayerId.New();
+
+        Assert.Throws<SeriesAuthorizationException>(() => series.Accept(_challenger, Later));
+        Assert.Throws<SeriesAuthorizationException>(() => series.Accept(stranger, Later));
+        Assert.Throws<SeriesAuthorizationException>(() => series.Decline(_challenger, Later));
+        Assert.Throws<SeriesAuthorizationException>(() => series.Decline(stranger, Later));
+        Assert.Throws<SeriesAuthorizationException>(() => series.Cancel(_opponent, Later));
+        Assert.Throws<SeriesAuthorizationException>(() => series.Cancel(stranger, Later));
+        Assert.Equal(status, series.Status);
     }
 
     [Fact]

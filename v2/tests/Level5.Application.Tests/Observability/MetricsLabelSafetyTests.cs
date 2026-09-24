@@ -35,7 +35,7 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         // auth.refresh.outcome / outcome
         "success", "unknown", "expired", "revoked", "account_inactive", "replay_conflict",
         // series.concurrency.conflict / operation
-        "start_attempt", "complete_attempt",
+        "start_attempt", "complete_attempt", "accept_challenge", "decline_challenge", "cancel_challenge",
         // challenge.create.replay_or_conflict / outcome
         "created", "idempotent_replay", "conflict",
         // attempt.complete.outcome / outcome

@@ -90,11 +90,14 @@ public sealed class VersusSeries
 
     /// <summary>
     /// Idempotent for the opponent: <see cref="SeriesStatus.Active"/> is only ever reached via
-    /// this same opponent's own prior <see cref="Accept"/>, so a retried accept call (e.g. a lost
-    /// response) is a safe no-op that returns without re-touching the series, rather than an
-    /// illegal transition. The challenger and any non-participant are rejected regardless of
-    /// status - only the opponent gets this retry behavior. Every other status (Declined,
-    /// Cancelled, Completed) still falls through to <see cref="EnsureStatus"/> and conflicts.
+    /// this same opponent's own prior <see cref="Accept"/>, and <see cref="SeriesStatus.Completed"/>
+    /// only from <see cref="SeriesStatus.Active"/> (via <see cref="CompleteAttempt"/>), so either
+    /// status proves this exact accept already won. A retried accept (e.g. a lost response) is
+    /// then a safe no-op that returns without re-touching the series - <see cref="Revision"/> is
+    /// left unchanged, which is how callers detect the replay and skip the write. The challenger
+    /// and any non-participant are rejected regardless of status - only the opponent gets this
+    /// retry behavior. Declined and Cancelled still fall through to <see cref="EnsureStatus"/>
+    /// and conflict.
     /// </summary>
     public void Accept(PlayerId actingPlayerId, DateTimeOffset now)
     {
@@ -103,7 +106,7 @@ public sealed class VersusSeries
             throw new SeriesAuthorizationException("Only the challenged player can accept a challenge.");
         }
 
-        if (Status == SeriesStatus.Active)
+        if (Status is SeriesStatus.Active or SeriesStatus.Completed)
         {
             return;
         }
@@ -114,11 +117,22 @@ public sealed class VersusSeries
         Touch(now);
     }
 
+    /// <summary>
+    /// Idempotent for the opponent: <see cref="SeriesStatus.Declined"/> is only ever reached via
+    /// this same opponent's own prior <see cref="Decline"/>, so a retried decline is a no-op that
+    /// leaves <see cref="Revision"/> unchanged (see <see cref="Accept"/>). Every other
+    /// non-pending status conflicts - it proves a different command won.
+    /// </summary>
     public void Decline(PlayerId actingPlayerId, DateTimeOffset now)
     {
         if (actingPlayerId != OpponentId)
         {
             throw new SeriesAuthorizationException("Only the challenged player can decline a challenge.");
+        }
+
+        if (Status == SeriesStatus.Declined)
+        {
+            return;
         }
 
         EnsureStatus(SeriesStatus.PendingAcceptance);
@@ -128,11 +142,22 @@ public sealed class VersusSeries
         Touch(now);
     }
 
+    /// <summary>
+    /// Idempotent for the challenger: <see cref="SeriesStatus.Cancelled"/> is only ever reached
+    /// via this same challenger's own prior <see cref="Cancel"/>, so a retried cancel is a no-op
+    /// that leaves <see cref="Revision"/> unchanged (see <see cref="Accept"/>). Every other
+    /// non-pending status conflicts - it proves a different command won.
+    /// </summary>
     public void Cancel(PlayerId actingPlayerId, DateTimeOffset now)
     {
         if (actingPlayerId != ChallengerId)
         {
             throw new SeriesAuthorizationException("Only the challenger can cancel a challenge before it is accepted.");
+        }
+
+        if (Status == SeriesStatus.Cancelled)
+        {
+            return;
         }
 
         EnsureStatus(SeriesStatus.PendingAcceptance);

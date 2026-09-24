@@ -13,7 +13,7 @@ public sealed record CreateChallengeRequest(
     int? RulesetVersion,
     int TotalGames,
     string? InformationPolicy,
-    Guid? ClientRequestId);
+    Guid ClientRequestId);
 
 /// <summary>
 /// Only accepted friends may challenge each other for the correspondence MVP - broader discovery
@@ -28,7 +28,9 @@ public sealed record CreateChallengeRequest(
 /// carrying a <see cref="CreateChallengeRequest.ClientRequestId"/> already used by this same
 /// challenger for the same semantic request returns the originally created series instead of
 /// creating a duplicate; the same key reused for a different request is a 409 conflict (issue
-/// #10).
+/// #10). A concurrent duplicate (both requests miss the initial lookup, then race on insert) is
+/// resolved the same way: the loser's unique-constraint conflict is caught, the winner is
+/// reloaded by key, and the identical replay/conflict check runs against it.
 /// </summary>
 public sealed class CreateChallengeUseCase(
     IVersusSeriesStore seriesStore,
@@ -40,19 +42,18 @@ public sealed class CreateChallengeUseCase(
 
     public async Task<SeriesView> ExecuteAsync(CreateChallengeRequest request, CancellationToken cancellationToken)
     {
-        if (request.ClientRequestId is not { } clientRequestId)
+        if (request.ClientRequestId == Guid.Empty)
         {
-            throw new ValidationFailedException("A clientRequestId is required to create a challenge.");
+            throw new ValidationFailedException("A non-empty clientRequestId is required to create a challenge.");
         }
 
+        var clientRequestId = request.ClientRequestId;
         var requestedInformationPolicy = ParseInformationPolicy(request.InformationPolicy);
 
         var existing = await seriesStore.FindByIdempotencyKeyAsync(request.ChallengerId, clientRequestId, cancellationToken);
         if (existing is not null)
         {
-            EnsureMatchesExistingRequest(existing, request, requestedInformationPolicy);
-            ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "idempotent_replay");
-            return existing.ToView(request.ChallengerId);
+            return Replay(existing, request, requestedInformationPolicy);
         }
 
         if (!await friendshipStore.AreFriendsAsync(request.ChallengerId, request.OpponentId, cancellationToken))
@@ -87,10 +88,37 @@ public sealed class CreateChallengeUseCase(
 
         var series = VersusSeries.CreateChallenge(request.ChallengerId, request.OpponentId, format, rules, clock.UtcNow);
 
-        await seriesStore.AddAsync(series, clientRequestId, cancellationToken);
+        try
+        {
+            await seriesStore.AddAsync(series, clientRequestId, cancellationToken);
+        }
+        catch (ConflictException)
+        {
+            // Possibly lost a concurrent insert race under this (challenger, clientRequestId) key.
+            // Only a row actually holding that key proves it; otherwise the conflict is something
+            // else and must surface unchanged rather than be reported as a replay.
+            var raced = await seriesStore.FindByIdempotencyKeyAsync(request.ChallengerId, clientRequestId, cancellationToken);
+            if (raced is null)
+            {
+                throw;
+            }
+
+            return Replay(raced, request, requestedInformationPolicy);
+        }
 
         ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "created");
         return series.ToView(request.ChallengerId);
+    }
+
+    /// <summary>
+    /// The single replay path for a reused idempotency key, shared by the lookup-before-insert
+    /// retry and the reload-after-insert-race case so both classify and compare identically.
+    /// </summary>
+    private static SeriesView Replay(VersusSeries existing, CreateChallengeRequest request, InformationPolicy? requestedInformationPolicy)
+    {
+        EnsureMatchesExistingRequest(existing, request, requestedInformationPolicy);
+        ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "idempotent_replay");
+        return existing.ToView(request.ChallengerId);
     }
 
     /// <summary>

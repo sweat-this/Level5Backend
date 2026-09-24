@@ -395,6 +395,9 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         var response = await alice.Client.PostAsJsonAsync("/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 3, rulesetId = "score-only" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("validation_failed", problem.GetProperty("code").GetString());
+        Assert.Empty((await GetPageItemsAsync(alice, "/api/v2/series/outgoing")).EnumerateArray());
     }
 
     [Theory]
@@ -473,6 +476,148 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);
         var cancelled = await cancelResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         Assert.Equal("Cancelled", cancelled.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("null")]
+    public async Task An_empty_or_null_clientRequestId_is_rejected_without_creating_a_series(string variant)
+    {
+        var alice = await factory.RegisterNewPlayerAsync($"AliceKey{variant}");
+        var bob = await factory.RegisterNewPlayerAsync($"BobKey{variant}");
+        await BefriendAsync(alice, bob);
+        Guid? clientRequestId = variant == "empty" ? Guid.Empty : null;
+
+        var response = await alice.Client.PostAsJsonAsync(
+            "/api/v2/series", new { opponentId = bob.PlayerId, totalGames = 3, rulesetId = "score-only", clientRequestId });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("validation_failed", problem.GetProperty("code").GetString());
+        Assert.Empty((await GetPageItemsAsync(alice, "/api/v2/series/outgoing")).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Concurrent_identical_creates_converge_on_one_series()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceConcCreate");
+        var bob = await factory.RegisterNewPlayerAsync("BobConcCreate");
+        await BefriendAsync(alice, bob);
+        var body = new { opponentId = bob.PlayerId, totalGames = 3, rulesetId = "score-only", clientRequestId = Guid.NewGuid() };
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => alice.Client.PostAsJsonAsync("/api/v2/series", body)));
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        var ids = await Task.WhenAll(responses.Select(async r => (await r.Content.ReadFromJsonAsync<JsonElement>(JsonOptions)).GetProperty("id").GetGuid()));
+        var seriesId = Assert.Single(ids.Distinct());
+        var outgoing = await GetPageItemsAsync(alice, "/api/v2/series/outgoing");
+        Assert.Equal(seriesId, Assert.Single(outgoing.EnumerateArray()).GetProperty("id").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("decline", "Declined")]
+    [InlineData("cancel", "Cancelled")]
+    public async Task A_repeated_decline_or_cancel_is_an_idempotent_replay(string command, string expectedStatus)
+    {
+        var alice = await factory.RegisterNewPlayerAsync($"AliceRep{command}");
+        var bob = await factory.RegisterNewPlayerAsync($"BobRep{command}");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        var actor = command == "cancel" ? alice : bob;
+
+        var first = await actor.Client.PostAsync($"/api/v2/series/{seriesId}/{command}", null);
+        var retried = await actor.Client.PostAsync($"/api/v2/series/{seriesId}/{command}", null);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, retried.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var retriedBody = await retried.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal(expectedStatus, retriedBody.GetProperty("status").GetString());
+        Assert.Equal(firstBody.GetProperty("revision").GetInt64(), retriedBody.GetProperty("revision").GetInt64());
+    }
+
+    [Fact]
+    public async Task Accept_retry_after_the_series_completed_returns_the_completed_series()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceAccDone");
+        var bob = await factory.RegisterNewPlayerAsync("BobAccDone");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 1);
+        await CompleteAttemptAsync(alice, seriesId, 1, await StartAttemptAsync(alice, seriesId, 1), 90);
+        await CompleteAttemptAsync(bob, seriesId, 1, await StartAttemptAsync(bob, seriesId, 1), 10);
+
+        var retried = await bob.Client.PostAsync($"/api/v2/series/{seriesId}/accept", null);
+
+        Assert.Equal(HttpStatusCode.OK, retried.StatusCode);
+        var body = await retried.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Completed", body.GetProperty("status").GetString());
+        Assert.Equal(alice.PlayerId, body.GetProperty("winnerId").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("accept", "Active")]
+    [InlineData("decline", "Declined")]
+    [InlineData("cancel", "Cancelled")]
+    public async Task Concurrent_duplicate_transitions_all_succeed_with_one_committed_write(string command, string expectedStatus)
+    {
+        var alice = await factory.RegisterNewPlayerAsync($"AliceCon{command}");
+        var bob = await factory.RegisterNewPlayerAsync($"BobCon{command}");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        var actor = command == "cancel" ? alice : bob;
+
+        var responses = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => actor.Client.PostAsync($"/api/v2/series/{seriesId}/{command}", null)));
+
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        var final = await alice.Client.GetFromJsonAsync<JsonElement>($"/api/v2/series/{seriesId}", JsonOptions);
+        Assert.Equal(expectedStatus, final.GetProperty("status").GetString());
+        Assert.Equal(1, final.GetProperty("revision").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("accept", "cancel")]
+    [InlineData("accept", "decline")]
+    [InlineData("decline", "cancel")]
+    public async Task Concurrent_incompatible_transitions_have_exactly_one_legal_winner(string first, string second)
+    {
+        var alice = await factory.RegisterNewPlayerAsync($"AliceVs{first}{second}");
+        var bob = await factory.RegisterNewPlayerAsync($"BobVs{first}{second}");
+        await BefriendAsync(alice, bob);
+        var seriesId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        RegisteredPlayer ActorFor(string command) => command == "cancel" ? alice : bob;
+
+        var responses = await Task.WhenAll(
+            ActorFor(first).Client.PostAsync($"/api/v2/series/{seriesId}/{first}", null),
+            ActorFor(second).Client.PostAsync($"/api/v2/series/{seriesId}/{second}", null));
+
+        var winner = Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
+        var loser = Assert.Single(responses, r => r.StatusCode == HttpStatusCode.Conflict);
+        var loserProblem = await loser.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("IllegalSeriesTransitionException", loserProblem.GetProperty("code").GetString());
+        var winnerStatus = (await winner.Content.ReadFromJsonAsync<JsonElement>(JsonOptions)).GetProperty("status").GetString();
+        var final = await alice.Client.GetFromJsonAsync<JsonElement>($"/api/v2/series/{seriesId}", JsonOptions);
+        Assert.Equal(winnerStatus, final.GetProperty("status").GetString());
+        Assert.Equal(1, final.GetProperty("revision").GetInt64());
+    }
+
+    [Fact]
+    public async Task Replay_tolerance_does_not_widen_authorization_or_reveal_the_series()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceRepAuth");
+        var bob = await factory.RegisterNewPlayerAsync("BobRepAuth");
+        var mallory = await factory.RegisterNewPlayerAsync("MalRepAuth");
+        await BefriendAsync(alice, bob);
+        var declinedId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        await bob.Client.PostAsync($"/api/v2/series/{declinedId}/decline", null);
+        var cancelledId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        await alice.Client.PostAsync($"/api/v2/series/{cancelledId}/cancel", null);
+
+        // The wrong participant replaying a command that already won is still forbidden...
+        Assert.Equal(HttpStatusCode.Forbidden, (await alice.Client.PostAsync($"/api/v2/series/{declinedId}/decline", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await bob.Client.PostAsync($"/api/v2/series/{cancelledId}/cancel", null)).StatusCode);
+        // ...and a non-participant still cannot learn the series exists.
+        Assert.Equal(HttpStatusCode.NotFound, (await mallory.Client.PostAsync($"/api/v2/series/{declinedId}/decline", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await mallory.Client.PostAsync($"/api/v2/series/{cancelledId}/cancel", null)).StatusCode);
     }
 
     [Fact]

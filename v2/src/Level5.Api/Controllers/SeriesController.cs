@@ -6,12 +6,22 @@ using Level5.Domain.Competition;
 using Level5.Domain.Ids;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 
 namespace Level5.Api.Controllers;
 
+/// <summary>
+/// <see cref="ClientRequestId"/> is mandatory (issue #10). <c>[JsonRequired]</c> makes an omitted
+/// value fail model binding (400) and lists it as required in the generated contract; being
+/// non-nullable rejects an explicit <c>null</c> the same way. An empty GUID binds and is rejected
+/// by <c>CreateChallengeUseCase</c>. <c>[JsonRequired]</c> rather than <c>[Required]</c>, because
+/// ASP.NET Core rejects validation attributes on a record's primary-constructor properties and
+/// Swashbuckle ignores them on the parameter. Its default exists only so it can keep its position
+/// after the optional parameters.
+/// </summary>
 public sealed record CreateChallengeDto(
     Guid OpponentId, int TotalGames, string RulesetId, int? RulesetVersion = null,
-    string? InformationPolicy = null, Guid? ClientRequestId = null);
+    string? InformationPolicy = null, [property: JsonRequired] Guid ClientRequestId = default);
 
 public sealed record ComparisonKeyDto(string Metric, string Direction);
 
