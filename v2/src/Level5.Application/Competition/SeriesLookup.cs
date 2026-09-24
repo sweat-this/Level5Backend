@@ -48,7 +48,7 @@ internal static class SeriesLookup
 
         command(series);
 
-        if (series.Revision == expectedRevision || await store.TrySaveAsync(series, expectedRevision, cancellationToken))
+        if (await SaveIfChangedAsync(store, series, expectedRevision, cancellationToken))
         {
             return series.ToView(actingPlayerId);
         }
@@ -66,4 +66,17 @@ internal static class SeriesLookup
         ApplicationMetrics.SeriesConcurrencyConflicts.Increment(ApplicationMetrics.OperationTag, operation);
         throw new ConflictException("Series was concurrently modified by another request. Reload and retry.");
     }
+
+    /// <summary>
+    /// Persists <paramref name="series"/> only if the command just applied to it actually mutated
+    /// it (<see cref="VersusSeries.Revision"/> advanced past <paramref name="expectedRevision"/>) -
+    /// an idempotent no-op replay leaves nothing to save, and saving anyway risks losing to an
+    /// unrelated concurrent write and turning a pure no-op into a false conflict. Shared by every
+    /// series use case that follows this load/mutate/save-if-changed shape.
+    /// </summary>
+    public static Task<bool> SaveIfChangedAsync(
+        IVersusSeriesStore store, VersusSeries series, long expectedRevision, CancellationToken cancellationToken) =>
+        series.Revision == expectedRevision
+            ? Task.FromResult(true)
+            : store.TrySaveAsync(series, expectedRevision, cancellationToken);
 }

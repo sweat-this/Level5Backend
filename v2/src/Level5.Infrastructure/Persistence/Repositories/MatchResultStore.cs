@@ -18,8 +18,21 @@ public sealed class MatchResultStore(Level5V2DbContext db) : IMatchResultStore
 
     public async Task AddAsync(MatchResult result, CancellationToken cancellationToken)
     {
-        db.MatchResults.Add(ToRow(result));
-        await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
+        var row = ToRow(result);
+        db.MatchResults.Add(row);
+
+        try
+        {
+            await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
+        }
+        catch
+        {
+            // Whatever failed the insert - a translated ConflictException or anything else (a
+            // retry-budget exhaustion, say) - the row never committed. Stop tracking it so a
+            // later save on this same scoped DbContext can't retry-insert the rejected row.
+            db.Entry(row).State = EntityState.Detached;
+            throw;
+        }
     }
 
     private static MatchResultRow ToRow(MatchResult result) => new()
