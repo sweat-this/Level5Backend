@@ -6,16 +6,11 @@ namespace Level5.Application.Competition;
 
 public sealed record DeclineChallengeRequest(PlayerId ActingPlayerId, VersusSeriesId SeriesId);
 
+/// <summary>Retry- and race-safe per <see cref="SeriesLookup.ApplyChallengeTransitionAsync"/> (issue #10).</summary>
 public sealed class DeclineChallengeUseCase(IVersusSeriesStore seriesStore, IClock clock)
 {
-    public async Task<SeriesView> ExecuteAsync(DeclineChallengeRequest request, CancellationToken cancellationToken)
-    {
-        var series = await SeriesLookup.LoadForParticipantAsync(seriesStore, request.SeriesId, request.ActingPlayerId, cancellationToken);
-        var expectedRevision = series.Revision;
-
-        series.Decline(request.ActingPlayerId, clock.UtcNow);
-
-        await SeriesLookup.SaveOrThrowAsync(seriesStore, series, expectedRevision, cancellationToken);
-        return series.ToView(request.ActingPlayerId);
-    }
+    public Task<SeriesView> ExecuteAsync(DeclineChallengeRequest request, CancellationToken cancellationToken)
+        => SeriesLookup.ApplyChallengeTransitionAsync(
+            seriesStore, request.SeriesId, request.ActingPlayerId, "decline_challenge",
+            series => series.Decline(request.ActingPlayerId, clock.UtcNow), cancellationToken);
 }

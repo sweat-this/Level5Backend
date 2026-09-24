@@ -204,19 +204,24 @@ coverage around the existing aggregate/store from issue #9.
   materially different request is `409`/`conflict`. No separate fingerprint is persisted - the
   comparison is made directly against the already-persisted series' own fields
   (`CreateChallengeUseCase.EnsureMatchesExistingRequest`), since everything needed for the
-  comparison is already part of the aggregate. A missing `clientRequestId` is rejected outright
-  (`400`/`validation_failed`) rather than silently accepted as non-idempotent, since there is no
-  established convention in this codebase yet for exempting a create endpoint from retry-safety.
-  This is deliberately local to challenge creation, not a generic cross-API idempotency platform.
-- **Accept retry-safety**: `VersusSeries.Accept` is idempotent for the opponent once the series is
-  already `Active` (the only way to reach `Active` is that same opponent's own prior `Accept`), so
-  a retried accept call (e.g. a lost HTTP response) returns the current view instead of a
-  `409`/`illegal_transition`. The challenger and any non-participant are still rejected regardless
-  of status (`403`), and every other terminal state (`Declined`/`Cancelled`/`Completed`) still
-  conflicts. Decline/cancel were **not** made idempotent in this slice - deliberate, not an
-  oversight: nothing in issue #10's required behavior calls for it, and the existing
-  revision-based optimistic-concurrency conflict already gives a well-defined `409` for a repeated
-  decline/cancel; extending idempotency there is deferred until a concrete need appears.
+  comparison is already part of the aggregate. A missing, `null`, or empty (`Guid.Empty`)
+  `clientRequestId` is rejected outright (`400`/`validation_failed`) rather than silently accepted
+  as non-idempotent; the OpenAPI contract declares it required and non-nullable. A concurrent
+  duplicate (both requests miss the lookup, then race on insert) is resolved by the same
+  comparison: the loser's unique-constraint conflict is caught, the winning row is reloaded by key,
+  and the request either
+  replays it or gets the same `409`. A conflict with no row under that key is never treated as a
+  replay. This is deliberately local to challenge creation, not a generic cross-API idempotency
+  platform.
+- **Accept/decline/cancel retry-safety**: each transition is a no-op (no revision bump, no write)
+  when the authoritative state proves that same command already won: `Accept` on `Active` or
+  `Completed` (only reachable through that opponent's `Accept`), `Decline` on `Declined`, `Cancel`
+  on `Cancelled`. Any other non-pending state proves a different command won and stays a
+  `409`/`IllegalSeriesTransitionException`. Authorization is checked first in every state, so the
+  wrong participant is still `403` and a non-participant still `404`. A request that loses the
+  optimistic write reloads once and re-runs the same command (`SeriesLookup.ApplyChallengeTransitionAsync`):
+  it converges if the identical command won, conflicts if an incompatible one won, and otherwise
+  returns `409`/`conflict` without a second write or a retry loop.
 - **Completed list**: `GET /api/v2/series/completed`
   (`ListCompletedSeriesUseCase`/`IVersusSeriesStore.ListCompletedSeriesSummariesAsync` - see issue
   #21 below for the summary/pagination contract) returns the same sparse `SeriesSummaryDto` shape

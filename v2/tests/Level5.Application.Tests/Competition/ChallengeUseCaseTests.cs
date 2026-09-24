@@ -85,14 +85,16 @@ public class ChallengeUseCaseTests
     }
 
     [Fact]
-    public async Task Challenging_without_a_clientRequestId_is_rejected()
+    public async Task Challenging_with_an_empty_clientRequestId_is_rejected_without_persisting()
     {
         var challenger = PlayerId.New();
         var opponent = PlayerId.New();
         await MakeFriendsAsync(challenger, opponent);
 
         await Assert.ThrowsAsync<ValidationFailedException>(() =>
-            _create.ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, null), CancellationToken.None));
+            _create.ExecuteAsync(new CreateChallengeRequest(challenger, opponent, "score-only", null, 3, null, Guid.Empty), CancellationToken.None));
+
+        Assert.Null(await _series.FindByIdempotencyKeyAsync(challenger, Guid.Empty, CancellationToken.None));
     }
 
     [Theory]

@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../../../.."
+		},
+		{
+			"path": "../../../../../level5"
+		},
+		{
+			"path": "../../../../../level5frontend"
+		}
+	],
+	"settings": {
+		"dotnet.preferCSharpExtension": true
+	}
+}
