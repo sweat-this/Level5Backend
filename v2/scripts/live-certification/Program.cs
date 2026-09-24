@@ -643,7 +643,25 @@ async Task UnityCounterpartChallenge()
             $"unity-counterpart friend state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' first");
     }
 
-    await RunUnityCounterpartChallenge();
+    // The state file carries a plaintext password for a live (if throwaway) backend account - if
+    // this step fails partway (an assertion or a network fault), there is no seriesId yet for a
+    // later "playturn" to resume with, so there is nothing worth preserving: delete it rather than
+    // leaving a stale credential file behind, mirroring Phase2()'s own never-leave-it-behind rule.
+    // On success, RunUnityCounterpartChallenge itself rewrites the file (now carrying seriesId) and
+    // that copy is intentionally preserved for "playturn"/"cleanup".
+    try
+    {
+        await RunUnityCounterpartChallenge();
+    }
+    catch
+    {
+        if (File.Exists(unityCounterpartStatePath))
+        {
+            File.Delete(unityCounterpartStatePath);
+        }
+
+        throw;
+    }
 }
 
 async Task RunUnityCounterpartChallenge()
