@@ -30,8 +30,10 @@ public sealed class StaticRulesetCatalogTests
         Assert.Equal("most-points", definition.RulesetId);
         Assert.Equal(1, definition.RulesetVersion);
         Assert.Equal(1, definition.MinimumCompatibleVersion);
+        Assert.Equal("most-points", definition.ModeId);
         Assert.Equal(InformationPolicy.SealedAttempt, definition.InformationPolicy);
         Assert.False(definition.AlternatesFirstAttempt);
+        Assert.Equal(3, definition.ComparisonKeys.Count);
 
         // Order and direction matter: this mirrors Unity dev's DefaultCompetitiveRulesets.Score(),
         // whose own doc comment ("better accuracy breaks a tie, then fewer attempts") is the
@@ -70,5 +72,11 @@ public sealed class StaticRulesetCatalogTests
     public void Unknown_ruleset_still_fails_deterministically()
     {
         Assert.Throws<UnknownRulesetException>(() => _catalog.Resolve("does-not-exist", requestedVersion: null));
+    }
+
+    [Fact]
+    public void MostPoints_requesting_an_unsupported_version_is_rejected()
+    {
+        Assert.Throws<RulesetVersionUnsupportedException>(() => _catalog.Resolve("most-points", requestedVersion: 2));
     }
 }

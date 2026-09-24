@@ -83,7 +83,9 @@ expectations - read the thrown assertion message, not just the log tail.
 - Simultaneous-completion (Scenario 8) concurrency is real (`Task.WhenAll` on two independent
   `HttpClient`s) but still originates from one machine/process; it does not simulate network-level
   jitter or truly independent client hardware.
-- Assumes the `score-only` ruleset (the only entry in `StaticRulesetCatalog` at the time this was
-  written) and always has account A win every game, to keep the Bo3 outcome deterministic. If the
-  catalog gains more rulesets or a different outcome needs certifying, adjust `BuildMetrics`/the
-  win/lose assignment per game accordingly.
+- `phase1`/`phase2` use the `score-only` ruleset and always have account A win every game, to keep
+  the Bo3 outcome deterministic. `unity-counterpart challenge` instead uses `most-points` - the one
+  `StaticRulesetCatalog` entry Unity's own ruleset registry can actually resolve and launch
+  remotely - and `unity-counterpart playturn` builds its win/lose metric set dynamically from
+  whatever ruleset the series actually froze (`BuildMetrics`, reading the live `StartAttempt`
+  descriptor's own comparison keys), so it needs no changes if the catalog gains further rulesets.

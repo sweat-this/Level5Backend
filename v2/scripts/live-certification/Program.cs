@@ -201,9 +201,33 @@ try
         {
             await UnityCounterpartChallenge();
         }
+        else if (subAction == "playturn")
+        {
+            if (args.Length < 4)
+            {
+                Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart playturn <gameNumber> <win|lose>");
+                Environment.Exit(1);
+            }
+            if (!int.TryParse(args[2], out int gameNumber) || gameNumber < 1)
+            {
+                Console.Error.WriteLine("gameNumber must be a positive integer.");
+                Environment.Exit(1);
+            }
+            string outcome = args[3].ToLowerInvariant();
+            if (outcome != "win" && outcome != "lose")
+            {
+                Console.Error.WriteLine("outcome must be 'win' or 'lose'.");
+                Environment.Exit(1);
+            }
+            await UnityCounterpartPlayTurn(gameNumber, winning: outcome == "win");
+        }
+        else if (subAction == "cleanup")
+        {
+            UnityCounterpartCleanup();
+        }
         else
         {
-            Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart [friend <tag>|challenge]");
+            Console.Error.WriteLine("Usage: dotnet run -- unity-counterpart [friend <tag>|challenge|playturn <gameNumber> <win|lose>|cleanup]");
             Environment.Exit(1);
         }
     }
@@ -563,12 +587,21 @@ async Task RunPhase2(
 // docs/backend-v2-correspondence-certification.md). This plays "Account B" via the same real
 // backend contract as phase1/phase2 above, but timed to act as the second human player opposite a
 // live Unity Editor session driving Account A for real (BackendV2LiveCertificationRunner in the
-// level5 repo, Assets/Level5/Editor/). Run as two separate steps because the challenge step
-// requires the friendship Unity/Account A accepted in between to already be Accepted server-side:
+// level5 repo, Assets/Level5/Editor/). Run as separate steps because the challenge step requires
+// the friendship Unity/Account A accepted in between to already be Accepted server-side, and each
+// playturn step requires Account A's own turn for that game to have already been resolved live:
 //   dotnet run -- unity-counterpart friend <tagOfUnityAccountA>
 //   <Unity accepts the friend request live>
 //   dotnet run -- unity-counterpart challenge
 //   <Unity accepts the challenge and plays its turn live>
+//   dotnet run -- unity-counterpart playturn <gameNumber> <win|lose>
+//   <repeat challenge/playturn's Unity-side turn as the series progresses>
+//   dotnet run -- unity-counterpart cleanup
+//
+// unityCounterpartStatePath is intentionally NOT deleted after "friend" or "challenge" - state
+// (usernameB/password/seriesId) must survive across these separate process invocations for
+// "playturn" to log back in as Account B and act on the right series. Only "cleanup" removes it,
+// once the whole two-Unity-process certification run is done with Account B.
 // ---------------------------------------------------------------------
 async Task UnityCounterpartFriend(string tagA)
 {
@@ -610,27 +643,13 @@ async Task UnityCounterpartChallenge()
             $"unity-counterpart friend state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' first");
     }
 
-    // The state file carries a plaintext password for a live (if throwaway) backend account - same
-    // rule Phase2() already follows for its own state file - never leave it behind, whether this
-    // step succeeds or an assertion/exception aborts it partway through. Nothing downstream of this
-    // command reads unityCounterpartStatePath again.
-    try
-    {
-        await RunUnityCounterpartChallenge();
-    }
-    finally
-    {
-        if (File.Exists(unityCounterpartStatePath))
-        {
-            File.Delete(unityCounterpartStatePath);
-        }
-    }
+    await RunUnityCounterpartChallenge();
 }
 
 async Task RunUnityCounterpartChallenge()
 {
-    string usernameB, password, displayNameB;
-    Guid playerIdB, playerIdA;
+    string usernameB, password, displayNameB, tagB, tagA;
+    Guid playerIdB, playerIdA, friendRequestId;
     using (JsonDocument stateDoc = JsonDocument.Parse(File.ReadAllText(unityCounterpartStatePath)))
     {
         JsonElement state = stateDoc.RootElement;
@@ -638,7 +657,10 @@ async Task RunUnityCounterpartChallenge()
         password = state.GetProperty("password").GetString()!;
         displayNameB = state.GetProperty("displayNameB").GetString()!;
         playerIdB = state.GetProperty("playerIdB").GetGuid();
+        tagB = state.GetProperty("tagB").GetString()!;
         playerIdA = state.GetProperty("playerIdA").GetGuid();
+        tagA = state.GetProperty("tagA").GetString()!;
+        friendRequestId = state.GetProperty("friendRequestId").GetGuid();
     }
 
     Log($"=== unity-counterpart challenge start === usernameB={usernameB} unityAccountAPlayerId={playerIdA}");
@@ -653,15 +675,96 @@ async Task RunUnityCounterpartChallenge()
         "the Unity-driven account must already be an accepted friend before a challenge can be created - " +
         "has the live Unity Accept-friend-request step run yet?");
 
+    // "most-points" - the one ruleset Unity dev's own CompetitiveRulesetCatalog can actually
+    // resolve and launch remotely (see StaticRulesetCatalog); "score-only" has no Unity
+    // counterpart, so a challenge created with it would make the real Unity-driven account's own
+    // Play click fail to launch with "this build does not know the ruleset 'score-only'".
     Guid clientRequestId = Guid.NewGuid();
-    object createBody = new { opponentId = playerIdA, totalGames = 3, rulesetId = "score-only", clientRequestId };
+    object createBody = new { opponentId = playerIdA, totalGames = 3, rulesetId = "most-points", clientRequestId };
     var createResult = await SendAsync(httpB, HttpMethod.Post, "api/v2/series", createBody, b.AccessToken);
     Log($"UnityCert.CreateChallengeToUnityAccountA: {Describe(createResult)}");
     Expect(createResult.status == 200, $"CreateChallengeToUnityAccountA expected 200, got {Describe(createResult)}");
     Guid seriesId = createResult.doc!.Value.GetProperty("id").GetGuid();
     Record("unityCounterpart.seriesId", seriesId);
 
-    Log($"=== unity-counterpart challenge complete === seriesId={seriesId} sent live to the Unity-driven account");
+    // Preserved (not deleted) - later "playturn" invocations are separate process runs that need
+    // seriesId (and B's own login) read back from this same file. Only "cleanup" removes it.
+    var state2 = new { usernameB, password, displayNameB, playerIdB, tagB, playerIdA, tagA, friendRequestId, seriesId };
+    File.WriteAllText(unityCounterpartStatePath, JsonSerializer.Serialize(state2, jsonOpts));
+    Log($"=== unity-counterpart challenge complete === seriesId={seriesId} sent live to the Unity-driven account; " +
+        $"state preserved at {unityCounterpartStatePath} for later playturn commands");
+}
+
+async Task UnityCounterpartPlayTurn(int gameNumber, bool winning)
+{
+    if (!File.Exists(unityCounterpartStatePath))
+    {
+        throw new InvalidOperationException(
+            $"unity-counterpart state not found at {unityCounterpartStatePath} - run 'unity-counterpart friend <tag>' " +
+            "then 'unity-counterpart challenge' first");
+    }
+
+    string usernameB, password, displayNameB;
+    Guid playerIdB, seriesId;
+    using (JsonDocument stateDoc = JsonDocument.Parse(File.ReadAllText(unityCounterpartStatePath)))
+    {
+        JsonElement state = stateDoc.RootElement;
+        usernameB = state.GetProperty("usernameB").GetString()!;
+        password = state.GetProperty("password").GetString()!;
+        displayNameB = state.GetProperty("displayNameB").GetString()!;
+        playerIdB = state.GetProperty("playerIdB").GetGuid();
+        if (!state.TryGetProperty("seriesId", out JsonElement seriesIdProperty))
+        {
+            throw new InvalidOperationException(
+                $"unity-counterpart state at {unityCounterpartStatePath} has no seriesId - run 'unity-counterpart challenge' first");
+        }
+
+        seriesId = seriesIdProperty.GetGuid();
+    }
+
+    string outcomeLabel = winning ? "win" : "lose";
+    Log($"=== unity-counterpart playturn start === usernameB={usernameB} seriesId={seriesId} gameNumber={gameNumber} outcome={outcomeLabel}");
+    using HttpClient httpB = NewClient();
+    Account b = await Login(httpB, usernameB, password, displayNameB, playerIdB);
+
+    var startResult = await SendAsync(httpB, HttpMethod.Post,
+        $"api/v2/series/{seriesId}/games/{gameNumber}/attempts/start", null, b.AccessToken);
+    Log($"UnityCert.StartAttempt(game{gameNumber}): {Describe(startResult)}");
+    Expect(startResult.status == 200, $"StartAttempt(game{gameNumber}) expected 200, got {Describe(startResult)}");
+    Guid attemptId = startResult.doc!.Value.GetProperty("attemptId").GetGuid();
+
+    // Reuses the same BuildMetrics phase1/phase2 already rely on: it reads the descriptor's own
+    // server-frozen comparisonKeys/requiredResultMetrics and constructs a metric set that wins or
+    // loses under whatever ruleset this series actually froze, rather than a hard-coded
+    // score-only payload that would silently stop covering a richer ruleset like "most-points".
+    var metrics = BuildMetrics(startResult.doc!.Value, winning);
+
+    var completeResult = await SendAsync(httpB, HttpMethod.Post,
+        $"api/v2/series/{seriesId}/games/{gameNumber}/attempts/{attemptId}/complete", new { metrics }, b.AccessToken);
+    Log($"UnityCert.CompleteAttempt(game{gameNumber}): {Describe(completeResult)}");
+    Expect(completeResult.status == 200, $"CompleteAttempt(game{gameNumber}) expected 200, got {Describe(completeResult)}");
+
+    Record("unityCounterpart.playturn.gameNumber", gameNumber);
+    Record("unityCounterpart.playturn.outcome", outcomeLabel);
+    Record("unityCounterpart.playturn.attemptId", attemptId);
+    Log($"=== unity-counterpart playturn complete === game {gameNumber} attempt completed live ({outcomeLabel}); " +
+        $"state preserved at {unityCounterpartStatePath}");
+}
+
+void UnityCounterpartCleanup()
+{
+    // The state file carries a plaintext password for a live (if throwaway) backend account -
+    // remove it once the whole two-Unity-process certification run is done with Account B, mirroring
+    // Phase2()'s own never-leave-it-behind rule for its own state file.
+    if (File.Exists(unityCounterpartStatePath))
+    {
+        File.Delete(unityCounterpartStatePath);
+        Log($"=== unity-counterpart cleanup === removed {unityCounterpartStatePath}");
+    }
+    else
+    {
+        Log($"=== unity-counterpart cleanup === no state file found at {unityCounterpartStatePath} (already clean)");
+    }
 }
 
 sealed class Account

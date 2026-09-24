@@ -35,10 +35,14 @@ public sealed class StaticRulesetCatalog : IRulesetCatalog
         // exactly (id, version, comparison keys/order/directions) - "score-only" above has no counterpart
         // in Unity's own ruleset registry, so it is not actually playable by any shipped client. This is
         // the one ruleset Unity can currently resolve and launch through RemoteAttemptDescriptorMapper.
+        // ModeId is opaque to the Backend (protocol doc section 9/14: "carried, not interpreted") and is
+        // never read by Unity's RemoteAttemptDescriptorMapper.Map - only descriptor.RulesetId is resolved
+        // against Unity's own catalog. Its value follows Unity's own BackendV2Fixtures wire-fixture
+        // convention of reusing the RulesetId string, not PR #37's now-unused "mode-most-points".
         ["most-points"] = new CatalogEntry(
             CurrentVersion: 1,
             MinimumCompatibleVersion: 1,
-            ModeId: "mode-most-points",
+            ModeId: "most-points",
             InformationPolicy: InformationPolicy.SealedAttempt,
             AlternatesFirstAttempt: false,
             ComparisonKeys:
