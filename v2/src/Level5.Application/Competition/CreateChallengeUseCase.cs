@@ -53,18 +53,18 @@ public sealed class CreateChallengeUseCase(
         var existing = await seriesStore.FindByIdempotencyKeyAsync(request.ChallengerId, clientRequestId, cancellationToken);
         if (existing is not null)
         {
-            return Replay(existing, request, requestedInformationPolicy);
-        }
-
-        if (!await friendshipStore.AreFriendsAsync(request.ChallengerId, request.OpponentId, cancellationToken))
-        {
-            throw new FriendshipRequiredException("You can only challenge an accepted friend.");
+            return Replay(existing, request, requestedInformationPolicy, afterRace: false);
         }
 
         if (!SupportedTotalGames.Contains(request.TotalGames))
         {
             throw new ValidationFailedException(
                 $"Unsupported series format: best-of-{request.TotalGames}. Remote challenges support best-of-1, 3, 5, or 7 only.");
+        }
+
+        if (!await friendshipStore.AreFriendsAsync(request.ChallengerId, request.OpponentId, cancellationToken))
+        {
+            throw new FriendshipRequiredException("You can only challenge an accepted friend.");
         }
 
         var format = SeriesFormat.BestOf(request.TotalGames);
@@ -88,22 +88,16 @@ public sealed class CreateChallengeUseCase(
 
         var series = VersusSeries.CreateChallenge(request.ChallengerId, request.OpponentId, format, rules, clock.UtcNow);
 
-        try
-        {
-            await seriesStore.AddAsync(series, clientRequestId, cancellationToken);
-        }
-        catch (ConflictException)
-        {
-            // Possibly lost a concurrent insert race under this (challenger, clientRequestId) key.
-            // Only a row actually holding that key proves it; otherwise the conflict is something
-            // else and must surface unchanged rather than be reported as a replay.
-            var raced = await seriesStore.FindByIdempotencyKeyAsync(request.ChallengerId, clientRequestId, cancellationToken);
-            if (raced is null)
-            {
-                throw;
-            }
+        // A concurrent duplicate may lose an insert race under this (challenger, clientRequestId)
+        // key; the helper below reloads whoever actually won it for Replay to compare against.
+        var raced = await IdempotentInsertRecovery.TryInsertAsync(
+            ct => seriesStore.AddAsync(series, clientRequestId, ct),
+            ct => seriesStore.FindByIdempotencyKeyAsync(request.ChallengerId, clientRequestId, ct),
+            cancellationToken);
 
-            return Replay(raced, request, requestedInformationPolicy);
+        if (raced is not null)
+        {
+            return Replay(raced, request, requestedInformationPolicy, afterRace: true);
         }
 
         ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "created");
@@ -113,29 +107,30 @@ public sealed class CreateChallengeUseCase(
     /// <summary>
     /// The single replay path for a reused idempotency key, shared by the lookup-before-insert
     /// retry and the reload-after-insert-race case so both classify and compare identically.
+    /// <paramref name="afterRace"/> only steers which outcome tag is recorded - a normal duplicate
+    /// request versus one that only resolved after losing a real insert race, which is a
+    /// operationally distinct signal worth telling apart in <see cref="ApplicationMetrics.ChallengeCreateOutcomes"/>.
     /// </summary>
-    private static SeriesView Replay(VersusSeries existing, CreateChallengeRequest request, InformationPolicy? requestedInformationPolicy)
+    private static SeriesView Replay(VersusSeries existing, CreateChallengeRequest request, InformationPolicy? requestedInformationPolicy, bool afterRace)
     {
         EnsureMatchesExistingRequest(existing, request, requestedInformationPolicy);
-        ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, "idempotent_replay");
+        ApplicationMetrics.ChallengeCreateOutcomes.Increment(ApplicationMetrics.OutcomeTag, afterRace ? "idempotent_replay_after_race" : "idempotent_replay");
         return existing.ToView(request.ChallengerId);
     }
 
     /// <summary>
-    /// The semantic fingerprint check for a reused idempotency key: every field the caller
-    /// supplied must match what the original request actually produced. Compared against the
-    /// already-persisted series' own fields rather than a separately stored fingerprint, since
-    /// everything needed is already part of the aggregate - no extra persistence is required just
-    /// to detect a conflicting reuse.
+    /// The semantic fingerprint check for a reused idempotency key, delegated to the aggregate's
+    /// own <see cref="VersusSeries.MatchesRequest"/> for the fields it owns. Also re-checks
+    /// <see cref="SupportedTotalGames"/> membership against the persisted value rather than
+    /// trusting it was already validated at creation - that invariant holds today, but this keeps
+    /// a replay from silently succeeding against it if it is ever violated (e.g. by a future
+    /// admin/backfill path).
     /// </summary>
     private static void EnsureMatchesExistingRequest(VersusSeries existing, CreateChallengeRequest request, InformationPolicy? requestedInformationPolicy)
     {
         var sameRequest =
-            existing.OpponentId == request.OpponentId &&
-            existing.Format.TotalGames == request.TotalGames &&
-            existing.Rules.RulesetId == request.RulesetId &&
-            (request.RulesetVersion is null || existing.Rules.RulesetVersion == request.RulesetVersion) &&
-            (requestedInformationPolicy is null || existing.Rules.InformationPolicy == requestedInformationPolicy);
+            SupportedTotalGames.Contains(existing.Format.TotalGames) &&
+            existing.MatchesRequest(request.OpponentId, request.TotalGames, request.RulesetId, request.RulesetVersion, requestedInformationPolicy);
 
         if (!sameRequest)
         {

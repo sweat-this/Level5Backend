@@ -27,10 +27,11 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
         {
             await db.SaveChangesTranslatingConflictsAsync(cancellationToken);
         }
-        catch (ConflictException)
+        catch
         {
-            // CreateChallengeUseCase resolves a lost insert race by reloading on this same
-            // context; stop tracking the rejected row so no later save retries the insert.
+            // Whatever failed the insert - a translated ConflictException or anything else (a
+            // retry-budget exhaustion, say) - the row never committed. Stop tracking it so a
+            // later save on this same scoped DbContext can't retry-insert the rejected row.
             db.Entry(row).State = EntityState.Detached;
             throw;
         }

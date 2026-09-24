@@ -46,22 +46,15 @@ public sealed class SubmitMatchResultUseCase(IMatchResultStore store, ILeaderboa
             request.PlayerId, request.ClientResultId, request.ModeId, request.LevelId, request.CharacterId,
             request.ClientVersion, request.Platform, request.Metrics, request.Modifiers, clock.UtcNow);
 
-        try
-        {
-            await store.AddAsync(result, cancellationToken);
-        }
-        catch (ConflictException)
-        {
-            // Lost a concurrent insert race under the same (PlayerId, ClientResultId) idempotency
-            // key: someone else's request (or an earlier attempt of this same one) committed first.
-            // Reload and resolve exactly like a sequential retry would, against whichever request
-            // actually won the race.
-            var raced = await store.FindByClientResultIdAsync(request.PlayerId, request.ClientResultId, cancellationToken)
-                ?? throw new ConflictException("The request conflicts with existing data. Please retry.");
-            return EnsureMatchesExistingRequest(raced, request);
-        }
+        // A concurrent duplicate may lose an insert race under the same (PlayerId, ClientResultId)
+        // idempotency key; the helper below reloads whoever actually won it for the same
+        // replay/conflict comparison a sequential retry would run.
+        var raced = await IdempotentInsertRecovery.TryInsertAsync(
+            ct => store.AddAsync(result, ct),
+            ct => store.FindByClientResultIdAsync(request.PlayerId, request.ClientResultId, ct),
+            cancellationToken);
 
-        return result;
+        return raced is not null ? EnsureMatchesExistingRequest(raced, request) : result;
     }
 
     /// <summary>

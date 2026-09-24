@@ -843,7 +843,7 @@ already known, with no constructor wiring required.
 | `auth.login.failure` | `LoginUseCase` | `reason_category` | `bad_username_format`, `unknown_account`, `bad_password`, `account_disabled` |
 | `auth.refresh.outcome` | `RefreshSessionUseCase` | `outcome` | `success`, `unknown`, `expired`, `revoked`, `account_inactive`, `replay_conflict` |
 | `series.concurrency.conflict` | `StartAttemptUseCase`/`CompleteAttemptUseCase` | `operation` | `start_attempt`, `complete_attempt` |
-| `challenge.create.replay_or_conflict` | `CreateChallengeUseCase` | `outcome` | `created`, `idempotent_replay`, `conflict` |
+| `challenge.create.replay_or_conflict` | `CreateChallengeUseCase` | `outcome` | `created`, `idempotent_replay`, `idempotent_replay_after_race`, `conflict` |
 | `attempt.complete.outcome` | `CompleteAttemptUseCase` | `outcome` | `success`, `conflicting_result` |
 | `http.server.5xx` | `ApiExceptionHandler` | `code` | the same fixed `ProblemDetails` "code" vocabulary already returned to the client (currently just `internal_error`) |
 

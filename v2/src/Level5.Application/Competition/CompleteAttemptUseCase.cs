@@ -46,7 +46,7 @@ public sealed class CompleteAttemptUseCase(IVersusSeriesStore seriesStore, ICloc
             // nothing to persist. Saving anyway would issue an unnecessary conditional UPDATE that
             // could spuriously lose to another participant's unrelated concurrent write, turning a
             // pure no-op replay into a false 409, and would re-resolve nothing but still touch the row.
-            if (series.Revision == expectedRevision || await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
+            if (await SeriesLookup.SaveIfChangedAsync(seriesStore, series, expectedRevision, cancellationToken))
             {
                 ApplicationMetrics.AttemptCompleteOutcomes.Increment(ApplicationMetrics.OutcomeTag, "success");
                 return series.ToView(request.ActingPlayerId);
