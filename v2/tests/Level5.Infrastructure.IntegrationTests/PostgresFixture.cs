@@ -1,5 +1,6 @@
 using Level5.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -8,7 +9,10 @@ namespace Level5.Infrastructure.IntegrationTests;
 /// <summary>
 /// One real, ephemeral Postgres container shared by every test in a collection. Real Postgres
 /// (not SQLite) is required to exercise JSONB, partial unique indexes, and the conditional
-/// UPDATE ... WHERE revision = @expected concurrency check exactly as production runs them.
+/// UPDATE ... WHERE revision = @expected concurrency check exactly as production runs them. Contexts
+/// are built with the same runtime configuration as the API (<see cref="PostgresConfiguration"/>,
+/// including its retrying execution strategy), so every store test also proves its persistence
+/// path is compatible with that strategy.
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
@@ -31,10 +35,11 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task DisposeAsync() => await _container.DisposeAsync();
 
-    public Level5V2DbContext CreateDbContext()
+    public Level5V2DbContext CreateDbContext(params IInterceptor[] interceptors)
     {
         var options = new DbContextOptionsBuilder<Level5V2DbContext>()
-            .UseNpgsql(_container.GetConnectionString())
+            .UseLevel5Postgres(_container.GetConnectionString())
+            .AddInterceptors(interceptors)
             .Options;
 
         return new Level5V2DbContext(options);

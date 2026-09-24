@@ -17,9 +17,10 @@ public static class ApiMetrics
 
     /// <summary>
     /// Requests <see cref="Level5.Api.ErrorHandling.ApiExceptionHandler"/> reported as an unhandled
-    /// 500. Tag <c>code</c> is the same small, fixed <c>ProblemDetails</c> "code" vocabulary already
-    /// returned to the client (currently just <c>internal_error</c>) - never the exception's own
-    /// message or type.
+    /// 500, or as a 503 for a database outage that outlived the bounded retry budget. Tag
+    /// <c>code</c> is the same small, fixed <c>ProblemDetails</c> "code" vocabulary already
+    /// returned to the client (<c>internal_error</c>, <c>service_unavailable</c>) - never the
+    /// exception's own message or type.
     /// </summary>
     public static readonly Counter<long> UnhandledServerErrors =
         Meter.CreateCounter<long>("http.server.5xx", description: "Requests that resulted in an unhandled 5xx response, by ProblemDetails code.");

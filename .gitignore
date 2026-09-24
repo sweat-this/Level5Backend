@@ -341,3 +341,5 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+# Local-only docker-compose.local-db.yml overrides (see .env.example) - never committed.
+.env

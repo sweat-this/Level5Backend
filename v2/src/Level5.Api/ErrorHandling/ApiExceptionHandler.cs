@@ -3,6 +3,7 @@ using Level5.Application.Common;
 using Level5.Domain.Competition;
 using Level5.Domain.Common;
 using Level5.Domain.Social;
+using Level5.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,11 +27,21 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
             logger.LogError(exception, "Unhandled exception processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
             ApiMetrics.UnhandledServerErrors.Add(1, new KeyValuePair<string, object?>(ApiMetrics.CodeTag, code));
         }
+        else if (status == StatusCodes.Status503ServiceUnavailable)
+        {
+            logger.LogError(exception, "Database unavailable processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+            ApiMetrics.UnhandledServerErrors.Add(1, new KeyValuePair<string, object?>(ApiMetrics.CodeTag, code));
+        }
 
         var problemDetails = new ProblemDetails
         {
             Status = status,
-            Title = status == StatusCodes.Status500InternalServerError ? "An unexpected error occurred." : exception.Message,
+            Title = status switch
+            {
+                StatusCodes.Status500InternalServerError => "An unexpected error occurred.",
+                StatusCodes.Status503ServiceUnavailable => "The service is temporarily unavailable. Please retry.",
+                _ => exception.Message
+            },
             Type = $"https://level5.game/errors/{code}",
         };
         problemDetails.Extensions["code"] = code;
@@ -44,8 +55,12 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
     // Persistence-specific failures are not listed here on purpose: the infrastructure layer
     // translates a unique-constraint violation into ConflictException before it gets this far
     // (see ConflictTranslatingSave), so EF/Npgsql exception types never leak into the HTTP layer.
-    // Any database failure that is *not* a recognised conflict deliberately falls through to the
-    // 500 branch below, where it gets logged rather than being mislabelled as a client conflict.
+    // The one other database outcome recognised here is a transient failure (connection loss or
+    // server shutdown that outlived Infrastructure's bounded retry budget, or a timeout, which is
+    // never retried) - a retryable 503, classified by PersistenceFailures so no Npgsql type is
+    // referenced from this layer. Any
+    // other database failure deliberately falls through to the 500 branch below, where it gets
+    // logged rather than being mislabelled as a client conflict or a transient outage.
     private static (int Status, string Code) Classify(Exception exception) => exception switch
     {
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code),
@@ -67,6 +82,7 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         MissingRequiredMetricException e => (StatusCodes.Status400BadRequest, e.Code),
         DomainException e => (StatusCodes.Status400BadRequest, e.Code),
 
+        _ when PersistenceFailures.IsTransientUnavailability(exception) => (StatusCodes.Status503ServiceUnavailable, "service_unavailable"),
         _ => (StatusCodes.Status500InternalServerError, "internal_error")
     };
 }
