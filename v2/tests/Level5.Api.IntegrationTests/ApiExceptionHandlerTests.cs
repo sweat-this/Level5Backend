@@ -3,6 +3,7 @@ using Level5.Api.ErrorHandling;
 using Level5.Application.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -45,6 +46,24 @@ public sealed class ApiExceptionHandlerTests
         Assert.Equal("An unexpected error occurred.", body.GetProperty("title").GetString());
         Assert.DoesNotContain("22001", body.ToString());
         Assert.Contains(logger.Errors, e => ReferenceEquals(e, dbException));
+    }
+
+    [Fact]
+    public async Task A_database_outage_that_outlived_the_retry_budget_is_a_logged_503_without_details()
+    {
+        var outage = new RetryLimitExceededException(
+            "The maximum number of retries (3) was exceeded while executing database operations.",
+            new InvalidOperationException("Failed to connect to 10.0.0.5:5432"));
+
+        var (context, logger) = await HandleAsync(outage);
+
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
+
+        var body = await ReadBodyAsync(context);
+        Assert.Equal("service_unavailable", body.GetProperty("code").GetString());
+        Assert.DoesNotContain("10.0.0.5", body.ToString());
+        Assert.DoesNotContain("retries", body.ToString());
+        Assert.Contains(logger.Errors, e => ReferenceEquals(e, outage));
     }
 
     private static async Task<(DefaultHttpContext Context, CapturingLogger Logger)> HandleAsync(Exception exception)

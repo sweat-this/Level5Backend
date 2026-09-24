@@ -36,7 +36,8 @@ before doing this in production.
 docker compose -f docker-compose.local-db.yml up -d
 ```
 
-Connects on `localhost:5432`, database `level5`, user `level5` (see the compose file for the local
+Connects on `127.0.0.1:5432` (use `127.0.0.1` rather than `localhost`, see the compose file), database
+`level5`, user `level5` (see the compose file for the local
 dev password - it's not a real secret, just a fixed value so the container is reproducible).
 
 ### Applying new migrations

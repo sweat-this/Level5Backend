@@ -1,18 +1,41 @@
-# Local-only Postgres instance for testing the MySQL -> Postgres migration.
-# Not part of the deployed stack - the Dockerfile builds the API image separately.
-# Usage: docker compose -f docker-compose.local-db.yml up -d
+# Local-only Postgres instance shared by the legacy backend (database "level5") and Backend V2
+# (database "level5_v2", created by v2/scripts/db.ps1). Not part of the deployed stack - the
+# Dockerfile builds the API image separately, and the API itself runs on the host (dotnet run).
+#
+# Usage: docker compose -f docker-compose.local-db.yml up -d --wait
+#
+# Every value below can be overridden from the environment (or a git-ignored .env file next to
+# this one - see .env.example). The defaults are a fixed, well-known, development-only credential
+# for a server that is only reachable from this machine; they are not, and must never become, a
+# credential for any shared or deployed database.
+#
+# This file owns the server/database lifecycle only. Application tables are created exclusively by
+# EF Core migrations - do not add init scripts that create schema here.
 services:
   postgres:
+    # Pinned major version; matches the Testcontainers image used by the V2 integration tests.
     image: postgres:18-alpine
-    container_name: level5-postgres-local
+    container_name: ${LEVEL5_PG_CONTAINER_NAME:-level5-postgres-local}
+    restart: unless-stopped
     environment:
       POSTGRES_DB: level5
-      POSTGRES_USER: level5
-      POSTGRES_PASSWORD: localdevpassword
+      POSTGRES_USER: ${LEVEL5_PG_USER:-level5}
+      POSTGRES_PASSWORD: ${LEVEL5_PG_PASSWORD:-localdevpassword}
     ports:
-      - "5432:5432"
+      # Loopback only - the dev database is never exposed to the local network. IPv4 only, because
+      # binding [::1] fails outright on hosts with IPv6 disabled. Connect with Host=127.0.0.1, not
+      # localhost: "localhost" resolves to ::1 first on Windows, and the refused IPv6 attempt costs
+      # ~2s per new connection (measured). The setup scripts write 127.0.0.1 for that reason.
+      - "127.0.0.1:${LEVEL5_PG_PORT:-5432}:5432"
     volumes:
+      # Postgres 18 images keep PGDATA under a version-specific subdirectory of this path.
       - level5-postgres-local-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d level5"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
 volumes:
   level5-postgres-local-data:

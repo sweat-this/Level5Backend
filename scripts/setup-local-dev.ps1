@@ -17,7 +17,7 @@ $pgUser = "level5"
 $pgPassword = "localdevpassword"
 $pgDb = "level5"
 $pgPort = 5432
-$connectionString = "Host=localhost;Port=$pgPort;Database=$pgDb;Username=$pgUser;Password=$pgPassword"
+$connectionString = "Host=127.0.0.1;Port=$pgPort;Database=$pgDb;Username=$pgUser;Password=$pgPassword"
 
 Write-Host "Starting local Postgres container..." -ForegroundColor Cyan
 docker compose -f docker-compose.local-db.yml up -d

@@ -31,7 +31,7 @@ public static class ServiceCollectionExtensions
                 ?? throw new InvalidOperationException(
                     "ConnectionStrings:DefaultConnection is not configured. Set it via user-secrets (local dev) or the ConnectionStrings__DefaultConnection environment variable (production).");
 
-            options.UseNpgsql(connectionString);
+            options.UseLevel5Postgres(connectionString);
         });
 
         services.AddOptions<JwtOptions>()
@@ -62,7 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRulesetCatalog, StaticRulesetCatalog>();
         services.AddSingleton<ILeaderboardPolicyCatalog, StaticLeaderboardPolicyCatalog>();
 
-        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
+        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database", tags: ["ready"], timeout: DatabaseHealthCheck.Timeout);
 
         return services;
     }

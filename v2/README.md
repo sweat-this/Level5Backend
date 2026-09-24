@@ -27,7 +27,11 @@ vertical (register, login, persistent rotating refresh sessions, logout/revocati
 production-operations baseline: an OpenTelemetry tracing/metrics baseline, a small set of
 service-level signals, request/trace correlation into `ProblemDetails`, GitHub branch protection on
 `main`/`dev`, and a deployment/migration runbook (see
-[Production operations baseline](#production-operations-baseline-issue-22)). Not yet built:
+[Production operations baseline](#production-operations-baseline-issue-22)), plus bounded
+PostgreSQL transient-failure resiliency, a round-trip readiness probe, a retryable `503` for
+database outages, and a scripted local database workflow (see
+[PostgreSQL resiliency and connection budget](#postgresql-resiliency-and-connection-budget) and
+[Local database commands](#local-database-commands)). Not yet built:
 leaderboards, richer profiles, notifications, anything in the
 [Non-goals](#non-goals-for-this-slice) list below.
 
@@ -676,6 +680,17 @@ rebaselined `InitialCreate` needs no such backfill: `LowerPlayerId`/`UpperPlayer
 exclusively by `Friendship.Order` from the moment the columns exist, so no SQL-level
 canonicalization - correct or otherwise - is needed at all.
 
+**PostgreSQL foundation hardening (no third rebaseline).** That hardening pass re-audited the chain
+and deliberately left it as-is: `InitialCreate` → `AddMatchResults` →
+`ConvertMatchResultModeAndLevelIdsToInteger` → `AddMatchResultsModeIdIndex`. The canonicalization
+hazard and the missing player foreign keys that would have justified squashing were already
+resolved by the #20 rebaseline above (`SchemaTests` pins both), and this project has already
+committed to additive migrations from #20 onward - `MatchResultsMigrationUpgradeTests` exercises
+that forward path with real pre-existing data. Squashing again would buy nothing and would break
+the one rule the migration history exists to establish. `SchemaTests` now also asserts
+`HasPendingModelChanges()` is false, so a mapping change without a matching migration fails CI
+instead of silently diverging from what `EnsureCreated`-based API tests see.
+
 ## Shared competition domain
 
 The prompt driving the original V2 foundation work assumed a pure-C# Unity versus/correspondence
@@ -867,13 +882,106 @@ context**, not a second custom correlation system:
 
 ### Health endpoints
 
-Unchanged semantics, now covered by end-to-end HTTP tests (`TelemetryTests`) rather than only by
+Covered by end-to-end HTTP tests (`TelemetryTests`, `DatabaseOutageTests`) rather than only by
 inspection:
 
 - `GET /health/live` - process can respond; no dependency checks (`Predicate = _ => false`).
-  Registering telemetry does not add a dependency check here.
-- `GET /health/ready` - dependencies needed to serve traffic are ready; still includes the
-  Postgres connectivity check (`DatabaseHealthCheck`, tag `"ready"`) and nothing else.
+  Registering telemetry does not add a dependency check here. Stays `200` during a database
+  outage, so an orchestrator never restart-loops the API over something a restart can't fix.
+- `GET /health/ready` - dependencies needed to serve traffic are ready: the Postgres check
+  (`DatabaseHealthCheck`, tag `"ready"`) and nothing else. It runs one `SELECT 1` on a directly
+  opened connection, outside EF's retrying execution strategy, bounded by a 5s check timeout.
+  Both details matter and were found by running it against a stopped server: going through
+  `CanConnectAsync` made one probe take the whole retry budget (~13s), and merely *opening* a
+  pooled connection does no round trip, so readiness stayed `200` after Postgres stopped
+  (`ReadinessAfterServerLossTests` pins that regression). Readiness never runs migrations.
+
+### PostgreSQL resiliency and connection budget
+
+All runtime database configuration lives in one place, `PostgresConfiguration.UseLevel5Postgres`
+(Infrastructure), used by DI and by the Infrastructure integration-test fixture, so every store
+test runs under the same execution strategy production does.
+
+- **Bounded transient retry**: Npgsql's retrying strategy with `maxRetryCount: 3,
+  maxRetryDelay: 5s`. Only what Npgsql classifies as transient is retried
+  (`NpgsqlException.IsTransient`: refused/broken connections, server shutdown/startup,
+  serialization failures/deadlocks - the aborted transaction was rolled back, so re-running it is
+  safe) - **except timeouts**. Npgsql counts a timeout as transient, but a timed-out command or
+  connect has already spent its whole budget, usually because the server is overloaded or
+  unreachable; retrying it would multiply both the request's latency (up to 4 × 30s) and the load
+  on a struggling database. `PostgresConfiguration`'s strategy therefore skips anything caused by a
+  `TimeoutException`, and a timeout surfaces as `503` on the first attempt
+  (`PersistenceResilienceTests` pins both the "timeout runs once" and the "refused connection is
+  retried exactly 3 times, then gives up" behavior). Unique/FK/check violations are not
+  transient and surface on the first attempt (`PersistenceResilienceTests` asserts a unique
+  violation executes its `INSERT` exactly once and becomes a `ConflictException`). A
+  revision-conditioned `UPDATE ... WHERE revision = @expected` that affects zero rows is a
+  *result*, not an exception, so the strategy cannot retry it - concurrency conflicts keep flowing
+  through the existing application semantics (`SeriesLookup.SaveOrThrowAsync` → `409`, or the
+  bounded 3-pass reload-and-reapply loops in `StartAttemptUseCase`/`CompleteAttemptUseCase`). No
+  code path opens an explicit transaction, which a retrying strategy would reject. The request's
+  `CancellationToken` flows through every store call, so a client disconnect also stops any
+  remaining retries.
+- **Idempotency compatibility (the "committed, but the acknowledgement was lost" case)**: if a
+  connection drops after Postgres commits but before Npgsql sees the commit, the strategy
+  re-executes the write. It can never create a second logical operation, because every write is
+  keyed: inserts reuse the same client-generated primary key (and idempotency key), so the re-run
+  hits a unique index; updates are revision-conditioned, so the re-run affects zero rows. What the
+  caller sees for that (rare) case, per operation:
+  - *Replayed in-request*: match-result submission (catches the conflict and reloads by
+    `(player_id, client_result_id)`), start/complete attempt (reload loop sees its own write;
+    identical results are idempotent successes).
+  - *`409` although the write committed*: create challenge (a client retry with the same
+    `clientRequestId` then returns the existing series as `idempotent_replay`), accept challenge
+    (idempotent for the opponent, so a client retry succeeds), decline/cancel challenge and
+    friend-request transitions (a reload shows the applied state; a blind retry is a `409`
+    illegal transition, never a second transition).
+  - *Known edges, unchanged by this work and identical to a plain client retry*: `register`
+    reports "username taken" for the account the caller just created; a refresh rotation is
+    treated as refresh-token replay.
+
+  Making create-challenge replay in-request (catch the conflict, reload by idempotency key, as
+  `SubmitMatchResultUseCase` does) belongs to the challenge API, not this persistence slice.
+- **Outage behavior**: once the retry budget is spent, the operation fails with
+  `RetryLimitExceededException`; `ApiExceptionHandler` recognises it (via
+  `PersistenceFailures.IsTransientUnavailability`, so the Api never references Npgsql) and returns
+  `503` `service_unavailable` with a generic title - never the Npgsql message, host, or retry
+  details - logged at `Error` and counted in `http.server.5xx{code=service_unavailable}`. There is
+  no fallback store, fake success, or in-memory substitute: durable operations are durable or fail
+  clearly. Measured locally with Postgres stopped under a running API: `/health/live` `200`,
+  `/health/ready` `503` in under 2.2s, a login `503` in ~10.5s on Windows (each refused connect
+  costs ~2s there; roughly 4s on Linux, where refusal is immediate), and full recovery without a
+  restart once Postgres returned.
+- **Timeouts**: request workloads use Npgsql's finite defaults, set through the connection string
+  rather than code - `Timeout` (connect, default 15s) and `Command Timeout` (default 30s). The
+  suggested production template below lowers the connect timeout to 5s; since timeouts are not
+  retried, that is also one request's worst case against an unreachable (black-holed) host.
+  Migrations are a
+  different workload: `Level5V2DbContextFactory` (used by `dotnet ef` and migration bundles) sets a
+  10-minute command timeout and no retrying strategy, so a failed migration stops for
+  investigation instead of being re-run automatically.
+- **Connection budget**: Npgsql's built-in pool, no custom pool, no PgBouncer. The budget is
+  `API replicas × Maximum Pool Size (default 100) ≤ Postgres max_connections (default 100) −
+  headroom for migrations/admin/monitoring`. Two replicas on default settings can already
+  oversubscribe a default server, so set `Maximum Pool Size` explicitly per deployment - e.g. 4
+  replicas × 20 = 80 sessions against `max_connections = 100`. Raising the pool is not a
+  performance fix; revisit PgBouncer only if measured connection pressure (not query latency)
+  demands it.
+- **Suggested production connection string** (a template - real values come from the
+  environment/secret store, never this repo):
+  `Host=<host>;Port=5432;Database=level5_v2;Username=<runtime-role>;Password=<secret>;SSL Mode=Require;Timeout=5;Command Timeout=30;Maximum Pool Size=<per-replica budget>`
+- **Sensitive data**: `EnableSensitiveDataLogging`/`Include Error Detail` are not enabled anywhere,
+  so parameter values never reach logs; Npgsql's connection failures name the host but never the
+  password (checked against the API log during the outage run above).
+- **Indexes**: unchanged. Every existing index already matches a real predicate
+  (`accounts.username_canonical`, `player_profiles.tag`/`account_id`,
+  `friend_requests (to_player_id|from_player_id, status)`,
+  `competitive_series (opponent_id|challenger_id, status)`, `match_results.mode_id`, plus the
+  idempotency/uniqueness indexes). The list queries' `ORDER BY created_at DESC, id DESC` sorts
+  one player's filtered rows, which is small; widening those composites with sort columns (or
+  adding an expression index for the completed list's `COALESCE(completed_at, created_at)`
+  ordering) waits for a measured plan, the same bar `match_results.mode_id` was held to.
+  No JSONB GIN index: nothing queries inside `state_json`.
 
 ### Branch protection / required checks
 
@@ -923,6 +1031,36 @@ serve traffic
   Per the [migration history](#migration-history) notes above, migrations from this point forward
   must be additive - the two prior rebaselines were only safe because no V2 environment had ever
   held durable data yet.
+  Where the deploy environment shouldn't carry the .NET SDK and source, build a self-contained EF
+  migration bundle in CI instead and run that artifact as the migration step. It uses the same
+  design-time factory (so the same 10-minute command timeout and no retry strategy), which reads
+  its connection string from `ConnectionStrings__DefaultConnection` - supply the migration role's
+  connection string there from the deploy secret store:
+  ```bash
+  dotnet ef migrations bundle --project src/Level5.Infrastructure --startup-project src/Level5.Api       --self-contained -r linux-x64 -o efbundle
+  ConnectionStrings__DefaultConnection="<migration-role connection string>" ./efbundle
+  ```
+- **Separate migration and runtime identities**: production should use two roles. The
+  *migration* role owns the `level5_v2` schema objects and is used only by the migration step. The
+  *runtime* role used by `ConnectionStrings__DefaultConnection` gets `CONNECT`, `USAGE` on the
+  schema, and `SELECT, INSERT, UPDATE, DELETE` on its tables - no DDL. A sketch (run once by an
+  administrator; role names illustrative):
+  ```sql
+  GRANT CONNECT ON DATABASE level5_v2 TO level5_v2_app;
+  GRANT USAGE ON SCHEMA public TO level5_v2_app;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO level5_v2_app;
+  ALTER DEFAULT PRIVILEGES FOR ROLE level5_v2_migrator IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO level5_v2_app;
+  ```
+  None of this touches Domain/Application code - it is purely which connection string each step
+  receives. Local development deliberately uses one role (see
+  [Local database commands](#local-database-commands)) because splitting it would add setup
+  friction without protecting anything.
+- **Durability once real data exists**: the moment V2 holds non-disposable user data, its Postgres
+  deployment must provide automated backups with a defined retention period, point-in-time
+  recovery where the platform supports it, a written restore procedure, and periodic restore drills
+  (an untested backup is not a backup). This is a deployment requirement - nothing in this
+  repository implements backups, and the local dev container intentionally has none.
 - **Backup / pre-deploy checks**: take a Postgres backup of `level5_v2` (or confirm the
   infrastructure's existing automated backup covers it) before applying migrations to any
   environment holding real data. Confirm the reviewed migration diff matches what's in the PR
@@ -957,6 +1095,9 @@ serve traffic
   - *Readiness failures*: `/health/ready` returns unhealthy; check `DatabaseHealthCheck`'s
     dependency (Postgres reachability/credentials) and the database span traces for connection
     errors/timeouts.
+  - *`503 service_unavailable` responses*: a transient database failure outlived the bounded retry
+    budget, or timed out (see [PostgreSQL resiliency](#postgresql-resiliency-and-connection-budget)); the paired
+    `Database unavailable processing ...` log entry carries the underlying Npgsql exception.
   - *5xx spikes*: `http.server.5xx` (tag `code`) plus the `ApiExceptionHandler`
     `LogError(exception, "Unhandled exception processing {Method} {Path}", ...)` entries that
     accompany every one of them - the log line has the exception detail the metric deliberately
@@ -1019,8 +1160,9 @@ including `MetricsLabelSafetyTests`, `Level5.Architecture.Tests`) runs without i
 
 Starts the same local Postgres container the legacy backend uses
 (`docker-compose.local-db.yml`, one level up), creates the separate `level5_v2` database inside it
-if it doesn't already exist, generates a JWT signing key, stores both via `dotnet user-secrets`
-(never in a file in this repo), and applies EF Core migrations. Safe to re-run.
+if it doesn't already exist, applies EF Core migrations (via `db.ps1 migrate`, below), generates a
+JWT signing key, and stores the connection string and key via `dotnet user-secrets` (never in a
+file in this repo). Safe to re-run; re-running rotates the local JWT key.
 
 Then:
 
@@ -1032,6 +1174,41 @@ dotnet run
 - Swagger UI: `http://localhost:5000/swagger` (Development environment only)
 - Liveness: `GET /health/live` - always healthy if the process is up, no dependency checks
 - Readiness: `GET /health/ready` - checks Postgres connectivity
+
+### Local database commands
+
+```powershell
+./v2/scripts/db.ps1 start      # start Postgres, wait for its health check
+./v2/scripts/db.ps1 migrate    # start if needed, create level5_v2 if missing, apply migrations
+./v2/scripts/db.ps1 stop       # stop the container; the data volume is kept
+./v2/scripts/db.ps1 reset      # DESTRUCTIVE: drop + recreate ONLY level5_v2, then migrate
+```
+
+The Postgres server is Docker-managed (`postgres:18-alpine`, a pinned major version matching the
+Testcontainers image, `restart: unless-stopped`, a `pg_isready` health check, and a named volume);
+the API still runs on the host with `dotnet run`/the debugger. The port is bound to `127.0.0.1`
+only. The container owns the server and database lifecycle only - tables come exclusively from EF
+Core migrations, and there are no init scripts that create schema.
+
+Credentials are a fixed, well-known, development-only default (`level5`/`localdevpassword`) shared
+with the legacy backend's setup script, for a server only reachable from this machine. To change
+the port, user, password, or container name, set `LEVEL5_PG_PORT`/`LEVEL5_PG_USER`/
+`LEVEL5_PG_PASSWORD`/`LEVEL5_PG_CONTAINER_NAME` in the environment or in a git-ignored `.env` at the
+repository root (see `.env.example`, placeholders only); `docker compose` and `db.ps1` resolve them
+the same way. Re-run `setup-local-dev.ps1` afterward so user-secrets picks up the new connection
+string. Note that the user/password only take effect when the volume is first initialized.
+
+The port is published on `127.0.0.1` only (binding `[::1]` as well would fail outright on hosts
+with IPv6 disabled), so connection strings use `Host=127.0.0.1`, not `localhost`: on Windows
+`localhost` resolves to `::1` first, and each new connection would pay ~2s for the refused IPv6
+attempt. Both setup scripts (this one and the legacy `scripts/setup-local-dev.ps1`) write
+`127.0.0.1`; if your existing user-secrets still say `localhost`, re-run the setup script once.
+
+`reset` asks you to type the database name (or pass `-Force`) and only ever runs
+`DROP DATABASE level5_v2` inside the local compose container. It never reads
+`ConnectionStrings__DefaultConnection`, so it cannot be pointed at a shared, staging, or production
+database, and it leaves the legacy `level5` database and the volume alone. Automated tests never
+touch this container: both integration-test projects start their own Testcontainers instances.
 
 ### Running the tests
 
@@ -1066,7 +1243,7 @@ IP via `X-Forwarded-For`, so don't add ranges wider than the actual infrastructu
 
 ```powershell
 cd v2
-$env:ConnectionStrings__DefaultConnection = "Host=localhost;Port=5432;Database=level5_v2;Username=level5;Password=localdevpassword"
+$env:ConnectionStrings__DefaultConnection = ./scripts/db.ps1 connection-string
 dotnet ef migrations add <Name> --project src/Level5.Infrastructure --startup-project src/Level5.Api -o Persistence/Migrations
 ```
 

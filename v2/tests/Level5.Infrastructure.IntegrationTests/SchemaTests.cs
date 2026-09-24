@@ -148,6 +148,17 @@ public sealed class SchemaTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task The_current_model_has_no_changes_missing_from_the_migrations()
+    {
+        // The converse of the test above: a mapping change (new index, FK, column) made in
+        // Level5V2DbContext without a matching migration would otherwise build and pass against
+        // EnsureCreated-based API tests while never reaching a migrated database.
+        await using var db = fixture.CreateDbContext();
+
+        Assert.False(db.Database.HasPendingModelChanges());
+    }
+
+    [Fact]
     public async Task Friend_requests_has_a_unique_partial_index_on_the_canonical_pending_pair()
     {
         await using var db = fixture.CreateDbContext();
