@@ -265,6 +265,62 @@ public class ConcurrencyTests
     }
 
     [Fact]
+    public async Task StartAttempt_replay_returns_the_same_descriptor_without_writing()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        var original = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+
+        var store = new InterceptingVersusSeriesStore(_seriesStore);
+        var replayed = await new StartAttemptUseCase(store, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+
+        Assert.Equal(original.AttemptId, replayed.AttemptId);
+        Assert.Equal(original.GameNumber, replayed.GameNumber);
+        Assert.Equal(original.ComparisonKeys, replayed.ComparisonKeys);
+        Assert.Equal(0, store.SaveCalls);
+        var persisted = await _seriesStore.FindByIdAsync(seriesId, CancellationToken.None);
+        Assert.Equal(2, persisted!.Revision); // unchanged by the replay: 1 for Accept, 1 for the original StartAttempt
+    }
+
+    [Fact]
+    public async Task StartAttempt_replay_still_succeeds_with_zero_writes_after_the_series_advanced_concurrently()
+    {
+        // A pure no-op replay must not attempt a conditional UPDATE at all: if it did, its
+        // expectedRevision would be captured fresh at load time regardless, but the point of
+        // skipping the write entirely is that a replay can never be made to race - there is
+        // nothing for a concurrent unrelated write (the other participant's own StartAttempt) to
+        // invalidate.
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        var original = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+        await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(opponent, seriesId, 1), CancellationToken.None);
+
+        var store = new InterceptingVersusSeriesStore(_seriesStore);
+        var replayed = await new StartAttemptUseCase(store, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+
+        Assert.Equal(original.AttemptId, replayed.AttemptId);
+        Assert.Equal(0, store.SaveCalls);
+    }
+
+    [Fact]
+    public async Task CompleteAttempt_identical_replay_returns_stable_state_without_writing()
+    {
+        var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync();
+        await new AcceptChallengeUseCase(_seriesStore, _clock).ExecuteAsync(new AcceptChallengeRequest(opponent, seriesId), CancellationToken.None);
+        var started = await new StartAttemptUseCase(_seriesStore, _clock).ExecuteAsync(new StartAttemptRequest(challenger, seriesId, 1), CancellationToken.None);
+        var original = await new CompleteAttemptUseCase(_seriesStore, _clock)
+            .ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(80)), CancellationToken.None);
+
+        var store = new InterceptingVersusSeriesStore(_seriesStore);
+        var replayed = await new CompleteAttemptUseCase(store, _clock)
+            .ExecuteAsync(new CompleteAttemptRequest(challenger, seriesId, 1, started.AttemptId, AttemptResult.OfScore(80)), CancellationToken.None);
+
+        Assert.Equal(original.Revision, replayed.Revision);
+        Assert.Equal(80d, replayed.Games.Single(g => g.GameNumber == 1).YourAttempt!.Result![ResultMetric.Score]);
+        Assert.Equal(0, store.SaveCalls);
+    }
+
+    [Fact]
     public async Task Accept_replay_after_the_series_completed_returns_the_completed_view_without_writing()
     {
         var (seriesId, challenger, opponent) = await SeedPendingChallengeAsync(totalGames: 1);

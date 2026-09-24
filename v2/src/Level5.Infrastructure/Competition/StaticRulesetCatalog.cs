@@ -29,7 +29,24 @@ public sealed class StaticRulesetCatalog : IRulesetCatalog
             ModeId: "mode-score-only",
             InformationPolicy: InformationPolicy.SealedAttempt,
             AlternatesFirstAttempt: false,
-            ComparisonKeys: [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)])
+            ComparisonKeys: [new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins)]),
+
+        // Mirrors Unity dev's DefaultCompetitiveRulesets.Score("most-points", GameModeId.TotalPoints, ...)
+        // exactly (id, version, comparison keys/order/directions) - "score-only" above has no counterpart
+        // in Unity's own ruleset registry, so it is not actually playable by any shipped client. This is
+        // the one ruleset Unity can currently resolve and launch through RemoteAttemptDescriptorMapper.
+        ["most-points"] = new CatalogEntry(
+            CurrentVersion: 1,
+            MinimumCompatibleVersion: 1,
+            ModeId: "mode-most-points",
+            InformationPolicy: InformationPolicy.SealedAttempt,
+            AlternatesFirstAttempt: false,
+            ComparisonKeys:
+            [
+                new ComparisonKey(ResultMetric.Score, MetricDirection.HigherWins),
+                new ComparisonKey(ResultMetric.Accuracy, MetricDirection.HigherWins),
+                new ComparisonKey(ResultMetric.ShotsAttempted, MetricDirection.LowerWins)
+            ])
     };
 
     public RulesetDefinition Resolve(string rulesetId, int? requestedVersion)

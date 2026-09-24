@@ -225,9 +225,14 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         await Assert.ThrowsAsync<ConflictingAttemptResultException>(() =>
             completeAttempt.ExecuteAsync(new CompleteAttemptRequest(challenger, created.Id, 1, started.AttemptId, AttemptResult.OfScore(999)), CancellationToken.None));
 
+        // A genuinely new completion (the opponent's own attempt, never completed before), not a
+        // replay of the challenger's already-accepted result above - an idempotent replay makes no
+        // write at all (issue #11) and so can never observe a store's forced save failure.
+        var opponentStarted = await new StartAttemptUseCase(seriesStore, clock).ExecuteAsync(new StartAttemptRequest(opponent, created.Id, 1), CancellationToken.None);
+        sensitiveValues.Add(opponentStarted.AttemptId.Value.ToString());
         await Assert.ThrowsAsync<Level5.Application.Common.ConflictException>(() =>
             new CompleteAttemptUseCase(new AlwaysConflictingVersusSeriesStore(seriesStore), clock)
-                .ExecuteAsync(new CompleteAttemptRequest(challenger, created.Id, 1, started.AttemptId, AttemptResult.OfScore(50)), CancellationToken.None));
+                .ExecuteAsync(new CompleteAttemptRequest(opponent, created.Id, 1, opponentStarted.AttemptId, AttemptResult.OfScore(30)), CancellationToken.None));
 
         return sensitiveValues;
     }

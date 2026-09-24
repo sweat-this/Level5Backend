@@ -41,7 +41,12 @@ public sealed class CompleteAttemptUseCase(IVersusSeriesStore seriesStore, ICloc
                 throw;
             }
 
-            if (await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
+            // An idempotent replay (this exact attempt was already completed with a semantically
+            // identical result) leaves Revision unchanged - no domain mutation occurred, so there is
+            // nothing to persist. Saving anyway would issue an unnecessary conditional UPDATE that
+            // could spuriously lose to another participant's unrelated concurrent write, turning a
+            // pure no-op replay into a false 409, and would re-resolve nothing but still touch the row.
+            if (series.Revision == expectedRevision || await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
             {
                 ApplicationMetrics.AttemptCompleteOutcomes.Increment(ApplicationMetrics.OutcomeTag, "success");
                 return series.ToView(request.ActingPlayerId);

@@ -53,7 +53,11 @@ public sealed class StartAttemptUseCase(IVersusSeriesStore seriesStore, IClock c
 
             var attempt = series.StartAttempt(request.ActingPlayerId, request.GameNumber, clock.UtcNow);
 
-            if (await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
+            // An idempotent replay (this exact attempt already existed) leaves Revision unchanged -
+            // no domain mutation occurred, so there is nothing to persist. Saving anyway would issue
+            // an unnecessary conditional UPDATE that could spuriously lose to another participant's
+            // unrelated concurrent write, turning a pure no-op replay into a false 409.
+            if (series.Revision == expectedRevision || await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
             {
                 return BuildDescriptor(series, attempt, request.GameNumber);
             }
