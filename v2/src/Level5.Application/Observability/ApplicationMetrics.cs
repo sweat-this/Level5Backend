@@ -58,8 +58,11 @@ public static class ApplicationMetrics
 
     /// <summary>
     /// Challenge-create requests, by outcome. Tag <c>outcome</c>: <c>created</c> (a new series),
-    /// <c>idempotent_replay</c> (a retried create with a matching <c>clientRequestId</c>),
-    /// <c>conflict</c> (a reused <c>clientRequestId</c> for a materially different request).
+    /// <c>idempotent_replay</c> (a sequential retry found a matching <c>clientRequestId</c> already
+    /// persisted), <c>idempotent_replay_after_race</c> (the same, but only resolved after losing a
+    /// concurrent insert race on that key - a distinct signal worth alerting on separately, since
+    /// it indicates real write contention rather than an ordinary client retry), <c>conflict</c> (a
+    /// reused <c>clientRequestId</c> for a materially different request).
     /// </summary>
     public static readonly Counter<long> ChallengeCreateOutcomes =
         Meter.CreateCounter<long>("challenge.create.replay_or_conflict", description: "Challenge-create requests, by outcome.");

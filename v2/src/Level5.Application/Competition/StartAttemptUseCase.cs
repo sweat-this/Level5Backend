@@ -57,7 +57,7 @@ public sealed class StartAttemptUseCase(IVersusSeriesStore seriesStore, IClock c
             // no domain mutation occurred, so there is nothing to persist. Saving anyway would issue
             // an unnecessary conditional UPDATE that could spuriously lose to another participant's
             // unrelated concurrent write, turning a pure no-op replay into a false 409.
-            if (series.Revision == expectedRevision || await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
+            if (await SeriesLookup.SaveIfChangedAsync(seriesStore, series, expectedRevision, cancellationToken))
             {
                 return BuildDescriptor(series, attempt, request.GameNumber);
             }

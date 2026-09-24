@@ -99,23 +99,11 @@ public sealed class VersusSeries
     /// retry behavior. Declined and Cancelled still fall through to <see cref="EnsureStatus"/>
     /// and conflict.
     /// </summary>
-    public void Accept(PlayerId actingPlayerId, DateTimeOffset now)
-    {
-        if (actingPlayerId != OpponentId)
-        {
-            throw new SeriesAuthorizationException("Only the challenged player can accept a challenge.");
-        }
-
-        if (Status is SeriesStatus.Active or SeriesStatus.Completed)
-        {
-            return;
-        }
-
-        EnsureStatus(SeriesStatus.PendingAcceptance);
-
-        Status = SeriesStatus.Active;
-        Touch(now);
-    }
+    public void Accept(PlayerId actingPlayerId, DateTimeOffset now) =>
+        ApplyTerminalTransition(
+            actingPlayerId, OpponentId, "Only the challenged player can accept a challenge.",
+            alreadyApplied: status => status is SeriesStatus.Active or SeriesStatus.Completed,
+            targetStatus: SeriesStatus.Active, setsCompletedAt: false, now);
 
     /// <summary>
     /// Idempotent for the opponent: <see cref="SeriesStatus.Declined"/> is only ever reached via
@@ -123,24 +111,11 @@ public sealed class VersusSeries
     /// leaves <see cref="Revision"/> unchanged (see <see cref="Accept"/>). Every other
     /// non-pending status conflicts - it proves a different command won.
     /// </summary>
-    public void Decline(PlayerId actingPlayerId, DateTimeOffset now)
-    {
-        if (actingPlayerId != OpponentId)
-        {
-            throw new SeriesAuthorizationException("Only the challenged player can decline a challenge.");
-        }
-
-        if (Status == SeriesStatus.Declined)
-        {
-            return;
-        }
-
-        EnsureStatus(SeriesStatus.PendingAcceptance);
-
-        Status = SeriesStatus.Declined;
-        CompletedAt = now;
-        Touch(now);
-    }
+    public void Decline(PlayerId actingPlayerId, DateTimeOffset now) =>
+        ApplyTerminalTransition(
+            actingPlayerId, OpponentId, "Only the challenged player can decline a challenge.",
+            alreadyApplied: status => status == SeriesStatus.Declined,
+            targetStatus: SeriesStatus.Declined, setsCompletedAt: true, now);
 
     /// <summary>
     /// Idempotent for the challenger: <see cref="SeriesStatus.Cancelled"/> is only ever reached
@@ -148,22 +123,39 @@ public sealed class VersusSeries
     /// that leaves <see cref="Revision"/> unchanged (see <see cref="Accept"/>). Every other
     /// non-pending status conflicts - it proves a different command won.
     /// </summary>
-    public void Cancel(PlayerId actingPlayerId, DateTimeOffset now)
+    public void Cancel(PlayerId actingPlayerId, DateTimeOffset now) =>
+        ApplyTerminalTransition(
+            actingPlayerId, ChallengerId, "Only the challenger can cancel a challenge before it is accepted.",
+            alreadyApplied: status => status == SeriesStatus.Cancelled,
+            targetStatus: SeriesStatus.Cancelled, setsCompletedAt: true, now);
+
+    /// <summary>
+    /// Shared shape behind <see cref="Accept"/>/<see cref="Decline"/>/<see cref="Cancel"/>: each is
+    /// the one legal transition a specific actor may make out of <see cref="SeriesStatus.PendingAcceptance"/>,
+    /// idempotent on its own resulting status, and a conflict against any other status.
+    /// </summary>
+    private void ApplyTerminalTransition(
+        PlayerId actingPlayerId, PlayerId requiredActor, string authorizationErrorMessage,
+        Func<SeriesStatus, bool> alreadyApplied, SeriesStatus targetStatus, bool setsCompletedAt, DateTimeOffset now)
     {
-        if (actingPlayerId != ChallengerId)
+        if (actingPlayerId != requiredActor)
         {
-            throw new SeriesAuthorizationException("Only the challenger can cancel a challenge before it is accepted.");
+            throw new SeriesAuthorizationException(authorizationErrorMessage);
         }
 
-        if (Status == SeriesStatus.Cancelled)
+        if (alreadyApplied(Status))
         {
             return;
         }
 
         EnsureStatus(SeriesStatus.PendingAcceptance);
 
-        Status = SeriesStatus.Cancelled;
-        CompletedAt = now;
+        Status = targetStatus;
+        if (setsCompletedAt)
+        {
+            CompletedAt = now;
+        }
+
         Touch(now);
     }
 
@@ -312,6 +304,24 @@ public sealed class VersusSeries
         var gameIndex = gameNumber - 1;
         return gameIndex % 2 == 0 ? ChallengerId : OpponentId;
     }
+
+    /// <summary>
+    /// The idempotent-replay semantic fingerprint check for a reused challenge-creation
+    /// idempotency key: true iff every client-controlled field of a candidate resubmission
+    /// matches what this series was originally created with. <paramref name="requestedRulesetVersion"/>
+    /// and <paramref name="requestedInformationPolicy"/> are optional on the request - when
+    /// omitted, the client is not asserting a value for that field, so it cannot conflict.
+    /// Assumes the caller already matched on (ChallengerId, idempotency key) via lookup before
+    /// calling this.
+    /// </summary>
+    public bool MatchesRequest(
+        PlayerId opponentId, int totalGames, string rulesetId, int? requestedRulesetVersion,
+        InformationPolicy? requestedInformationPolicy) =>
+        OpponentId == opponentId
+        && Format.TotalGames == totalGames
+        && Rules.RulesetId == rulesetId
+        && (requestedRulesetVersion is null || Rules.RulesetVersion == requestedRulesetVersion)
+        && (requestedInformationPolicy is null || Rules.InformationPolicy == requestedInformationPolicy);
 
     public SeriesView ToView(PlayerId viewerId)
     {

@@ -37,7 +37,7 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         // series.concurrency.conflict / operation
         "start_attempt", "complete_attempt", "accept_challenge", "decline_challenge", "cancel_challenge",
         // challenge.create.replay_or_conflict / outcome
-        "created", "idempotent_replay", "conflict",
+        "created", "idempotent_replay", "idempotent_replay_after_race", "conflict",
         // attempt.complete.outcome / outcome
         "conflicting_result",
     ];
@@ -209,6 +209,21 @@ public sealed class MetricsLabelSafetyTests : IDisposable
 
         await Assert.ThrowsAsync<Level5.Application.Common.ConflictException>(() => createChallenge.ExecuteAsync(
             new CreateChallengeRequest(challenger, opponent, "score-only", null, 5, null, clientRequestId), CancellationToken.None));
+
+        // challenge.create.replay_or_conflict: idempotent_replay_after_race - a duplicate create that
+        // only resolves after losing a concurrent insert race under the same clientRequestId, a
+        // distinct signal from the ordinary sequential replay driven above.
+        var raceOpponent = Level5.Domain.Ids.PlayerId.New();
+        sensitiveValues.Add(raceOpponent.Value.ToString());
+        await friendships.AddFriendshipAsync(Friendship.Between(challenger, raceOpponent, clock.UtcNow), CancellationToken.None);
+        var raceRequest = new CreateChallengeRequest(challenger, raceOpponent, "score-only", null, 3, null, Guid.NewGuid());
+        sensitiveValues.Add(raceRequest.ClientRequestId.ToString());
+        var racingStore = new Level5.Application.Tests.Competition.InterceptingVersusSeriesStore(seriesStore)
+        {
+            BeforeFirstAdd = () => createChallenge.ExecuteAsync(raceRequest, CancellationToken.None)
+        };
+        var raced = await new CreateChallengeUseCase(racingStore, friendships, catalog, clock).ExecuteAsync(raceRequest, CancellationToken.None);
+        sensitiveValues.Add(raced.Id.Value.ToString());
 
         // series.concurrency.conflict (start_attempt) and attempt.complete.outcome (success, conflicting_result); series.concurrency.conflict (complete_attempt).
         await new AcceptChallengeUseCase(seriesStore, clock).ExecuteAsync(new AcceptChallengeRequest(opponent, created.Id), CancellationToken.None);
