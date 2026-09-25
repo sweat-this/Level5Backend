@@ -51,6 +51,25 @@ public interface IVersusSeriesStore
     Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
 
     /// <summary>
+    /// See <see cref="ListIncomingChallengeSummariesAsync"/> - same projection/pagination contract,
+    /// ordered by completion time like <see cref="ListCompletedSeriesSummariesAsync"/> but scoped
+    /// to every terminal status (<see cref="SeriesStatus.Completed"/>, <see cref="SeriesStatus.Declined"/>,
+    /// <see cref="SeriesStatus.Cancelled"/>, <see cref="SeriesStatus.Expired"/>) either participant
+    /// is in - the durable history surface: terminal records are retained indefinitely and this is
+    /// how a participant queries all of them, not just series that finished actual play.
+    /// </summary>
+    Task<PagedResult<SeriesSummary>> ListTerminalHistorySummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds up to <paramref name="batchSize"/> series still in <see cref="SeriesStatus.PendingAcceptance"/>
+    /// whose <c>CreatedAt</c> is older than <paramref name="cutoff"/> - the background expiry
+    /// sweep's source query (bounded so one sweep tick can never scan or lock an unbounded number
+    /// of rows). Ordered by <c>CreatedAt</c> ascending so the oldest, most-overdue challenges are
+    /// always expired first across successive bounded runs.
+    /// </summary>
+    Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Persists a mutated series iff the stored revision still equals
     /// <paramref name="expectedRevision"/> (the revision that was loaded before the domain
     /// mutation ran). Returns false on a concurrency conflict instead of throwing, so callers can

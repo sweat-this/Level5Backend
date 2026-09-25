@@ -11,26 +11,38 @@
                       current V2 EF Core migrations to it.
     reset             DESTRUCTIVE. Drop and recreate ONLY the local level5_v2 database, then apply
                       migrations. The legacy "level5" database and the volume are left alone.
+    e2e-migrate       Start (if needed), create the level5_v2_e2e database if missing, and apply
+                      the current V2 EF Core migrations to it. Same schema/migration chain as
+                      level5_v2 - there is no separate E2E schema.
+    e2e-reset         DESTRUCTIVE. Drop and recreate ONLY the local level5_v2_e2e database, then
+                      apply migrations. Use this before seeding deterministic E2E fixtures
+                      (see e2e.ps1) - level5_v2_e2e is meant to be reset freely and must never
+                      accumulate manual development data.
     connection-string Print the local level5_v2 connection string (used by setup-local-dev.ps1).
 
     Every command operates on the local compose container only. The target is built from the
     LEVEL5_PG_* settings (environment or the git-ignored ../../.env - see ../../.env.example) and
     is always 127.0.0.1; ConnectionStrings__DefaultConnection is never read, so this script
-    cannot be pointed at a shared, staging, or production database. Schema lives in EF Core
-    migrations, never in this script.
+    cannot be pointed at a shared, staging, or production database. The target database name for
+    each command is a hardcoded literal ("level5_v2" or "level5_v2_e2e"), never derived from user
+    input, so a typo in a command's arguments can never redirect a destructive operation at the
+    wrong database. Schema lives in EF Core migrations, never in this script.
 
 .EXAMPLE
     ./v2/scripts/db.ps1 migrate
 
 .EXAMPLE
     ./v2/scripts/db.ps1 reset -Force
+
+.EXAMPLE
+    ./v2/scripts/db.ps1 e2e-reset -Force
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet("start", "stop", "migrate", "reset", "connection-string")]
+    [ValidateSet("start", "stop", "migrate", "reset", "e2e-migrate", "e2e-reset", "connection-string")]
     [string]$Command,
 
-    # Skips the interactive confirmation for "reset".
+    # Skips the interactive confirmation for "reset"/"e2e-reset".
     [switch]$Force
 )
 
@@ -38,7 +50,13 @@ $ErrorActionPreference = "Stop"
 $v2Root = Split-Path $PSScriptRoot -Parent
 $repoRoot = Split-Path $v2Root -Parent
 $composeFile = Join-Path $repoRoot "docker-compose.local-db.yml"
-$database = "level5_v2"
+
+# Hardcoded literals, not derived from $Command text or any external input - this is what makes
+# "e2e-reset" safe to run freely: there is no path by which it can end up targeting level5_v2 (or
+# anything else) instead.
+$devDatabase = "level5_v2"
+$e2eDatabase = "level5_v2_e2e"
+$database = if ($Command -like "e2e-*") { $e2eDatabase } else { $devDatabase }
 
 # Same values docker compose resolves: environment first, then .env, then the compose defaults.
 function Get-Setting([string]$name, [string]$default) {
@@ -95,6 +113,18 @@ function Update-Database {
     }
 }
 
+function Reset-Database {
+    Write-Host "RESET will permanently delete the local '$database' database (container on 127.0.0.1:$pgPort) and rebuild it from migrations." -ForegroundColor Yellow
+    if (-not $Force) {
+        $answer = Read-Host "Type '$database' to confirm"
+        if ($answer -ne $database) { throw "Reset cancelled." }
+    }
+    Start-Database
+    Invoke-Psql "DROP DATABASE IF EXISTS $database WITH (FORCE)" | Out-Null
+    Initialize-Database
+    Update-Database
+}
+
 switch ($Command) {
     "start" {
         Start-Database
@@ -109,15 +139,15 @@ switch ($Command) {
         Update-Database
     }
     "reset" {
-        Write-Host "RESET will permanently delete the local '$database' database (container on 127.0.0.1:$pgPort) and rebuild it from migrations." -ForegroundColor Yellow
-        if (-not $Force) {
-            $answer = Read-Host "Type '$database' to confirm"
-            if ($answer -ne $database) { throw "Reset cancelled." }
-        }
+        Reset-Database
+    }
+    "e2e-migrate" {
         Start-Database
-        Invoke-Psql "DROP DATABASE IF EXISTS $database WITH (FORCE)" | Out-Null
         Initialize-Database
         Update-Database
+    }
+    "e2e-reset" {
+        Reset-Database
     }
     "connection-string" {
         Write-Output $connectionString

@@ -44,6 +44,11 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<ChallengeExpiryOptions>()
+            .Bind(configuration.GetSection(ChallengeExpiryOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<IPlayerProfileStore, PlayerProfileStore>();
         services.AddScoped<IFriendshipStore, FriendshipStore>();
@@ -57,6 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
         services.AddSingleton<IRefreshTokenGenerator, RefreshTokenGenerator>();
         services.AddSingleton<IAuthSessionPolicy, AuthSessionPolicy>();
+        services.AddSingleton<IChallengeExpiryPolicy, ChallengeExpiryPolicy>();
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton<IRulesetCatalog, StaticRulesetCatalog>();

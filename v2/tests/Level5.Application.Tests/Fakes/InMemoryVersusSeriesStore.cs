@@ -83,6 +83,27 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
             _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && s.Status == SeriesStatus.Completed),
             s => s.CompletedAt ?? s.CreatedAt, limit, cursor, SeriesListPaging.CompletedScope));
 
+    private static readonly SeriesStatus[] TerminalStatuses =
+        [SeriesStatus.Completed, SeriesStatus.Declined, SeriesStatus.Cancelled, SeriesStatus.Expired];
+
+    public Task<PagedResult<SeriesSummary>> ListTerminalHistorySummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => Task.FromResult(Page(
+            _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && TerminalStatuses.Contains(s.Status)),
+            s => s.CompletedAt ?? s.CreatedAt, limit, cursor, SeriesListPaging.HistoryScope));
+
+    public Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<VersusSeriesId> ids =
+        [
+            .. _rows.Values
+                .Where(s => s.Status == SeriesStatus.PendingAcceptance && s.CreatedAt < cutoff)
+                .OrderBy(s => s.CreatedAt)
+                .Take(batchSize)
+                .Select(s => s.Id)
+        ];
+        return Task.FromResult(ids);
+    }
+
     /// <summary>
     /// Mirrors <c>VersusSeriesStore</c>'s keyset pagination (issue #21): descending by
     /// <paramref name="sortKey"/> then <c>Id</c>, with the same opaque, scope-tagged cursor format

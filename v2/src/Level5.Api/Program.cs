@@ -1,4 +1,5 @@
 using System.Text;
+using Level5.Api.BackgroundServices;
 using Level5.Api.ErrorHandling;
 using Level5.Api.Security;
 using Level5.Api.Telemetry;
@@ -107,10 +108,13 @@ builder.Services.AddScoped<ListIncomingChallengesUseCase>();
 builder.Services.AddScoped<ListOutgoingChallengesUseCase>();
 builder.Services.AddScoped<ListActiveSeriesUseCase>();
 builder.Services.AddScoped<ListCompletedSeriesUseCase>();
+builder.Services.AddScoped<ListTerminalHistoryUseCase>();
 builder.Services.AddScoped<StartAttemptUseCase>();
 builder.Services.AddScoped<CompleteAttemptUseCase>();
 builder.Services.AddScoped<SubmitMatchResultUseCase>();
 builder.Services.AddScoped<GetLeaderboardUseCase>();
+builder.Services.AddScoped<ExpireStalePendingChallengesUseCase>();
+builder.Services.AddHostedService<ChallengeExpirySweepService>();
 
 builder.Services.AddScoped<ICurrentAccountAccessor, CurrentAccountAccessor>();
 builder.Services.AddScoped<ICurrentPlayerProvider, CurrentPlayerProvider>();

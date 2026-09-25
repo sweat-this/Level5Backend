@@ -276,6 +276,87 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task ListTerminalHistorySummariesAsync_returns_every_terminal_status_but_not_active_or_pending()
+    {
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "HistoryChallenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "HistoryOpponent", Now);
+        var unrelated = await PlayerSeeding.CreatePlayerAsync(db, "HistoryUnrelated", Now);
+
+        var completed = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now);
+        completed.Accept(opponent, Now);
+        var challengerAttempt = completed.StartAttempt(challenger, 1, Now);
+        var opponentAttempt = completed.StartAttempt(opponent, 1, Now);
+        completed.CompleteAttempt(challenger, 1, challengerAttempt.Id, AttemptResult.OfScore(80), Now);
+        completed.CompleteAttempt(opponent, 1, opponentAttempt.Id, AttemptResult.OfScore(60), Now);
+
+        var declined = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        declined.Decline(opponent, Now);
+
+        var cancelled = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        cancelled.Cancel(challenger, Now);
+
+        var expired = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        expired.Expire(Now);
+
+        var stillPending = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        var active = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, Now);
+        active.Accept(opponent, Now);
+        var forSomeoneElse = VersusSeries.CreateChallenge(challenger, unrelated, SeriesFormat.BestOf(3), DefaultRules, Now);
+        forSomeoneElse.Decline(unrelated, Now);
+
+        var store = new VersusSeriesStore(db);
+        foreach (var series in new[] { completed, declined, cancelled, expired, stillPending, active, forSomeoneElse })
+        {
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+        }
+
+        var history = await store.ListTerminalHistorySummariesAsync(opponent, limit: null, cursor: null, CancellationToken.None);
+
+        var historyIds = history.Items.Select(i => i.Id).ToHashSet();
+        Assert.Equal(4, history.Items.Count);
+        Assert.Contains(completed.Id, historyIds);
+        Assert.Contains(declined.Id, historyIds);
+        Assert.Contains(cancelled.Id, historyIds);
+        Assert.Contains(expired.Id, historyIds);
+    }
+
+    [Fact]
+    public async Task FindStalePendingChallengeIdsAsync_only_returns_pending_challenges_older_than_the_cutoff_up_to_the_batch_size()
+    {
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "StaleChallenger", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "StaleOpponent", Now);
+
+        var old1 = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now.AddDays(-40));
+        var old2 = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now.AddDays(-35));
+        var fresh = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now.AddDays(-1));
+        var alreadyAccepted = VersusSeries.CreateChallenge(challenger, opponent, SeriesFormat.BestOf(1), DefaultRules, Now.AddDays(-40));
+        alreadyAccepted.Accept(opponent, Now.AddDays(-40));
+
+        var store = new VersusSeriesStore(db);
+        foreach (var series in new[] { old1, old2, fresh, alreadyAccepted })
+        {
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+        }
+
+        var cutoff = Now.AddDays(-30);
+        var stale = await store.FindStalePendingChallengeIdsAsync(cutoff, batchSize: 100, CancellationToken.None);
+
+        var staleIds = stale.ToHashSet();
+        Assert.Equal(2, stale.Count);
+        Assert.Contains(old1.Id, staleIds);
+        Assert.Contains(old2.Id, staleIds);
+        Assert.DoesNotContain(fresh.Id, staleIds);
+        Assert.DoesNotContain(alreadyAccepted.Id, staleIds);
+
+        var bounded = await store.FindStalePendingChallengeIdsAsync(cutoff, batchSize: 1, CancellationToken.None);
+        Assert.Single(bounded);
+        // Oldest first, so successive bounded sweeps make monotonic progress.
+        Assert.Equal(old1.Id, bounded[0]);
+    }
+
+    [Fact]
     public async Task AddAsync_rejects_a_duplicate_clientRequestId_for_the_same_challenger()
     {
         await using var db = fixture.CreateDbContext();

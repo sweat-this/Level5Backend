@@ -130,9 +130,11 @@ Deliberately not modeled yet: leaderboards, progression, matchmaking, notificati
   minimal, since how it is administered/populated long-term is issue #10's concern, not #9's; #9
   only needed *some* server-owned seam so a created series is never rules-less.
 - **Legal transitions only**: `PendingAcceptance -> Active -> Completed`, or
-  `PendingAcceptance -> Declined/Cancelled`. Every mutating method validates the acting player and
-  the current status before applying anything (`SeriesAuthorizationException`,
-  `IllegalSeriesTransitionException`).
+  `PendingAcceptance -> Declined/Cancelled/Expired`. Every mutating method validates the acting
+  player and the current status before applying anything (`SeriesAuthorizationException`,
+  `IllegalSeriesTransitionException`). `Expire` is the one transition with no acting player at all -
+  it is a system transition, only ever called by the background expiry sweep (see "Correspondence
+  history and expiry" below) or fixture tooling, never by a participant through the HTTP API.
 - **Optimistic concurrency**: every mutation increments `Revision`. Persistence writes with
   `WHERE id = @id AND revision = @expectedRevision`; a 0-row update means someone else moved first,
   and the use case surfaces a `409 Conflict` rather than silently overwriting (see
@@ -373,6 +375,44 @@ summary/paged query per list instead of returning `IReadOnlyList<VersusSeries>`.
   call could accidentally reach aggregate/sealed state, independent of how any implementation
   behaves. `FindByIdAsync`/`FindByIdempotencyKeyAsync`/`TrySaveAsync` are unchanged and remain the
   only aggregate-hydrating paths on the interface.
+
+## Correspondence history and expiry
+
+**Completed, declined, cancelled, and expired correspondence records are retained as durable
+history. They are not deleted by normal application behavior.** No delete-history endpoint and no
+automatic TTL/purge process exist anywhere in this codebase. `CompletedAt` (the one authoritative
+terminal timestamp - see the "Persistence" section below) is set once, on the transition into
+whichever terminal status applies, and is never cleared; the row itself is never removed.
+
+- **`Expired` terminal status**: `SeriesStatus.Expired`, reached only from `PendingAcceptance` via
+  `VersusSeries.Expire(now)` - a challenge can only expire while still unanswered, exactly like
+  `Decline`/`Cancel`. Unlike those two, `Expire` takes no acting player: it is a system transition
+  (`Level5.Domain.Tests.Competition.VersusSeriesTests`' `Expire_*` tests cover idempotency/replay
+  and illegal-transition rejection the same way `Decline`/`Cancel` are covered).
+- **Automatic expiry sweep**: `ChallengeExpirySweepService`
+  (`v2/src/Level5.Api/BackgroundServices/`) is an ASP.NET Core `BackgroundService` - no new external
+  infrastructure, just the framework's built-in hosted-service model - that periodically calls
+  `ExpireStalePendingChallengesUseCase`. That use case finds challenges still `PendingAcceptance`
+  older than `Challenges:PendingExpiryDays` (default **30 days**) via
+  `IVersusSeriesStore.FindStalePendingChallengeIdsAsync` (backed by a dedicated
+  `IX_competitive_series_Status_CreatedAt` index - the only schema migration in this slice, purely
+  additive per the migration policy below) and expires each one using the exact same
+  conditional-update optimistic-concurrency save every other transition uses. Configuration:
+  `Challenges:PendingExpiryDays` (default 30), `Challenges:ExpirySweepIntervalMinutes` (default 60),
+  `Challenges:ExpirySweepBatchSize` (default 100, bounding how many rows one tick can touch). A
+  failed tick is logged and never crashes the host; the next tick retries. There is no
+  administrative "expire now" HTTP endpoint - `Expire` is reachable only through the sweep and
+  through fixture tooling, since no required-operations list calls for a manual one.
+- **Terminal history query**: `GET /api/v2/series/history` (`ListTerminalHistoryUseCase` /
+  `IVersusSeriesStore.ListTerminalHistorySummariesAsync`) returns every series either participant is
+  in with status `Completed`, `Declined`, `Cancelled`, **or** `Expired` - the durable-history
+  surface. This is deliberately separate from `GET /api/v2/series/completed`
+  (`ListCompletedSeriesUseCase`), which stays scoped to `Completed` only per issue #10's original
+  "completed means actually finished play" decision; `history` is the superset a client uses to
+  render "everything that stopped being active," `completed` remains the narrower "actual finished
+  play" view. Both use the same narrow relational-only projection as every other list endpoint (no
+  `StateJson` hydration, ordered by `CompletedAt DESC, Id DESC`), so one malformed/unsupported
+  aggregate document on any row cannot break either list.
 
 ## Authentication and sessions
 
@@ -699,6 +739,10 @@ that forward path with real pre-existing data. Squashing again would buy nothing
 the one rule the migration history exists to establish. `SchemaTests` now also asserts
 `HasPendingModelChanges()` is false, so a mapping change without a matching migration fails CI
 instead of silently diverging from what `EnsureCreated`-based API tests see.
+
+**`AddCompetitiveSeriesStatusCreatedAtIndex`** (correspondence-history/expiry slice) continues the
+additive-only policy: one new index (`Status`, `CreatedAt`) supporting the background expiry
+sweep's scan, no column or table changes.
 
 ## Shared competition domain
 
@@ -1290,11 +1334,62 @@ dotnet run
 ### Local database commands
 
 ```powershell
-./v2/scripts/db.ps1 start      # start Postgres, wait for its health check
-./v2/scripts/db.ps1 migrate    # start if needed, create level5_v2 if missing, apply migrations
-./v2/scripts/db.ps1 stop       # stop the container; the data volume is kept
-./v2/scripts/db.ps1 reset      # DESTRUCTIVE: drop + recreate ONLY level5_v2, then migrate
+./v2/scripts/db.ps1 start        # start Postgres, wait for its health check
+./v2/scripts/db.ps1 migrate      # start if needed, create level5_v2 if missing, apply migrations
+./v2/scripts/db.ps1 stop         # stop the container; the data volume is kept
+./v2/scripts/db.ps1 reset        # DESTRUCTIVE: drop + recreate ONLY level5_v2, then migrate
+./v2/scripts/db.ps1 e2e-migrate  # same as migrate, but for level5_v2_e2e
+./v2/scripts/db.ps1 e2e-reset    # DESTRUCTIVE: drop + recreate ONLY level5_v2_e2e, then migrate
 ```
+
+**Two local databases, one schema.** `level5_v2` is the persistent manual-development database -
+it survives restarts and may accumulate whatever developer-created accounts/challenges you create
+by hand while working against the API from the frontend, Unity, or Swagger. `level5_v2_e2e` is a
+separate, deliberately disposable database used only by deterministic E2E fixtures (below) - reset
+it freely, and never rely on it retaining anything between runs. Both run the exact same EF Core
+migration chain (there is no separate "test schema"); only the target database name and reset
+policy differ. Every `db.ps1` command's target database name is a hardcoded literal, never derived
+from a command-line argument or `ConnectionStrings__DefaultConnection`, so there is no way to point
+a destructive command at anything but one of these two well-known local databases.
+
+### Deterministic E2E fixtures
+
+```powershell
+./v2/scripts/e2e.ps1 e2e-seed baseline                # reset level5_v2_e2e, then seed it
+./v2/scripts/e2e.ps1 e2e-seed series-completed -Force  # skip the interactive reset confirmation
+```
+
+`e2e-seed <scenario>` always resets `level5_v2_e2e` first (via `db.ps1 e2e-reset`), then seeds it
+with a named scenario through `v2/tools/Level5.E2E.Fixtures` - a small console app that drives the
+*real* `Level5.Application` use cases over the *real* `Level5.Infrastructure` persistence (real
+password hashing, real domain constructors/transitions, real EF Core repositories), never raw SQL
+and never a test-only table. It refuses to run against anything but a database literally named
+`level5_v2_e2e` (a hardcoded rail inside the tool itself, independent of whatever connection string
+it's handed), and every fixture timestamp is driven by one fixed, scenario-internal clock rather
+than wall-clock time, so repeated `e2e-reset` + `e2e-seed` of the same scenario reproduces identical
+logical state every time.
+
+Four fixed identities exist in every scenario (usernames/tags are what's fixed and reset-stable -
+see `FixtureIdentities.cs` for why a literal GUID isn't a real domain constructor's job): `Patrick
+E2E` (`e2e_patrick`, tag `E2E_PATRICK#0001`), `Alice E2E` (`E2E_ALICE#0002`), `Bob E2E`
+(`E2E_BOB#0003`), `Carol E2E` (`E2E_CAROL#0004`), all sharing one fixture-only password
+(`FixtureIdentities.Password`) hashed by the real `AspNetPasswordHasher`.
+
+Named scenarios (`v2/tools/Level5.E2E.Fixtures/Scenarios.cs`), each layering on the full 4-account
+baseline roster:
+
+| Scenario | Produces |
+| --- | --- |
+| `baseline` | 4 accounts + profiles only |
+| `friends` | + Patrick ↔ Alice friendship |
+| `pending-friend` | + Patrick → Bob pending friend request |
+| `challenge-invited` | Patrick/Alice friends + Patrick → Alice pending challenge |
+| `series-active` | + Alice accepts (series `Active`) |
+| `series-one-attempt-complete` | + Patrick completes his game-1 attempt, Alice has not |
+| `series-completed` | + both complete game 1; series naturally resolves to `Completed` |
+| `challenge-declined` | Patrick → Alice challenge, declined by Alice |
+| `challenge-cancelled` | Patrick → Alice challenge, cancelled by Patrick |
+| `challenge-expired` | Patrick → Alice challenge, expired via the same `VersusSeries.Expire` transition the background sweep uses |
 
 The Postgres server is Docker-managed (`postgres:18-alpine`, a pinned major version matching the
 Testcontainers image, `restart: unless-stopped`, a `pg_isready` health check, and a named volume);
@@ -1332,7 +1427,11 @@ dotnet test Level5BackendV2.sln
 Requires Docker to be running - `Level5.Infrastructure.IntegrationTests` and
 `Level5.Api.IntegrationTests` spin up ephemeral Postgres containers via Testcontainers (real
 Postgres semantics: JSONB, partial unique indexes, `ExecuteUpdate`-based optimistic concurrency -
-deliberately not SQLite, since none of that behavior would be representative there).
+deliberately not SQLite, since none of that behavior would be representative there). This isolation
+is unconditional: neither integration-test project ever reads `level5_v2`/`level5_v2_e2e`'s
+connection details from anywhere, so running `dotnet test` while `db.ps1`/`e2e.ps1` have the local
+dev and E2E databases up does not read, modify, migrate, or delete either of them - each test run
+gets its own throwaway container and database, destroyed when the run ends.
 
 ### Running behind a reverse proxy
 

@@ -20,6 +20,7 @@ public static class SeriesListPaging
     public const string OutgoingScope = "outgoing";
     public const string ActiveScope = "active";
     public const string CompletedScope = "completed";
+    public const string HistoryScope = "history";
 
     public static int ResolveLimit(int? requested) => requested is null or <= 0 ? DefaultLimit : Math.Min(requested.Value, MaxLimit);
 }

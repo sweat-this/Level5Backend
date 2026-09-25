@@ -15,6 +15,13 @@ public sealed class FakeClock : IClock
     public DateTimeOffset UtcNow { get; set; } = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 }
 
+public sealed class FakeChallengeExpiryPolicy : IChallengeExpiryPolicy
+{
+    public TimeSpan PendingAcceptanceTimeout { get; set; } = TimeSpan.FromDays(30);
+    public TimeSpan SweepInterval { get; set; } = TimeSpan.FromHours(1);
+    public int SweepBatchSize { get; set; } = 100;
+}
+
 /// <summary>Mirrors the single "score-only" entry of the real Infrastructure catalog (<c>StaticRulesetCatalog</c>) so use-case tests exercise the same resolution/rejection rules without depending on Infrastructure.</summary>
 public sealed class FakeRulesetCatalog : IRulesetCatalog
 {

@@ -152,6 +152,10 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.Property(e => e.StateJson).HasColumnType("jsonb");
             entity.HasIndex(e => new { e.OpponentId, e.Status });
             entity.HasIndex(e => new { e.ChallengerId, e.Status });
+            // Supports the background expiry sweep's bounded scan for stale PendingAcceptance
+            // challenges (Status == PendingAcceptance AND CreatedAt < cutoff) - without this, that
+            // scan would fall back to a sequential scan of the whole table as it grows.
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
             // Create idempotency (issue #10): Postgres unique indexes treat NULL as distinct from
             // every other value, so this enforces uniqueness only once a create actually supplies
             // a ClientRequestId - any number of rows with no key (e.g. seeded directly by tests)

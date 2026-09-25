@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Not shipped, not part of the public API - a local/CI E2E-only tool, so it doesn't belong
+         in a "tests" or "src" solution folder (mirrors Level5.Api.OpenApiExport). -->
+    <RootNamespace>Level5.E2E.Fixtures</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Drives the real use cases over the real Infrastructure persistence (AddLevel5Infrastructure) -
+         no direct SQL, no bespoke seeding path. Deliberately references Infrastructure directly
+         (a composition root, like Level5.Api), not just Application - this tool's whole job is to
+         wire the real DI container. -->
+    <ProjectReference Include="..\..\src\Level5.Application\Level5.Application.csproj" />
+    <ProjectReference Include="..\..\src\Level5.Infrastructure\Level5.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
