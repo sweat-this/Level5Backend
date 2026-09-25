@@ -64,6 +64,29 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
             db.VersusSeries.AsNoTracking().Where(r => (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && r.Status == nameof(SeriesStatus.Completed)),
             limit, cursor, SeriesListPaging.CompletedScope, cancellationToken);
 
+    private static readonly string[] TerminalStatusNames =
+    [
+        nameof(SeriesStatus.Completed), nameof(SeriesStatus.Declined), nameof(SeriesStatus.Cancelled), nameof(SeriesStatus.Expired)
+    ];
+
+    public Task<PagedResult<SeriesSummary>> ListTerminalHistorySummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken)
+        => PageByCompletedAtAsync(
+            db.VersusSeries.AsNoTracking().Where(r =>
+                (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && TerminalStatusNames.Contains(r.Status)),
+            limit, cursor, SeriesListPaging.HistoryScope, cancellationToken);
+
+    public async Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
+    {
+        var ids = await db.VersusSeries.AsNoTracking()
+            .Where(r => r.Status == nameof(SeriesStatus.PendingAcceptance) && r.CreatedAt < cutoff)
+            .OrderBy(r => r.CreatedAt)
+            .Take(batchSize)
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        return [.. ids.Select(id => new VersusSeriesId(id))];
+    }
+
     /// <summary>Intermediate EF projection for a summary row - carries the actual creation time (for the DTO) separately from the keyset sort key, which differs between queries (see <see cref="PageByCompletedAtAsync"/>).</summary>
     private sealed record SummaryRow(
         Guid Id, Guid ChallengerId, Guid OpponentId, string Status, int CurrentGameNumber, int TotalGames, long Revision,

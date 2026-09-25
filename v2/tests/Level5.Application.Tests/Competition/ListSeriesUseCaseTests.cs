@@ -33,11 +33,15 @@ public sealed class ListSeriesUseCaseTests
     private readonly FakeClock _clock = new();
     private readonly CreateChallengeUseCase _create;
     private readonly AcceptChallengeUseCase _accept;
+    private readonly DeclineChallengeUseCase _decline;
+    private readonly CancelChallengeUseCase _cancel;
 
     public ListSeriesUseCaseTests()
     {
         _create = new CreateChallengeUseCase(_series, _friendships, _catalog, _clock);
         _accept = new AcceptChallengeUseCase(_series, _clock);
+        _decline = new DeclineChallengeUseCase(_series, _clock);
+        _cancel = new CancelChallengeUseCase(_series, _clock);
     }
 
     private async Task MakeFriendsAsync(PlayerId a, PlayerId b)
@@ -257,6 +261,50 @@ public sealed class ListSeriesUseCaseTests
         var only = Assert.Single(outgoing.Items);
         Assert.Equal(visible.Id, only.Id);
         Assert.Equal(visibleOpponent, only.Opponent.PlayerId);
+    }
+
+    [Fact]
+    public async Task History_contains_every_terminal_status_but_not_active_or_pending()
+    {
+        var challenger = await SeedPlayerAsync("HistoryChallenger");
+        var opponent = await SeedPlayerAsync("HistoryOpponent");
+        var startAttempt = new StartAttemptUseCase(_series, _clock);
+        var completeAttempt = new CompleteAttemptUseCase(_series, _clock);
+
+        var pending = await ChallengeAsync(challenger, opponent, totalGames: 1);
+
+        var active = await ChallengeAsync(challenger, opponent, totalGames: 3);
+        await _accept.ExecuteAsync(new AcceptChallengeRequest(opponent, active), CancellationToken.None);
+
+        var completed = await ChallengeAsync(challenger, opponent, totalGames: 1);
+        await _accept.ExecuteAsync(new AcceptChallengeRequest(opponent, completed), CancellationToken.None);
+        var challengerAttempt = await startAttempt.ExecuteAsync(new StartAttemptRequest(challenger, completed, GameNumber: 1), CancellationToken.None);
+        await completeAttempt.ExecuteAsync(new CompleteAttemptRequest(challenger, completed, 1, challengerAttempt.AttemptId, AttemptResult.OfScore(10)), CancellationToken.None);
+        var opponentAttempt = await startAttempt.ExecuteAsync(new StartAttemptRequest(opponent, completed, GameNumber: 1), CancellationToken.None);
+        await completeAttempt.ExecuteAsync(new CompleteAttemptRequest(opponent, completed, 1, opponentAttempt.AttemptId, AttemptResult.OfScore(5)), CancellationToken.None);
+
+        var declined = await ChallengeAsync(challenger, opponent, totalGames: 1);
+        await _decline.ExecuteAsync(new DeclineChallengeRequest(opponent, declined), CancellationToken.None);
+        var cancelled = await ChallengeAsync(challenger, opponent, totalGames: 1);
+        await _cancel.ExecuteAsync(new CancelChallengeRequest(challenger, cancelled), CancellationToken.None);
+
+        var expired = await ChallengeAsync(challenger, opponent, totalGames: 1);
+        var expiredSeries = await _series.FindByIdAsync(expired, CancellationToken.None);
+        expiredSeries!.Expire(_clock.UtcNow);
+        await _series.TrySaveAsync(expiredSeries, 0, CancellationToken.None);
+
+        var history = await new ListTerminalHistoryUseCase(_series, _profiles)
+            .ExecuteAsync(new ListSeriesPageRequest(challenger, null, null), CancellationToken.None);
+
+        var historyIds = history.Items.Select(i => i.Id).ToHashSet();
+        Assert.Contains(completed, historyIds);
+        Assert.Contains(declined, historyIds);
+        Assert.Contains(cancelled, historyIds);
+        Assert.Contains(expired, historyIds);
+        Assert.DoesNotContain(pending, historyIds);
+        Assert.DoesNotContain(active, historyIds);
+        Assert.All(history.Items, item => Assert.NotEqual(SeriesStatus.PendingAcceptance, item.Status));
+        Assert.All(history.Items, item => Assert.NotEqual(SeriesStatus.Active, item.Status));
     }
 
     /// <summary>Wraps a real store to count <see cref="IPlayerProfileStore.FindByIdsAsync"/> calls, proving enrichment batches instead of querying per row.</summary>

@@ -159,6 +159,29 @@ public sealed class VersusSeries
         Touch(now);
     }
 
+    /// <summary>
+    /// System-initiated transition: unlike <see cref="Accept"/>/<see cref="Decline"/>/<see cref="Cancel"/>,
+    /// this is never invoked by a participant - only the background expiry sweep calls it, once a
+    /// challenge has sat in <see cref="SeriesStatus.PendingAcceptance"/> past the configured
+    /// timeout. Idempotent: expiring an already-<see cref="SeriesStatus.Expired"/> series is a
+    /// safe no-op (<see cref="Revision"/> left unchanged), so a re-run of the sweep against a row
+    /// it already expired cannot double-apply. Only legal from <see cref="SeriesStatus.PendingAcceptance"/> -
+    /// once a challenge is <see cref="SeriesStatus.Active"/> it can no longer expire.
+    /// </summary>
+    public void Expire(DateTimeOffset now)
+    {
+        if (Status == SeriesStatus.Expired)
+        {
+            return;
+        }
+
+        EnsureStatus(SeriesStatus.PendingAcceptance);
+
+        Status = SeriesStatus.Expired;
+        CompletedAt = now;
+        Touch(now);
+    }
+
     public GameAttempt StartAttempt(PlayerId actingPlayerId, int gameNumber, DateTimeOffset now)
     {
         if (!IsParticipant(actingPlayerId))

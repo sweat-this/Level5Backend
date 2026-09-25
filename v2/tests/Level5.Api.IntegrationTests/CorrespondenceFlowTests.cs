@@ -672,6 +672,51 @@ public sealed class CorrespondenceFlowTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task History_list_contains_every_terminal_status_but_not_active_or_pending_and_is_scoped_to_participants()
+    {
+        var alice = await factory.RegisterNewPlayerAsync("AliceHist");
+        var bob = await factory.RegisterNewPlayerAsync("BobHist");
+        var outsider = await factory.RegisterNewPlayerAsync("OutsiderHist");
+        await BefriendAsync(alice, bob);
+
+        var pendingId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        var activeId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 3);
+
+        var completedId = await CreateAndAcceptSeriesAsync(alice, bob, totalGames: 1);
+        var completedAliceAttempt = await StartAttemptAsync(alice, completedId, 1);
+        var completedBobAttempt = await StartAttemptAsync(bob, completedId, 1);
+        await CompleteAttemptAsync(alice, completedId, 1, completedAliceAttempt, 90);
+        await CompleteAttemptAsync(bob, completedId, 1, completedBobAttempt, 10);
+
+        var declinedId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        await bob.Client.PostAsync($"/api/v2/series/{declinedId}/decline", null);
+
+        var cancelledId = await CreateSeriesAsync(alice, bob, totalGames: 3);
+        await alice.Client.PostAsync($"/api/v2/series/{cancelledId}/cancel", null);
+
+        var bobHistory = await GetPageItemsAsync(bob, "/api/v2/series/history");
+        var historyIds = bobHistory.EnumerateArray().Select(s => s.GetProperty("id").GetGuid()).ToHashSet();
+
+        Assert.Contains(completedId, historyIds);
+        Assert.Contains(declinedId, historyIds);
+        Assert.Contains(cancelledId, historyIds);
+        Assert.DoesNotContain(pendingId, historyIds);
+        Assert.DoesNotContain(activeId, historyIds);
+
+        // A history summary is sparse, exactly like the completed-list summary (issue #21's
+        // narrow-projection contract applies equally here).
+        var completedEntry = bobHistory.EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == completedId);
+        Assert.False(completedEntry.TryGetProperty("games", out _));
+        Assert.False(completedEntry.TryGetProperty("rules", out _));
+
+        var outsiderHistory = await GetPageItemsAsync(outsider, "/api/v2/series/history");
+        Assert.DoesNotContain(outsiderHistory.EnumerateArray(), s =>
+            s.GetProperty("id").GetGuid() == completedId ||
+            s.GetProperty("id").GetGuid() == declinedId ||
+            s.GetProperty("id").GetGuid() == cancelledId);
+    }
+
+    [Fact]
     public async Task Correspondence_list_pagination_is_bounded_and_covers_every_row_with_no_duplicates_through_http()
     {
         var alice = await factory.RegisterNewPlayerAsync("AlicePage");

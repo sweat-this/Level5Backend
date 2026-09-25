@@ -157,6 +157,9 @@ public class VersusSeriesTests
             case SeriesStatus.Cancelled:
                 series.Cancel(_challenger, Now);
                 break;
+            case SeriesStatus.Expired:
+                series.Expire(Now);
+                break;
         }
 
         Assert.Equal(status, series.Status);
@@ -191,6 +194,7 @@ public class VersusSeriesTests
     [Theory]
     [InlineData(SeriesStatus.Declined)]
     [InlineData(SeriesStatus.Cancelled)]
+    [InlineData(SeriesStatus.Expired)]
     public void Accept_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
     {
         var series = SeriesIn(status);
@@ -210,6 +214,7 @@ public class VersusSeriesTests
     [InlineData(SeriesStatus.Active)]
     [InlineData(SeriesStatus.Completed)]
     [InlineData(SeriesStatus.Cancelled)]
+    [InlineData(SeriesStatus.Expired)]
     public void Decline_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
     {
         var series = SeriesIn(status);
@@ -229,11 +234,44 @@ public class VersusSeriesTests
     [InlineData(SeriesStatus.Active)]
     [InlineData(SeriesStatus.Completed)]
     [InlineData(SeriesStatus.Declined)]
+    [InlineData(SeriesStatus.Expired)]
     public void Cancel_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
     {
         var series = SeriesIn(status);
 
         Assert.Throws<IllegalSeriesTransitionException>(() => series.Cancel(_challenger, Later));
+    }
+
+    [Fact]
+    public void Expire_from_pending_acceptance_transitions_and_sets_the_terminal_timestamp()
+    {
+        var series = CreateBestOf(3);
+
+        series.Expire(Later);
+
+        Assert.Equal(SeriesStatus.Expired, series.Status);
+        Assert.Equal(Later, series.CompletedAt);
+        Assert.Equal(1, series.Revision);
+    }
+
+    [Fact]
+    public void Expire_replay_is_a_no_op()
+    {
+        var series = SeriesIn(SeriesStatus.Expired);
+
+        AssertReplayIsNoOp(series, () => series.Expire(Later));
+    }
+
+    [Theory]
+    [InlineData(SeriesStatus.Active)]
+    [InlineData(SeriesStatus.Completed)]
+    [InlineData(SeriesStatus.Declined)]
+    [InlineData(SeriesStatus.Cancelled)]
+    public void Expire_after_a_different_command_won_is_an_illegal_transition(SeriesStatus status)
+    {
+        var series = SeriesIn(status);
+
+        Assert.Throws<IllegalSeriesTransitionException>(() => series.Expire(Later));
     }
 
     /// <summary>Replay tolerance never widens authorization: the wrong actor is rejected in every state, including the one where the right actor would replay.</summary>
@@ -243,6 +281,7 @@ public class VersusSeriesTests
     [InlineData(SeriesStatus.Completed)]
     [InlineData(SeriesStatus.Declined)]
     [InlineData(SeriesStatus.Cancelled)]
+    [InlineData(SeriesStatus.Expired)]
     public void Wrong_actors_are_rejected_for_every_challenge_transition_in_every_state(SeriesStatus status)
     {
         var series = SeriesIn(status);

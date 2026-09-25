@@ -53,6 +53,8 @@ public sealed class ChallengeConcurrencyTests(PostgresFixture fixture)
         public Task<PagedResult<SeriesSummary>> ListOutgoingChallengeSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListOutgoingChallengeSummariesAsync(playerId, limit, cursor, cancellationToken);
         public Task<PagedResult<SeriesSummary>> ListActiveSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListActiveSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
         public Task<PagedResult<SeriesSummary>> ListCompletedSeriesSummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListCompletedSeriesSummariesAsync(playerId, limit, cursor, cancellationToken);
+        public Task<PagedResult<SeriesSummary>> ListTerminalHistorySummariesAsync(PlayerId playerId, int? limit, string? cursor, CancellationToken cancellationToken) => inner.ListTerminalHistorySummariesAsync(playerId, limit, cursor, cancellationToken);
+        public Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken) => inner.FindStalePendingChallengeIdsAsync(cutoff, batchSize, cancellationToken);
         public Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken) => inner.TrySaveAsync(series, expectedRevision, cancellationToken);
     }
 

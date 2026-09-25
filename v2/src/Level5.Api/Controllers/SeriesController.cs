@@ -144,6 +144,7 @@ public sealed class SeriesQueriesController(
     ListOutgoingChallengesUseCase listOutgoing,
     ListActiveSeriesUseCase listActive,
     ListCompletedSeriesUseCase listCompleted,
+    ListTerminalHistoryUseCase listHistory,
     ICurrentPlayerProvider currentPlayer) : ControllerBase
 {
     [HttpGet("{seriesId:guid}")]
@@ -183,6 +184,20 @@ public sealed class SeriesQueriesController(
     {
         var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
         var page = await listCompleted.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
+        return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
+    }
+
+    /// <summary>
+    /// Every terminal correspondence record either participant is in: Completed, Declined,
+    /// Cancelled, and Expired. Unlike <see cref="ListCompleted"/>, which is scoped to series that
+    /// actually finished play, this is the durable-history surface for every way a challenge
+    /// stopped being active.
+    /// </summary>
+    [HttpGet("history")]
+    public async Task<ActionResult<SeriesSummaryPageDto>> ListHistory(int? limit, string? cursor, CancellationToken cancellationToken)
+    {
+        var me = await currentPlayer.GetCurrentPlayerIdAsync(cancellationToken);
+        var page = await listHistory.ExecuteAsync(new ListSeriesPageRequest(me, limit, cursor), cancellationToken);
         return Ok(SeriesDtoMapper.ToDto(page, SeriesListPaging.ResolveLimit(limit)));
     }
 }

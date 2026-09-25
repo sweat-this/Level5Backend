@@ -109,3 +109,21 @@ public sealed class ListCompletedSeriesUseCase(IVersusSeriesStore seriesStore, I
         return await SeriesSummaryEnrichment.EnrichAsync(playerProfileStore, page, cancellationToken);
     }
 }
+
+/// <summary>
+/// Full durable correspondence history: every series that reached any terminal status -
+/// <see cref="Domain.Competition.SeriesStatus.Completed"/>, <see cref="Domain.Competition.SeriesStatus.Declined"/>,
+/// <see cref="Domain.Competition.SeriesStatus.Cancelled"/>, or <see cref="Domain.Competition.SeriesStatus.Expired"/>.
+/// Unlike <see cref="ListCompletedSeriesUseCase"/> (deliberately scoped to actual finished play,
+/// issue #10), this is the query a client uses to render a "History" view of every way a
+/// challenge stopped being active - terminal records are retained indefinitely and are never
+/// deleted by normal application behavior, so this always reflects the complete history.
+/// </summary>
+public sealed class ListTerminalHistoryUseCase(IVersusSeriesStore seriesStore, IPlayerProfileStore playerProfileStore)
+{
+    public async Task<PagedResult<SeriesSummaryView>> ExecuteAsync(ListSeriesPageRequest request, CancellationToken cancellationToken)
+    {
+        var page = await seriesStore.ListTerminalHistorySummariesAsync(request.ActingPlayerId, request.Limit, request.Cursor, cancellationToken);
+        return await SeriesSummaryEnrichment.EnrichAsync(playerProfileStore, page, cancellationToken);
+    }
+}
