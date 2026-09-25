@@ -1,3 +1,5 @@
+extern alias LegacyMigrationTool;
+
 using Level5.Api;
 using Level5.Application.Competition;
 using Level5.Domain.Competition;
@@ -17,6 +19,7 @@ public sealed class DependencyRuleTests
     private static readonly System.Reflection.Assembly ApplicationAssembly = typeof(CreateChallengeUseCase).Assembly;
     private static readonly System.Reflection.Assembly InfrastructureAssembly = typeof(Level5V2DbContext).Assembly;
     private static readonly System.Reflection.Assembly ApiAssembly = typeof(Program).Assembly;
+    private static readonly System.Reflection.Assembly LegacyMigrationToolAssembly = typeof(LegacyMigrationTool::Program).Assembly;
 
     [Fact]
     public void Domain_does_not_depend_on_Application()
@@ -117,6 +120,7 @@ public sealed class DependencyRuleTests
         yield return [ApplicationAssembly];
         yield return [InfrastructureAssembly];
         yield return [ApiAssembly];
+        yield return [LegacyMigrationToolAssembly];
     }
 
     private static string Failures(TestResult result)

@@ -715,6 +715,10 @@ torn down per test run - both disposable, with no durable V2 data anywhere to pr
 forward, once V2 is actually deployed anywhere, migrations must be additive, not rebaselined - the
 same rule the first rebaseline established and this one continues to follow.
 
+The most recent migration, `AddLegacyAccountLinks`, is the first to follow that additive-only rule
+in practice: it adds the `legacy_account_links` table used by the legacy account migration tool
+(see [Legacy account migration](#legacy-account-migration) below) and nothing else.
+
 The pre-rebaseline chain, for reference (no longer present in `Migrations/`): `InitialCreate`
 (itself already a rebaseline of an earlier version, folding in `AccountStatus`, `Email`, and the
 `accounts`/`player_profiles` foreign key) → `AddAuthSessions` (added `auth_sessions`) →
@@ -1166,6 +1170,106 @@ serve traffic
   - *Replay/conflict spikes*: `series.concurrency.conflict` (optimistic-concurrency retries
     genuinely exhausted - persistent contention, not a single race), `challenge.create.replay_or_conflict`,
     and `attempt.complete.outcome`'s `conflicting_result` bucket.
+
+### Legacy account migration
+
+`v2/tools/Level5.LegacyAccountMigration` is an offline console tool that imports legacy V1 (the
+root-level `Level5Backend.csproj`, untouched otherwise) `users` rows into V2 as `Account` +
+`PlayerProfile` pairs, recording a durable `legacy_account_links` mapping
+(`legacy_user_id -> AccountId -> PlayerId`) that a future score-migration slice will join against.
+It does **not** migrate historical scores, reports, server messages, or anything else V1-side, and
+it never gives V2 login a runtime dependency on the V1 database - `legacy_account_links` is
+Infrastructure migration metadata, not something V2 login ever reads.
+
+**Preferred rollout order** for a first durable V2 deploy:
+
+```text
+provision/deploy V2 privately
+        ↓
+run account migration audit
+        ↓
+resolve blockers
+        ↓
+migrate accounts
+        ↓
+verify migration
+        ↓
+enable public V2 registration/login
+```
+
+If durable V2 accounts already exist (e.g. from earlier private testing), `audit`/`migrate` account
+for them automatically: an existing V2 username with no `legacy_account_links` row is always
+blocked from auto-linking (see below), never assumed to be discardable.
+
+**Configuration**: like every other tool under `v2/tools`, it reads environment variables only (no
+`appsettings.json`) and refuses to run unless connected to an allow-listed database:
+
+- `ConnectionStrings__DefaultConnection` - the V2 target database (must resolve to `level5_v2`,
+  `level5_v2_test`, or a name passed via `--allow-database <name>`).
+- `ConnectionStrings__LegacyDefaultConnection` - the V1 source database, read-only. Deliberately a
+  distinct key from `ConnectionStrings__DefaultConnection` so V1 and V2 can never be confused for
+  each other in a process's environment dump; the tool also refuses to run if both resolve to the
+  same database name.
+
+**Commands**:
+
+```powershell
+# Read-only report. Exits non-zero if any row would be blocked (invalid username, existing V2
+# username collision, or an invalid display name); an unrecognized credential alone does not fail
+# the exit code, since --accept-legacy-plaintext is an operator decision, not an error.
+dotnet run --project v2/tools/Level5.LegacyAccountMigration -- audit [--legacy-user-id <id>] [--limit <n>] [--verbose]
+
+# Writes Account + PlayerProfile + legacy_account_links, atomically, per row - never an
+# AuthSession/refresh/access token. Safe to re-run: an already-migrated, consistent row is a
+# no-op. Aborts the whole run (exit code 2) if it finds a legacy_account_links row whose
+# Account/PlayerProfile are missing or mismatched - that indicates manual data tampering and must
+# be investigated by hand, not silently skipped past.
+dotnet run --project v2/tools/Level5.LegacyAccountMigration -- migrate [--accept-legacy-plaintext] [--omit-invalid-email] [--legacy-user-id <id>] [--limit <n>]
+
+# Read-only post-check: re-verifies every legacy_account_links row's consistency independently of
+# any migrate run in the same process. Exits non-zero if any row is inconsistent.
+dotnet run --project v2/tools/Level5.LegacyAccountMigration -- verify [--legacy-user-id <id>]
+```
+
+**Credential handling**: V1 and V2 both hash passwords with stock ASP.NET Core Identity
+`PasswordHasher<T>` (see the V1 hardening note above `PasswordHashing.cs` was introduced by), so a
+row whose stored value structurally parses as a `PasswordHasher<T>` payload is copied byte-for-byte
+into `Account.PasswordHash` - it already verifies against the original password with no re-hash
+needed, and V2's existing `SuccessRehashNeeded` re-hash-on-login path (`LoginUseCase`) remains
+authoritative afterward. A row whose stored value does *not* parse that way (most commonly: a
+pre-July-30-2026-hardening plaintext password, since the fallback code path for those was fully
+removed, not just deprecated) is refused by default - `migrate` reports it as
+`SkippedUnrecognizedCredential` and writes nothing for that row. The classifier
+(`LegacyCredentialClassifier`) never needs the real plaintext and never logs/stores/reports the raw
+credential value; it only inspects whether the stored value's *structure* matches a valid
+`PasswordHasher<T>` payload. Migrating the documented pre-hardening plaintext form requires the
+explicit `--accept-legacy-plaintext` opt-in, which hashes the value with V2's own `IPasswordHasher`
+*before* it is ever persisted - the raw value is never written to any table.
+
+**Collision policy**: an existing V2 account with the same canonical username and no
+`legacy_account_links` row always blocks that legacy row rather than auto-linking - there is no way
+to tell whether that V2 account is an unrelated signup or the same person re-registering, and
+guessing wrong would transfer one person's history to another's account. Email is never used to
+*look up or auto-link* an existing account, in either direction. The legacy username is the default
+public display-name candidate (it was V1's historical public score identity); if it cannot be
+represented as a valid V2 display name, the row is reported as a blocker, never silently truncated
+or renamed. `PlayerTag` allocation reuses the exact same `PlayerTagAllocator` that live registration
+uses (`RegisterAccountUseCase`), so there is exactly one tag-allocation algorithm in the system.
+
+**Email handling**: V1's `users.email` is required, so a legacy row normally has one. It is
+preserved on the new `Account` when it is both a structurally valid V2 email and does not
+canonically conflict with an existing V2 account's email; `audit` reports both problems
+(`InvalidEmail`, `EmailCollision`) without failing its exit code, the same way it reports an
+unrecognized credential, since both have an explicit operator opt-in escape hatch rather than being
+a hard blocker. By default, `migrate` blocks a row over an invalid or conflicting email rather than
+silently dropping it - omitting the email is only ever the *explicit* `--omit-invalid-email`
+behavior, never the implicit default. Email is never consulted to decide whether two accounts are
+"the same person" in either direction; only the collision/omission decision above depends on it.
+
+**Not implemented by this tool** (tracked separately, out of scope): historical high-score import,
+user-report migration, server-message/stat migration, V1 shutdown, deleting V1 accounts, a runtime
+V1 authentication fallback, a general account-merge system, password-reset UX, email verification,
+OAuth/platform login, or `isdev`/privilege migration.
 
 ### Deployment artifacts
 
