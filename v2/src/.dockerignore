@@ -1,0 +1,13 @@
+# Applies to the v2/src Docker build context (see Level5.Api/Dockerfile).
+**/bin
+**/obj
+**/*.user
+**/.vs
+**/TestResults
+**/*.trx
+
+# No source-controlled secrets exist here, but keep this narrow context defensively clean of any
+# that might land locally during development.
+**/appsettings.*.local.json
+**/.env
+**/.env.*

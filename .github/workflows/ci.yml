@@ -33,6 +33,10 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # Pins dotnet-ef to the version in .config/dotnet-tools.json rather than relying on an
+      # arbitrary (or absent) global install - see v2/README.md's "Deployment artifacts" section.
+      - run: dotnet tool restore
+
       - run: dotnet build v2/Level5BackendV2.sln
 
       # Level5.Infrastructure.IntegrationTests and Level5.Api.IntegrationTests spin up real,
@@ -45,3 +49,14 @@ jobs:
       # committed contract that sweat-this/level5frontend pins to (issue #4). See
       # v2/openapi/README.md.
       - run: v2/scripts/openapi/check-drift.sh
+
+      # Deployment-artifact build verification only - proves a clean checkout can still produce
+      # both V2 deployment artifacts. No push to a registry, no deploy, no staging/production
+      # database or credentials involved. See v2/README.md's deployment/migration runbook.
+      - name: Build V2 deployment image
+        run: docker build -f v2/src/Level5.Api/Dockerfile -t level5-v2-api:ci v2/src
+
+      # Builds the bundle executable only - it is never run here, so this never connects to or
+      # mutates a database. See v2/scripts/build-migration-bundle.ps1.
+      - name: Build V2 EF migration bundle
+        run: pwsh v2/scripts/build-migration-bundle.ps1 -Runtime linux-x64
