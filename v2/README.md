@@ -31,7 +31,11 @@ service-level signals, request/trace correlation into `ProblemDetails`, GitHub b
 PostgreSQL transient-failure resiliency, a round-trip readiness probe, a retryable `503` for
 database outages, and a scripted local database workflow (see
 [PostgreSQL resiliency and connection budget](#postgresql-resiliency-and-connection-budget) and
-[Local database commands](#local-database-commands)). Not yet built:
+[Local database commands](#local-database-commands)), and V2 is now reproducibly packageable for a
+future hosted deployment: a dedicated non-root deployment image, a pinned local `dotnet-ef` tool,
+and a deterministic EF migration bundle, all built and verified by CI on every push/PR (see
+[Deployment artifacts](#deployment-artifacts)) - no hosting provider, PostgreSQL instance, or
+staging/production environment has been selected or provisioned by this repository. Not yet built:
 leaderboards, richer profiles, notifications, anything in the
 [Non-goals](#non-goals-for-this-slice) list below.
 
@@ -1036,14 +1040,16 @@ serve traffic
   Per the [migration history](#migration-history) notes above, migrations from this point forward
   must be additive - the two prior rebaselines were only safe because no V2 environment had ever
   held durable data yet.
-  Where the deploy environment shouldn't carry the .NET SDK and source, build a self-contained EF
-  migration bundle in CI instead and run that artifact as the migration step. It uses the same
-  design-time factory (so the same 10-minute command timeout and no retry strategy), which reads
-  its connection string from `ConnectionStrings__DefaultConnection` - supply the migration role's
-  connection string there from the deploy secret store:
+  Where the deploy environment shouldn't carry the .NET SDK and source, build the self-contained EF
+  migration bundle described in [Deployment artifacts](#deployment-artifacts) below instead, and
+  run that artifact as the migration step. It uses the same design-time factory (so the same
+  10-minute command timeout and no retry strategy), which reads its connection string from
+  `ConnectionStrings__DefaultConnection` - supply the migration role's connection string there from
+  the deploy secret store, only when actually running the bundle (building it needs no real
+  connection string at all - see below):
   ```bash
-  dotnet ef migrations bundle --project src/Level5.Infrastructure --startup-project src/Level5.Api       --self-contained -r linux-x64 -o efbundle
-  ConnectionStrings__DefaultConnection="<migration-role connection string>" ./efbundle
+  ./v2/scripts/build-migration-bundle.ps1 -Runtime linux-x64
+  ConnectionStrings__DefaultConnection="<migration-role connection string>" ./v2/artifacts/efbundle
   ```
 - **Separate migration and runtime identities**: production should use two roles. The
   *migration* role owns the `level5_v2` schema objects and is used only by the migration step. The
@@ -1117,6 +1123,96 @@ serve traffic
     genuinely exhausted - persistent contention, not a single race), `challenge.create.replay_or_conflict`,
     and `attempt.complete.outcome`'s `conflicting_result` bucket.
 
+### Deployment artifacts
+
+Two repository-built, CI-verified artifacts back the runbook above: a Backend V2 deployment image
+and a Backend V2 EF Core migration bundle. Building either one never provisions infrastructure,
+selects a hosting provider, or touches a shared database - no PostgreSQL hosting, staging
+environment, or production environment has been selected or created by this repository.
+
+**Backend V2 deployment image** (`v2/src/Level5.Api/Dockerfile`):
+
+```powershell
+docker build -f v2/src/Level5.Api/Dockerfile -t level5-v2-api v2/src
+```
+
+- Build context is `v2/src`, not the repository root and not `v2/` - `Level5.Api` only references
+  sibling projects under `v2/src` (see the [dependency graph](#dependency-graph) above), and
+  nothing else (tests, tools, docs, scripts, the legacy backend) is needed to restore/build/publish
+  it or is copied into the image. `v2/src/.dockerignore` excludes `bin`/`obj`/`TestResults`/local
+  secrets from that context.
+- Multi-stage build: `mcr.microsoft.com/dotnet/sdk:10.0` restores/builds/publishes
+  `Level5.Api.csproj`; the final stage is `mcr.microsoft.com/dotnet/aspnet:10.0` (runtime only, no
+  SDK) containing just the published output, running as the image's built-in non-root `app` user,
+  listening on the image's default `8080` (`ASPNETCORE_HTTP_PORTS`, set by the base image).
+- Contains no source-controlled credentials, JWT secrets, `.env` contents, or user-secrets - the
+  only configuration baked in is `appsettings.json`'s existing empty defaults, plus
+  `appsettings.Development.json` (ASP.NET Core's default publish output always includes both;
+  the latter is just `Logging` levels, no secrets, and is inert unless a deployer explicitly sets
+  `ASPNETCORE_ENVIRONMENT=Development` - itself an externally-supplied setting, not something this
+  image does). All real configuration (see [Required environment
+  configuration/secrets](#deployment-and-migration-runbook) above) is supplied externally, by
+  environment variable, at container run time.
+- Never applies migrations - there is no `Database.Migrate()` call anywhere in `Program.cs` (see
+  [Persistence](#persistence) above), and the image build does not run `dotnet ef` at all.
+- Has no dependency on the legacy `Level5Backend` assembly or its Docker image
+  (`Dockerfile`/`docker-compose.local-db.yml` at the repository root), which remain untouched and
+  build/run exactly as before.
+- Verified locally (not just by inspection) as part of this work: the image builds from a clean
+  `v2/src` context, runs as `app` (not root), contains no `dotnet` SDK, starts and serves
+  `GET /health/live` (`200`) and `GET /health/ready` (`503` with no reachable database, without
+  crashing) when given a valid `Jwt__Key`/`Jwt__Issuer`/`Jwt__Audience`/
+  `ConnectionStrings__DefaultConnection`, and fails fast at startup with no configuration at all
+  (the same `JwtOptions` data-annotation validation [Required environment
+  configuration/secrets](#deployment-and-migration-runbook) above describes).
+
+**EF Core CLI tooling** (`.config/dotnet-tools.json`, repository root): pins `dotnet-ef` to the
+version matching this repository's EF Core packages (`10.0.10`), as a .NET local tool manifest,
+so `dotnet ef ...` resolves the same version on every machine and in CI rather than depending on
+whatever (if anything) is installed globally. One-time per clone:
+
+```powershell
+dotnet tool restore
+```
+
+`dotnet ef` (used by `v2/scripts/db.ps1`, the "Adding a migration" instructions below, and the
+migration bundle script) then resolves to the pinned version automatically from anywhere under the
+repository root - no other script needed changing, since they already just invoke `dotnet ef`.
+
+**Backend V2 EF migration bundle** (`v2/scripts/build-migration-bundle.ps1`):
+
+```powershell
+dotnet tool restore                                     # once per clone
+./v2/scripts/build-migration-bundle.ps1                 # -Runtime linux-x64 by default
+```
+
+- Uses `Level5.Infrastructure` as the migrations project, `Level5.Api` as the startup project, and
+  the same `Level5V2DbContextFactory` design-time factory as `db.ps1`/`dotnet ef database update`
+  (same 10-minute migration command timeout, no retry strategy - see [PostgreSQL
+  resiliency](#postgresql-resiliency-and-connection-budget) above) - via the pinned local
+  `dotnet-ef` tool above.
+- **Building the bundle never connects to or mutates a database.** `Level5V2DbContextFactory`
+  requires `ConnectionStrings__DefaultConnection` to be set to *construct* a `DbContext` instance
+  (from which `dotnet ef` reads the compiled migrations) - Npgsql doesn't open a connection for
+  that - so the script sets an obviously-fake placeholder for the build only, scoped and restored
+  exactly like `db.ps1`'s `Update-Database`. The real, migration-role connection string is supplied
+  only when the produced bundle is later *run*, per the [runbook](#deployment-and-migration-runbook)
+  above.
+- Output defaults to `v2/artifacts/efbundle` (gitignored via the repository's existing
+  `artifacts/` rule) - a self-contained, `linux-x64`-by-default executable with no dependency on a
+  `dotnet` SDK or runtime being present wherever it's run.
+- Verified locally as part of this work: built successfully from a clean checkout, then actually
+  run (self-contained, on `linux-x64`) against a disposable, throwaway Postgres container created
+  and destroyed solely for this check - never the local dev `level5_v2` database, and never a
+  shared/staging/production one - where it applied all four current migrations cleanly and created
+  the expected tables.
+
+**CI verification** (`.github/workflows/ci.yml`, `build-v2` job): every push/PR now also builds
+both artifacts above from a clean checkout, after the existing build/test/OpenAPI-drift steps and
+still using the pinned local tool. This is build verification only - CI never pushes either
+artifact anywhere, deploys anything, or touches a database beyond the ephemeral Testcontainers
+instances the test step already used before this change.
+
 ### Alert-worthy conditions
 
 Initial signals worth alerting on once telemetry is connected to a backend. No numeric thresholds
@@ -1143,17 +1239,28 @@ deployment-specific; pick them once real traffic data exists, then revisit perio
 ### Validation commands
 
 ```powershell
+dotnet tool restore                    # once per clone - pins dotnet-ef, see Deployment artifacts
+
 dotnet restore v2/Level5BackendV2.sln
 dotnet build v2/Level5BackendV2.sln
 dotnet test v2/Level5BackendV2.sln    # includes Level5.Architecture.Tests
 
 dotnet build Level5Backend.csproj
 dotnet test Level5Backend.Tests/Level5Backend.Tests.csproj
+
+v2/scripts/openapi/check-drift.sh
+
+docker build -f v2/src/Level5.Api/Dockerfile -t level5-v2-api v2/src
+./v2/scripts/build-migration-bundle.ps1
 ```
 
 `dotnet test v2/Level5BackendV2.sln` requires Docker (Testcontainers-backed Postgres for the two
 integration-test projects); everything else (`Level5.Domain.Tests`, `Level5.Application.Tests`
-including `MetricsLabelSafetyTests`, `Level5.Architecture.Tests`) runs without it.
+including `MetricsLabelSafetyTests`, `Level5.Architecture.Tests`) runs without it. The Docker image
+build and the migration bundle build also require Docker (for the image) and the pinned local
+`dotnet-ef` tool (for the bundle) respectively, but neither one requires or touches a Postgres
+database - see [Deployment artifacts](#deployment-artifacts) above for what each one actually
+does.
 
 ## Local development
 
@@ -1247,6 +1354,7 @@ IP via `X-Forwarded-For`, so don't add ranges wider than the actual infrastructu
 ### Adding a migration
 
 ```powershell
+dotnet tool restore    # once per clone - see Deployment artifacts, pins dotnet-ef to this repo's EF Core version
 cd v2
 $env:ConnectionStrings__DefaultConnection = ./scripts/db.ps1 connection-string
 dotnet ef migrations add <Name> --project src/Level5.Infrastructure --startup-project src/Level5.Api -o Persistence/Migrations
