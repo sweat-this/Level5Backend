@@ -1,5 +1,4 @@
 using Level5.Application.Identity;
-using Level5.Application.Players;
 using Level5.Application.Tests.Fakes;
 using Xunit;
 
@@ -17,7 +16,7 @@ public class GetCurrentAccountUseCaseTests
     {
         _register = new RegisterAccountUseCase(
             _accounts, _profiles, _sessions, new FakePasswordHasher(), new FakePasswordPolicy(),
-            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock(), new PlayerTagAllocator(_profiles));
+            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock());
         _getCurrentAccount = new GetCurrentAccountUseCase(_accounts, _profiles);
     }
 

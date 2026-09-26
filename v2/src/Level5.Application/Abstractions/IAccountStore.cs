@@ -11,8 +11,6 @@ public interface IAccountStore
 
     Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken);
 
-    Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken);
-
     Task AddAsync(Account account, CancellationToken cancellationToken);
 
     /// <summary>Writes back changes made to a previously-loaded account (e.g. a rehashed password).</summary>

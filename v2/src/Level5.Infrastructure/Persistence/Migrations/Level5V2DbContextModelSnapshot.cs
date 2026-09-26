@@ -184,36 +184,6 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.ToTable("friendships", (string)null);
                 });
 
-            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.LegacyAccountLinkRow", b =>
-                {
-                    b.Property<int>("LegacyUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("LegacyUsername")
-                        .IsRequired()
-                        .HasMaxLength(45)
-                        .HasColumnType("character varying(45)");
-
-                    b.Property<DateTimeOffset>("MigratedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("PlayerId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("LegacyUserId");
-
-                    b.HasIndex("AccountId")
-                        .IsUnique();
-
-                    b.HasIndex("PlayerId")
-                        .IsUnique();
-
-                    b.ToTable("legacy_account_links", (string)null);
-                });
-
             modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.MatchResultRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -410,21 +380,6 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
                         .WithMany()
                         .HasForeignKey("UpperPlayerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.LegacyAccountLinkRow", b =>
-                {
-                    b.HasOne("Level5.Infrastructure.Persistence.Rows.AccountRow", null)
-                        .WithMany()
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
-                        .WithMany()
-                        .HasForeignKey("PlayerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
