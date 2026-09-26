@@ -23,6 +23,9 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => db.Accounts.AnyAsync(a => a.UsernameCanonical == username.Canonical, cancellationToken);
 
+    public Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken)
+        => db.Accounts.AnyAsync(a => a.EmailCanonical == email.Canonical, cancellationToken);
+
     public async Task AddAsync(Account account, CancellationToken cancellationToken)
     {
         await db.Accounts.AddAsync(new AccountRow

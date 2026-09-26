@@ -4,6 +4,7 @@ using Level5.Application.Abstractions;
 using Level5.Application.Competition;
 using Level5.Application.Identity;
 using Level5.Application.Observability;
+using Level5.Application.Players;
 using Level5.Application.Tests.Competition;
 using Level5.Application.Tests.Fakes;
 using Level5.Domain.Competition;
@@ -117,7 +118,7 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         var clock = new FakeClock();
         var register = new RegisterAccountUseCase(
             accounts, profiles, sessions, hasher, new FakePasswordPolicy(),
-            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), clock);
+            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), clock, new PlayerTagAllocator(profiles));
         var login = new LoginUseCase(
             accounts, profiles, sessions, hasher, new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(),
             new FakeTokenIssuer(), new NoOpUnitOfWork(), clock);
@@ -151,7 +152,7 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         var expiredClock = new FakeClock();
         var registerForExpiry = new RegisterAccountUseCase(
             accounts, profiles, sessions, hasher, new FakePasswordPolicy(),
-            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), expiredClock);
+            new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), new NoOpUnitOfWork(), expiredClock, new PlayerTagAllocator(profiles));
         var refreshForExpiry = new RefreshSessionUseCase(
             sessions, accounts, profiles, new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), expiredClock);
         var expiringAccount = await registerForExpiry.ExecuteAsync(new RegisterAccountRequest("metricsexpired", "P@ssw0rd!", "MetricsExpired"), CancellationToken.None);
