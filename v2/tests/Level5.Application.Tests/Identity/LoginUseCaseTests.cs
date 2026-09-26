@@ -1,5 +1,4 @@
 using Level5.Application.Identity;
-using Level5.Application.Players;
 using Level5.Application.Tests.Fakes;
 using Level5.Domain.Identity;
 using Xunit;
@@ -21,7 +20,7 @@ public class LoginUseCaseTests
         var sessionPolicy = new FakeAuthSessionPolicy();
         _register = new RegisterAccountUseCase(
             _accounts, _profiles, _sessions, hasher, new FakePasswordPolicy(),
-            refreshTokens, sessionPolicy, new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock(), new PlayerTagAllocator(_profiles));
+            refreshTokens, sessionPolicy, new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock());
         _login = new LoginUseCase(
             _accounts, _profiles, _sessions, hasher, refreshTokens, sessionPolicy,
             new FakeTokenIssuer(), new NoOpUnitOfWork(), new FakeClock());

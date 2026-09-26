@@ -192,9 +192,6 @@ public sealed class InMemoryAccountStore : IAccountStore
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => Task.FromResult(_accounts.Values.Any(a => a.Username.Canonical == username.Canonical));
 
-    public Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken)
-        => Task.FromResult(_accounts.Values.Any(a => a.Email?.Canonical == email.Canonical));
-
     public Task AddAsync(Account account, CancellationToken cancellationToken)
     {
         _accounts[account.Id.Value] = account;

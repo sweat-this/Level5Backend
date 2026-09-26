@@ -1,6 +1,4 @@
 using Level5.Application.Abstractions;
-using Level5.Application.Migration;
-using Level5.Application.Players;
 using Level5.Infrastructure.Competition;
 using Level5.Infrastructure.Health;
 using Level5.Infrastructure.Identity;
@@ -59,9 +57,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILeaderboardQuery, LeaderboardQuery>();
         services.AddScoped<IAuthSessionStore, AuthSessionStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
-        services.AddScoped<ILegacyAccountLinkStore, LegacyAccountLinkStore>();
-        services.AddScoped<PlayerTagAllocator>();
-        services.AddScoped<ImportLegacyAccountUseCase>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();

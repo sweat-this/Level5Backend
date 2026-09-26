@@ -24,10 +24,6 @@
     <ProjectReference Include="..\..\src\Level5.Application\Level5.Application.csproj" />
     <ProjectReference Include="..\..\src\Level5.Infrastructure\Level5.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Level5.Api\Level5.Api.csproj" />
-    <!-- Aliased because both this project and Level5.Api reference an assembly whose top-level
-         statements generate a global-namespace `Program` class - without an alias, `Program`
-         would be ambiguous between the two. See DependencyRuleTests.cs's `extern alias`. -->
-    <ProjectReference Include="..\..\tools\Level5.LegacyAccountMigration\Level5.LegacyAccountMigration.csproj" Aliases="LegacyMigrationTool" />
   </ItemGroup>
 
 </Project>

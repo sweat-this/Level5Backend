@@ -13,7 +13,6 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
     public DbSet<MatchResultRow> MatchResults => Set<MatchResultRow>();
-    public DbSet<LegacyAccountLinkRow> LegacyAccountLinks => Set<LegacyAccountLinkRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -205,33 +204,6 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // Restrict, not cascade - match results are immutable history, same reasoning as
             // competitive_series/friend_requests above; a stray delete must fail loudly rather
             // than silently orphan or prune result history.
-            entity.HasOne<PlayerProfileRow>()
-                .WithMany()
-                .HasForeignKey(e => e.PlayerId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
-
-        modelBuilder.Entity<LegacyAccountLinkRow>(entity =>
-        {
-            entity.ToTable("legacy_account_links");
-            // Supplied by the migration tool from V1's users.userid, never identity-generated -
-            // this is the whole point of the table (a legacy user can never map to two accounts).
-            entity.HasKey(e => e.LegacyUserId);
-            entity.Property(e => e.LegacyUserId).ValueGeneratedNever();
-            // Matches V1 users.username varchar(45); stored purely as a debugging/audit aid, never
-            // a credential.
-            entity.Property(e => e.LegacyUsername).HasMaxLength(45);
-            // Unique on both AccountId and PlayerId: enforces the 1:1:1 triangle (one legacy user,
-            // one account, one profile) structurally, not just in application logic.
-            entity.HasIndex(e => e.AccountId).IsUnique();
-            entity.HasIndex(e => e.PlayerId).IsUnique();
-            // Restrict, not cascade - same reasoning as every other FK in this model: an
-            // accidental account/profile delete must fail loudly rather than silently orphan
-            // migration provenance that a future score-migration slice depends on.
-            entity.HasOne<AccountRow>()
-                .WithMany()
-                .HasForeignKey(e => e.AccountId)
-                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<PlayerProfileRow>()
                 .WithMany()
                 .HasForeignKey(e => e.PlayerId)
