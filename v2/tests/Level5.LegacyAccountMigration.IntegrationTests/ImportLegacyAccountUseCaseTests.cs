@@ -280,4 +280,17 @@ public sealed class ImportLegacyAccountUseCaseTests(V2PostgresFixture fixture)
         await Assert.ThrowsAsync<ConflictException>(() =>
             useCase.ExecuteAsync(new ImportLegacyAccountRequest(100_006, username, LegacyCredential.AlreadyHashed("some-hash"),username), CancellationToken.None));
     }
+
+    [Fact]
+    public void LegacyCredential_ToString_never_prints_the_raw_value()
+    {
+        // Guards against the record's default ToString()/PrintMembers, which would otherwise print
+        // Value verbatim - the one thing this feature must never do, per its own stated invariant
+        // (and the original spec's required "credential material is absent from logs/reports").
+        const string secret = "super-secret-legacy-plaintext";
+
+        var printed = LegacyCredential.Plaintext(secret).ToString();
+
+        Assert.DoesNotContain(secret, printed);
+    }
 }

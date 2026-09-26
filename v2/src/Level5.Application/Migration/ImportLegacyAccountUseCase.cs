@@ -34,6 +34,14 @@ public sealed record LegacyCredential(string Value, bool RequiresHashing)
     public static LegacyCredential AlreadyHashed(string hash) => new(hash, RequiresHashing: false);
 
     public static LegacyCredential Plaintext(string plaintext) => new(plaintext, RequiresHashing: true);
+
+    // Overridden so a record's default ToString()/PrintMembers - which would otherwise print
+    // Value verbatim - can never become an accidental credential-logging path (e.g. a future
+    // logger.LogDebug("{Request}", request) call, or an exception context dump). This is the same
+    // invariant every report type in this feature already upholds structurally (see
+    // Reporting/AuditRowReport.cs's comment); Value being a plain string on a record was the one
+    // place it wasn't.
+    public override string ToString() => $"{nameof(LegacyCredential)} {{ {nameof(RequiresHashing)} = {RequiresHashing} }}";
 }
 
 public enum ImportLegacyAccountOutcome
