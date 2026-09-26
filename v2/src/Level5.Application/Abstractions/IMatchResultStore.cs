@@ -13,6 +13,9 @@ public interface IMatchResultStore
     /// </summary>
     Task<MatchResult?> FindByClientResultIdAsync(PlayerId playerId, Guid clientResultId, CancellationToken cancellationToken);
 
+    /// <summary>Finds a result by its own id, regardless of owner - used by provenance verification (issue: historical score migration).</summary>
+    Task<MatchResult?> FindByIdAsync(MatchResultId id, CancellationToken cancellationToken);
+
     /// <summary>
     /// Persists a newly submitted result. A duplicate <c>(playerId, clientResultId)</c> pair (a
     /// submission race, not a sequential retry - see <see cref="FindByClientResultIdAsync"/> for

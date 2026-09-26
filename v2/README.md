@@ -826,8 +826,13 @@ establish the architecture; adding them now would be scope creep against an unpr
    `HttpContext.TraceIdentifier`/`ProblemDetails.traceId` derive from it. A vendor
    backend/dashboard and business-derived numeric SLOs remain explicitly deferred until a
    deployment actually needs one.
-6. **Leaderboards/highscores** - only after the correspondence vertical slice is proven in
-   production; do not migrate the legacy `Highscores` table wholesale.
+6. ~~Leaderboards/highscores~~ - done: general match-result ingestion + leaderboard reads (see
+   [Persistence](#persistence) above), the legacy account migration
+   (`v2/tools/Level5.LegacyAccountMigration`), and the historical V1 high-score migration
+   (`v2/tools/Level5.LegacyScoreMigration`, see [Historical V1 high-score
+   migration](#historical-v1-high-score-migration) above) - deliberately *not* a wholesale table
+   migration: only the six-metric/four-modifier canonical subset moves, gated by
+   `legacy_account_links` ownership, never V1-only telemetry.
 
 ## Production operations baseline (issue #22)
 
@@ -1194,6 +1199,10 @@ migrate accounts
         ↓
 verify migration
         ↓
+migrate historical scores (see below - depends on legacy_account_links)
+        ↓
+verify score migration
+        ↓
 enable public V2 registration/login
 ```
 
@@ -1270,6 +1279,106 @@ behavior, never the implicit default. Email is never consulted to decide whether
 user-report migration, server-message/stat migration, V1 shutdown, deleting V1 accounts, a runtime
 V1 authentication fallback, a general account-merge system, password-reset UX, email verification,
 OAuth/platform login, or `isdev`/privilege migration.
+
+### Historical V1 high-score migration
+
+`v2/tools/Level5.LegacyScoreMigration` is an offline console tool that imports legacy V1 (the
+root-level `Level5Backend.csproj`, untouched otherwise) `highscores` rows into V2 as `match_results`
+rows, using `legacy_account_links` - not username, not email, and never an invented V2 account - as
+the sole ownership bridge. It must run **after** the legacy account migration above: a `highscores`
+row whose `userid` has no `legacy_account_links` entry is always blocked, never resolved another
+way. It records a durable `legacy_match_result_links` provenance mapping
+(`legacy_highscore_id -> match_result_id`) and never queries or merges V1 data at runtime - V2's
+leaderboards read only `match_results`, exactly as they do for a live submission.
+
+**Canonical field mapping** (mirrors Unity's `BackendV2MatchResultAdapter` exactly - the migration
+tool never invents a second interpretation of these fields):
+
+```text
+Scoreid          -> ClientResultId (Guid.TryParse; missing/malformed = blocked, never invented)
+Modeid           -> ModeId   (must be > 0)
+Levelid          -> LevelId  (must be > 0)
+Characterid      -> CharacterId, via Characterid.ToString(CultureInfo.InvariantCulture)
+Version          -> ClientVersion
+Platform         -> Platform
+
+TotalPoints      -> MatchResultMetric.TotalPoints
+MaxShotMade      -> MatchResultMetric.ShotsMade
+TotalDistance    -> MatchResultMetric.TotalDistance
+Time             -> MatchResultMetric.CompletionTimeSeconds
+ConsecutiveShots -> MatchResultMetric.LongestStreak
+EnemiesKilled    -> MatchResultMetric.EnemiesKilled
+
+HardcoreEnabled != 0 -> Hardcore
+TrafficEnabled  != 0 -> TrafficEnabled
+EnemiesEnabled  != 0 -> EnemiesEnabled
+SniperEnabled   != 0 -> SniperEnabled
+```
+
+`ILeaderboardPolicyCatalog` (`StaticLeaderboardPolicyCatalog`) remains the sole mode-to-ranking-metric
+authority - a mode with no leaderboard policy still imports as a raw, unranked `MatchResult`. Every
+V1-only telemetry/breakdown column (OS/device/IP, difficulty, longest shot, shot-attempt counts,
+point breakdowns, bonuses/money balls, sniper mode/shots/hits, P1-P4 placement/CPU fields, etc.)
+remains available in archived V1 data only and is never mapped into an unrelated V2 field.
+
+**Provenance schema**:
+
+```text
+legacy_match_result_links
+--------------------------------
+LegacyHighscoreId  integer PK, ValueGeneratedNever   (highscores.id - the migration idempotency key)
+MatchResultId      uuid NOT NULL, UNIQUE, FK -> match_results.Id, ON DELETE RESTRICT
+LegacyScoreId      varchar(100) NULL   (highscores.scoreid - debugging/provenance only, never ownership authority)
+MigratedAt         timestamptz NOT NULL
+```
+
+`legacy_user_id` is deliberately not stored here: `verify` always re-reads the exact V1 row by
+`LegacyHighscoreId` (which carries `Userid`) and re-resolves the expected owner through
+`legacy_account_links`, so a redundant copy on this table would add no independent verification
+value. Neither column is exposed through any public API.
+
+**Existing-result reconciliation**: transition-period matches may already have been written to both
+V1 and a live V2 submission before migration runs. Before inserting anything, `migrate` checks the
+existing `(PlayerId, ClientResultId)` idempotency key `SubmitMatchResultUseCase` itself uses - an
+identical existing result is never duplicated, only linked; a conflicting one blocks rather than
+silently overwriting. `MatchResult.CreatedAt`/id differences never count as a conflict, matching
+`MatchResult.MatchesRequest`'s own semantics.
+
+**Timestamp policy**: `highscores.date` was historically written via Unity's `DateTime.Now.ToString()`
+- culture-specific, offsetless, client-local - and there is no way to recover the real occurrence
+instant from that string alone. This migration never tries: a migrated `MatchResult.CreatedAt` is
+always the migration-time instant, exactly like a live submission, never derived from `date`.
+`audit` still classifies (never blocks on) each row's `date` as `OffsetAware` /
+`AmbiguousOrOffsetless` / `Unparseable` purely as an operator diagnostic - in practice every V1 row
+is expected to land in the latter two buckets, never the first, since `DateTime.Now.ToString()`
+never emits offset information.
+
+**Commands** (same environment-variable configuration and V2 database allow-list as the account
+migration tool above - `ConnectionStrings__DefaultConnection` / `ConnectionStrings__LegacyDefaultConnection`):
+
+```powershell
+# Read-only report. Exits non-zero if any row would be blocked (no account link, malformed Scoreid,
+# non-positive mode/level, invalid version/platform/metric, or a conflicting existing V2 result).
+dotnet run --project v2/tools/Level5.LegacyScoreMigration -- audit [--legacy-highscore-id <id>] [--limit <n>] [--verbose]
+
+# Writes match_results + legacy_match_result_links, atomically, per row - each row gets its own
+# transaction, so one bad row never undoes previously completed imports and a rerun after an
+# interruption is always safe. Aborts the whole run (exit code 2) if it finds a
+# legacy_match_result_links row whose MatchResult is missing or no longer resolves to the owner
+# legacy_account_links currently reports - that indicates manual/partial data tampering and must be
+# investigated by hand.
+dotnet run --project v2/tools/Level5.LegacyScoreMigration -- migrate [--legacy-highscore-id <id>] [--limit <n>]
+
+# Read-only post-check: re-verifies every legacy_match_result_links row's consistency independently
+# of any migrate run in the same process. Exits non-zero if any row is inconsistent.
+dotnet run --project v2/tools/Level5.LegacyScoreMigration -- verify [--legacy-highscore-id <id>]
+```
+
+**Not implemented by this tool** (tracked separately, out of scope): V1/V2 live leaderboard merging,
+new leaderboard modes, leaderboard-policy redesign, Unity result-submission changes, expansion of
+`MatchResult` for every V1 field, a generic ETL framework, V1 user-report/server-stat/server-message
+migration, IP-address migration, V1 deletion/retirement, anti-cheat or retroactive score
+verification, or invented timezone reconstruction.
 
 ### Deployment artifacts
 

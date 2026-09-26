@@ -16,6 +16,12 @@ public sealed class MatchResultStore(Level5V2DbContext db) : IMatchResultStore
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<MatchResult?> FindByIdAsync(MatchResultId id, CancellationToken cancellationToken)
+    {
+        var row = await db.MatchResults.AsNoTracking().SingleOrDefaultAsync(r => r.Id == id.Value, cancellationToken);
+        return row is null ? null : ToDomain(row);
+    }
+
     public async Task AddAsync(MatchResult result, CancellationToken cancellationToken)
     {
         var row = ToRow(result);
@@ -35,7 +41,8 @@ public sealed class MatchResultStore(Level5V2DbContext db) : IMatchResultStore
         }
     }
 
-    private static MatchResultRow ToRow(MatchResult result) => new()
+    /// <summary>Internal, not private: reused by <see cref="LegacyMatchResultLinkStore"/> so migration imports use the exact same row mapping as a live submission.</summary>
+    internal static MatchResultRow ToRow(MatchResult result) => new()
     {
         Id = result.Id.Value,
         PlayerId = result.PlayerId.Value,

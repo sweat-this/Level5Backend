@@ -1,12 +1,12 @@
 using Level5.Infrastructure.DependencyInjection;
 using Level5.Infrastructure.Safety;
-using Level5.LegacyAccountMigration.Commands;
-using Level5.LegacyAccountMigration.Legacy;
+using Level5.LegacyScoreMigration.Commands;
+using Level5.LegacyScoreMigration.Legacy;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-const string Usage = "Usage: Level5.LegacyAccountMigration <audit|migrate|verify> "
-    + "[--accept-legacy-plaintext] [--omit-invalid-email] [--allow-database <name>] [--legacy-user-id <id>] [--limit <n>] [--verbose]";
+const string Usage = "Usage: Level5.LegacyScoreMigration <audit|migrate|verify> "
+    + "[--allow-database <name>] [--legacy-highscore-id <id>] [--limit <n>] [--verbose]";
 
 if (args.Length == 0)
 {
@@ -22,10 +22,8 @@ if (command is not ("audit" or "migrate" or "verify"))
     return 1;
 }
 
-var acceptLegacyPlaintext = false;
-var omitInvalidEmail = false;
 var verbose = false;
-int? legacyUserId = null;
+int? legacyHighscoreId = null;
 int? limit = null;
 var allowedDatabases = new List<string>();
 
@@ -33,27 +31,21 @@ for (var i = 1; i < args.Length; i++)
 {
     switch (args[i])
     {
-        case "--accept-legacy-plaintext":
-            acceptLegacyPlaintext = true;
-            break;
-        case "--omit-invalid-email":
-            omitInvalidEmail = true;
-            break;
         case "--verbose":
             verbose = true;
             break;
         case "--allow-database" when i + 1 < args.Length:
             allowedDatabases.Add(args[++i]);
             break;
-        case "--legacy-user-id" when i + 1 < args.Length:
-            if (!int.TryParse(args[++i], out var parsedLegacyUserId))
+        case "--legacy-highscore-id" when i + 1 < args.Length:
+            if (!int.TryParse(args[++i], out var parsedLegacyHighscoreId))
             {
-                await Console.Error.WriteLineAsync($"'--legacy-user-id' value '{args[i]}' is not a valid integer.");
+                await Console.Error.WriteLineAsync($"'--legacy-highscore-id' value '{args[i]}' is not a valid integer.");
                 await Console.Error.WriteLineAsync(Usage);
                 return 1;
             }
 
-            legacyUserId = parsedLegacyUserId;
+            legacyHighscoreId = parsedLegacyHighscoreId;
             break;
         case "--limit" when i + 1 < args.Length:
             if (!int.TryParse(args[++i], out var parsedLimit))
@@ -98,18 +90,18 @@ await using var provider = services.BuildServiceProvider();
 
 // Constructed directly, not via DI: it's a tool-local, connection-string-scoped type that reads
 // V1 raw SQL and never needs to be mocked through the container the way V2 stores are in tests.
-var legacyReader = new LegacyUserReader(v1ConnectionString);
+var legacyReader = new LegacyHighscoreReader(v1ConnectionString);
 
 return command switch
 {
-    "audit" => await AuditCommand.RunAsync(legacyReader, provider, new AuditOptions(legacyUserId, limit, verbose), CancellationToken.None),
-    "migrate" => await MigrateCommand.RunAsync(legacyReader, provider, new MigrateOptions(acceptLegacyPlaintext, legacyUserId, limit, omitInvalidEmail), CancellationToken.None),
-    "verify" => await VerifyCommand.RunAsync(legacyReader, provider, new VerifyOptions(legacyUserId), CancellationToken.None),
+    "audit" => await AuditCommand.RunAsync(legacyReader, provider, new AuditOptions(legacyHighscoreId, limit, verbose), CancellationToken.None),
+    "migrate" => await MigrateCommand.RunAsync(legacyReader, provider, new MigrateOptions(legacyHighscoreId, limit), CancellationToken.None),
+    "verify" => await VerifyCommand.RunAsync(legacyReader, provider, new VerifyOptions(legacyHighscoreId), CancellationToken.None),
     _ => throw new InvalidOperationException($"Unhandled command: {command}")
 };
 
 // Referenced only by Level5.Architecture.Tests.DependencyRuleTests via typeof(Program) - a plain
 // console Exe's top-level-statement Program class is internal by default, unlike ASP.NET Core's
 // web SDK template (which makes it public partial), so this makes it resolvable from the test
-// assembly the same way Level5.Api's Program already is.
+// assembly the same way Level5.Api's and Level5.LegacyAccountMigration's own Program already are.
 public partial class Program;

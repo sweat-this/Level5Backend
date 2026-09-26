@@ -60,8 +60,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthSessionStore, AuthSessionStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
         services.AddScoped<ILegacyAccountLinkStore, LegacyAccountLinkStore>();
+        services.AddScoped<ILegacyMatchResultLinkStore, LegacyMatchResultLinkStore>();
         services.AddScoped<PlayerTagAllocator>();
         services.AddScoped<ImportLegacyAccountUseCase>();
+        services.AddScoped<ImportLegacyMatchResultUseCase>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();

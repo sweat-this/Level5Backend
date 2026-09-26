@@ -1,4 +1,4 @@
-using Level5.LegacyAccountMigration.Safety;
+using Level5.Infrastructure.Safety;
 
 namespace Level5.LegacyAccountMigration.IntegrationTests;
 

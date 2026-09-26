@@ -16,6 +16,9 @@ public sealed class InMemoryMatchResultStore : IMatchResultStore
         return Task.FromResult(match);
     }
 
+    public Task<MatchResult?> FindByIdAsync(MatchResultId id, CancellationToken cancellationToken)
+        => Task.FromResult(_rows.GetValueOrDefault(id.Value));
+
     public Task AddAsync(MatchResult result, CancellationToken cancellationToken)
     {
         var duplicate = _rows.Values.Any(r => r.PlayerId == result.PlayerId && r.ClientResultId == result.ClientResultId);
@@ -52,6 +55,9 @@ public sealed class RacingMatchResultStore(InMemoryMatchResultStore inner) : IMa
 
         return inner.FindByClientResultIdAsync(playerId, clientResultId, cancellationToken);
     }
+
+    public Task<MatchResult?> FindByIdAsync(MatchResultId id, CancellationToken cancellationToken)
+        => inner.FindByIdAsync(id, cancellationToken);
 
     public Task AddAsync(MatchResult result, CancellationToken cancellationToken)
         => throw new ConflictException("The request conflicts with existing data. Please retry.");

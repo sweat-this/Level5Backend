@@ -28,6 +28,7 @@
          statements generate a global-namespace `Program` class - without an alias, `Program`
          would be ambiguous between the two. See DependencyRuleTests.cs's `extern alias`. -->
     <ProjectReference Include="..\..\tools\Level5.LegacyAccountMigration\Level5.LegacyAccountMigration.csproj" Aliases="LegacyMigrationTool" />
+    <ProjectReference Include="..\..\tools\Level5.LegacyScoreMigration\Level5.LegacyScoreMigration.csproj" Aliases="LegacyScoreMigrationTool" />
   </ItemGroup>
 
 </Project>

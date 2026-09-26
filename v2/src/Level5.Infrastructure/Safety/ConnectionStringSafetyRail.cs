@@ -1,15 +1,19 @@
 using Npgsql;
 
-namespace Level5.LegacyAccountMigration.Safety;
+namespace Level5.Infrastructure.Safety;
 
 public sealed record SafetyRailResult(bool Passed, string? RefusalReason);
 
 /// <summary>
-/// A hard safety rail mirroring Level5.E2E.Fixtures's own database-name allow-list: this tool
-/// refuses to run against a V2 database whose name isn't explicitly allow-listed, and refuses to
-/// run if the V1 and V2 connection strings resolve to the same database (a copy-paste mistake that
-/// would otherwise let the migration write into the wrong database, or read and write the same
-/// one). Pure string/NpgsqlConnectionStringBuilder logic - no I/O, independently unit-testable.
+/// A hard safety rail shared by every offline V1-&gt;V2 migration tool under <c>v2/tools</c>
+/// (originally introduced for <c>Level5.LegacyAccountMigration</c>, and reused as-is by
+/// <c>Level5.LegacyScoreMigration</c> rather than duplicated - both tools already reference this
+/// project for DI wiring, and a safety-critical rail is exactly the kind of tiny helper worth
+/// sharing instead of risking two copies drifting apart): refuses to run against a V2 database
+/// whose name isn't explicitly allow-listed, and refuses to run if the V1 and V2 connection strings
+/// resolve to the same database (a copy-paste mistake that would otherwise let a migration write
+/// into the wrong database, or read and write the same one). Pure string/NpgsqlConnectionStringBuilder
+/// logic - no I/O, independently unit-testable.
 /// </summary>
 public static class ConnectionStringSafetyRail
 {

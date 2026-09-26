@@ -14,6 +14,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
     public DbSet<MatchResultRow> MatchResults => Set<MatchResultRow>();
     public DbSet<LegacyAccountLinkRow> LegacyAccountLinks => Set<LegacyAccountLinkRow>();
+    public DbSet<LegacyMatchResultLinkRow> LegacyMatchResultLinks => Set<LegacyMatchResultLinkRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -235,6 +236,26 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasOne<PlayerProfileRow>()
                 .WithMany()
                 .HasForeignKey(e => e.PlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<LegacyMatchResultLinkRow>(entity =>
+        {
+            entity.ToTable("legacy_match_result_links");
+            // Supplied by the migration tool from V1's highscores.id, never identity-generated -
+            // the authoritative migration idempotency key (one legacy row can never migrate twice).
+            entity.HasKey(e => e.LegacyHighscoreId);
+            entity.Property(e => e.LegacyHighscoreId).ValueGeneratedNever();
+            // Matches V1 highscores.scoreid varchar(100); stored purely as a debugging/provenance
+            // aid, never ownership authority - LegacyHighscoreId is.
+            entity.Property(e => e.LegacyScoreId).HasMaxLength(100);
+            // Unique: a V2 result can be the migration target of at most one legacy row.
+            entity.HasIndex(e => e.MatchResultId).IsUnique();
+            // Restrict, not cascade - match results are immutable history; a stray delete must fail
+            // loudly rather than silently orphan migration provenance.
+            entity.HasOne<MatchResultRow>()
+                .WithMany()
+                .HasForeignKey(e => e.MatchResultId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
