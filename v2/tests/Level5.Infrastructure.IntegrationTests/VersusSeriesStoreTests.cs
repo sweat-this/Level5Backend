@@ -554,6 +554,125 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         Assert.Equal(expectedIds.OrderBy(id => id.Value), collected.OrderBy(id => id.Value));
     }
 
+    // PostgreSQL orders uuid columns bytewise (big-endian, RFC 4122), which matches ordinal
+    // comparison of the canonical lowercase hex string - NOT System.Guid.CompareTo, which compares
+    // fields in a different byte order. The expected order for an equal-sort-key page walk must
+    // therefore be computed the way the database does.
+    private static List<VersusSeriesId> OrderByIdDescendingLikePostgres(IEnumerable<VersusSeriesId> ids)
+        => [.. ids.OrderByDescending(id => id.Value.ToString("D"), StringComparer.Ordinal)];
+
+    private static async Task<List<VersusSeriesId>> WalkPagesAsync(
+        Func<string?, Task<PagedResult<SeriesSummary>>> fetchPage)
+    {
+        var collected = new List<VersusSeriesId>();
+        string? cursor = null;
+        var pagesFetched = 0;
+        do
+        {
+            // A broken keyset predicate can re-serve the same rows forever; fail instead of hanging.
+            Assert.True(++pagesFetched <= 20, "pagination did not terminate - the cursor is not advancing");
+            var page = await fetchPage(cursor);
+            Assert.True(page.Items.Count <= 2, "page exceeded the requested limit");
+            collected.AddRange(page.Items.Select(i => i.Id));
+            cursor = page.NextCursor;
+        } while (cursor is not null);
+
+        return collected;
+    }
+
+    [Fact]
+    public async Task Equal_created_at_rows_paginate_by_id_without_gaps_or_duplicates()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "EqualCreatedA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "EqualCreatedB", Now);
+        var store = new VersusSeriesStore(db);
+
+        // Every row shares one exact CreatedAt, so the (CreatedAt, Id) keyset's Id tiebreaker alone
+        // decides order and every page boundary falls between rows with an identical primary key.
+        var created = new List<VersusSeriesId>();
+        for (var i = 0; i < 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now);
+            series.Accept(b, Now);
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            created.Add(series.Id);
+        }
+
+        var collected = await WalkPagesAsync(cursor => store.ListActiveSeriesSummariesAsync(a, limit: 2, cursor, CancellationToken.None));
+
+        Assert.Equal(OrderByIdDescendingLikePostgres(created), collected);
+    }
+
+    [Fact]
+    public async Task Equal_created_at_pending_challenges_paginate_by_id_without_gaps_or_duplicates()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "EqualPendingA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "EqualPendingB", Now);
+        var store = new VersusSeriesStore(db);
+
+        var created = new List<VersusSeriesId>();
+        for (var i = 0; i < 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now);
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            created.Add(series.Id);
+        }
+
+        var outgoing = await WalkPagesAsync(cursor => store.ListOutgoingChallengeSummariesAsync(a, limit: 2, cursor, CancellationToken.None));
+        var incoming = await WalkPagesAsync(cursor => store.ListIncomingChallengeSummariesAsync(b, limit: 2, cursor, CancellationToken.None));
+
+        var expected = OrderByIdDescendingLikePostgres(created);
+        Assert.Equal(expected, outgoing);
+        Assert.Equal(expected, incoming);
+    }
+
+    [Fact]
+    public async Task Equal_completed_at_rows_paginate_by_id_without_gaps_or_duplicates_for_completed_and_history()
+    {
+        await using var db = fixture.CreateDbContext();
+        var a = await PlayerSeeding.CreatePlayerAsync(db, "EqualCompletedA", Now);
+        var b = await PlayerSeeding.CreatePlayerAsync(db, "EqualCompletedB", Now);
+        var store = new VersusSeriesStore(db);
+
+        // CompletedAt is identical across every row (while CreatedAt differs), so the keyset's
+        // primary sort key ties on completion time and Id alone breaks it.
+        var completedIds = new List<VersusSeriesId>();
+        for (var i = 0; i < 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(1), DefaultRules, Now.AddSeconds(-i - 1));
+            series.Accept(b, Now);
+            var aAttempt = series.StartAttempt(a, 1, Now);
+            var bAttempt = series.StartAttempt(b, 1, Now);
+            series.CompleteAttempt(a, 1, aAttempt.Id, AttemptResult.OfScore(80), Now);
+            series.CompleteAttempt(b, 1, bAttempt.Id, AttemptResult.OfScore(60), Now);
+            Assert.Equal(Now, series.CompletedAt);
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            completedIds.Add(series.Id);
+        }
+
+        var completed = await WalkPagesAsync(cursor => store.ListCompletedSeriesSummariesAsync(a, limit: 2, cursor, CancellationToken.None));
+        Assert.Equal(OrderByIdDescendingLikePostgres(completedIds), completed);
+
+        // History adds Declined/Cancelled/Expired rows that share the same CompletedAt.
+        var historyIds = new List<VersusSeriesId>(completedIds);
+        var declined = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(-10));
+        declined.Decline(b, Now);
+        var cancelled = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(-11));
+        cancelled.Cancel(a, Now);
+        var expired = VersusSeries.CreateChallenge(a, b, SeriesFormat.BestOf(3), DefaultRules, Now.AddSeconds(-12));
+        expired.Expire(Now);
+        foreach (var series in new[] { declined, cancelled, expired })
+        {
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            historyIds.Add(series.Id);
+        }
+
+        var history = await WalkPagesAsync(cursor => store.ListTerminalHistorySummariesAsync(a, limit: 2, cursor, CancellationToken.None));
+        Assert.Equal(OrderByIdDescendingLikePostgres(historyIds), history);
+    }
+
     [Fact]
     public async Task An_invalid_pagination_cursor_is_rejected_with_a_validation_error()
     {
