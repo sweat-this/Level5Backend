@@ -22,9 +22,9 @@ public sealed class LeaderboardQueryTests(PostgresFixture fixture)
     private static async Task<Guid> SeedResultAsync(
         Level5V2DbContext db, PlayerId player, int modeId, double totalPoints, DateTimeOffset createdAt,
         bool hardcore = false, bool traffic = false, bool enemies = false, bool sniper = false,
-        string characterId = "hero", int levelId = 1)
+        string characterId = "hero", int levelId = 1, Guid? resultId = null)
     {
-        var id = Guid.NewGuid();
+        var id = resultId ?? Guid.NewGuid();
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"""
              INSERT INTO match_results
@@ -237,6 +237,42 @@ public sealed class LeaderboardQueryTests(PostgresFixture fixture)
 
         Assert.Equal(expectedOrder, collected);
         Assert.Equal(expectedOrder.Count, collected.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Equal_values_and_receipt_times_page_stably_by_match_result_id()
+    {
+        await using var db = fixture.CreateDbContext();
+        var player = await PlayerSeeding.CreatePlayerAsync(db, "HQTiedPages", Now);
+        Guid[] expectedOrder =
+        [
+            Guid.Parse("00000000-0000-0000-0000-000000000001"),
+            Guid.Parse("00000000-0000-0000-0000-000000000002"),
+            Guid.Parse("00000000-0000-0000-0000-000000000003"),
+            Guid.Parse("00000000-0000-0000-0000-000000000004"),
+            Guid.Parse("00000000-0000-0000-0000-000000000005")
+        ];
+
+        foreach (var id in expectedOrder.Reverse())
+        {
+            await SeedResultAsync(db, player, modeId: 413, totalPoints: 50, createdAt: Now, resultId: id);
+        }
+
+        var collected = new List<Guid>();
+        (double, DateTimeOffset, Guid)? cursor = null;
+        do
+        {
+            var rows = await new LeaderboardQuery(db).ExecuteAsync(Spec(413, limit: 2, cursor: cursor), CancellationToken.None);
+            var pageRows = rows.Take(2).ToList();
+            collected.AddRange(pageRows.Select(row => row.MatchResultId));
+            cursor = rows.Count > 2
+                ? (pageRows[^1].RankingValue, pageRows[^1].CreatedAt, pageRows[^1].MatchResultId)
+                : null;
+        }
+        while (cursor is not null);
+
+        Assert.Equal(expectedOrder, collected);
+        Assert.Equal(expectedOrder.Length, collected.Distinct().Count());
     }
 
     [Fact]
