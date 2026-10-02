@@ -506,11 +506,12 @@ centralized password policy.
   `dotnet user-secrets` locally or `Sessions__RefreshTokenLifetimeDays` in production. No new
   required configuration beyond this - refresh-token hashing and password-policy limits are fixed
   constants, not configuration surface, since nothing in this slice needs them tunable.
-- **Rate limiting**: `/api/v2/auth/refresh` and `/api/v2/auth/logout` sit under the same
-  `AuthController`/`AuthPolicy` rate limiter as register/login (see
-  [Local development](#local-development) below) - refresh is as much a credential-guessing/replay
-  surface as login, and logout shares the policy rather than getting a separate, more restrictive
-  one it doesn't need.
+- **Rate limiting**: register, login, refresh, and logout each have an independent per-IP
+  fixed-window budget (see [Local development](#local-development) below). The current Production
+  configuration permits five requests per minute for each operation, rather than five requests per
+  minute shared across all four. This intentionally increases the theoretical per-IP aggregate to
+  20 auth requests per minute; no second aggregate limiter is applied. Non-Production permits 1000
+  requests per minute for each operation so local and integration-test traffic does not interfere.
 
 ## Public player identity and self-update
 
