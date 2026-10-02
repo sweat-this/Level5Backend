@@ -7,13 +7,11 @@ namespace Level5.Application.Competition;
 /// The background expiry sweep's per-tick body (invoked by <c>Level5.Api</c>'s hosted service, but
 /// kept here so it stays testable without a real timer). Finds challenges still in
 /// <see cref="Domain.Competition.SeriesStatus.PendingAcceptance"/> older than
-/// <see cref="IChallengeExpiryPolicy.PendingAcceptanceTimeout"/> and expires each one via the
-/// domain's own <see cref="Domain.Competition.VersusSeries.Expire"/> transition, using the same
-/// conditional-update optimistic-concurrency save every other series mutation uses. A row that
-/// loses the race (some other command - e.g. a concurrent Accept - already moved it out of
-/// PendingAcceptance) is simply skipped rather than retried: it is no longer eligible for expiry
-/// by definition, and if it is still stale and still pending, the next sweep tick will find it
-/// again.
+/// <see cref="IChallengeExpiryPolicy.PendingAcceptanceTimeout"/> and expires each candidate via a
+/// specialized relational compare-and-set. The maintenance path deliberately does not materialize
+/// or rewrite nested JSON state; <see cref="Domain.Competition.VersusSeries.Expire"/> remains the
+/// canonical in-memory transition. A row that loses the race (some other command - e.g. a
+/// concurrent Accept - already moved it out of PendingAcceptance) is skipped without retry.
 /// </summary>
 public sealed class ExpireStalePendingChallengesUseCase(IVersusSeriesStore seriesStore, IClock clock, IChallengeExpiryPolicy expiryPolicy)
 {
@@ -22,36 +20,14 @@ public sealed class ExpireStalePendingChallengesUseCase(IVersusSeriesStore serie
         var now = clock.UtcNow;
         var cutoff = now - expiryPolicy.PendingAcceptanceTimeout;
 
-        var staleIds = await seriesStore.FindStalePendingChallengeIdsAsync(cutoff, expiryPolicy.SweepBatchSize, cancellationToken);
+        var candidates = await seriesStore.FindStalePendingChallengeCandidatesAsync(
+            cutoff, expiryPolicy.SweepBatchSize, cancellationToken);
 
         var expiredCount = 0;
-        foreach (var id in staleIds)
+        foreach (var candidate in candidates)
         {
-            var series = await seriesStore.FindByIdAsync(id, cancellationToken);
-            if (series is null)
-            {
-                continue;
-            }
-
-            var expectedRevision = series.Revision;
-            try
-            {
-                series.Expire(now);
-            }
-            catch (IllegalSeriesTransitionException)
-            {
-                // Some other command (Accept/Decline/Cancel) already moved this series out of
-                // PendingAcceptance between the stale-id scan and this load - no longer eligible.
-                continue;
-            }
-
-            if (series.Revision == expectedRevision)
-            {
-                // Already expired by an earlier tick that raced this one - nothing to save.
-                continue;
-            }
-
-            if (await seriesStore.TrySaveAsync(series, expectedRevision, cancellationToken))
+            if (await seriesStore.TryExpireStalePendingChallengeAsync(
+                    candidate.Id, candidate.Revision, cutoff, now, cancellationToken))
             {
                 expiredCount++;
             }

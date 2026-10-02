@@ -403,10 +403,13 @@ whichever terminal status applies, and is never cleared; the row itself is never
   infrastructure, just the framework's built-in hosted-service model - that periodically calls
   `ExpireStalePendingChallengesUseCase`. That use case finds challenges still `PendingAcceptance`
   older than `Challenges:PendingExpiryDays` (default **30 days**) via
-  `IVersusSeriesStore.FindStalePendingChallengeIdsAsync` (backed by a dedicated
-  `IX_competitive_series_Status_CreatedAt` index - the only schema migration in this slice, purely
-  additive per the migration policy below) and expires each one using the exact same
-  conditional-update optimistic-concurrency save every other transition uses. Configuration:
+  `IVersusSeriesStore.FindStalePendingChallengeCandidatesAsync` (backed by a dedicated
+  `IX_competitive_series_Status_CreatedAt` index). The query projects only each candidate's ID and
+  revision, ordered by `(CreatedAt, Id)`, and expiry uses a specialized relational compare-and-set
+  over ID/status/revision/cutoff. It updates only lifecycle columns and never reads or rewrites
+  `StateJson`, so corrupt nested state cannot starve the bounded sweep. `VersusSeries.Expire`
+  remains the canonical in-memory domain transition; this is a narrow maintenance fast path whose
+  complete effects are already relational. Configuration:
   `Challenges:PendingExpiryDays` (default 30), `Challenges:ExpirySweepIntervalMinutes` (default 60),
   `Challenges:ExpirySweepBatchSize` (default 100, bounding how many rows one tick can touch). A
   failed tick is logged and never crashes the host; the next tick retries. There is no

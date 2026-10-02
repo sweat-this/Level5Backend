@@ -322,7 +322,7 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
     }
 
     [Fact]
-    public async Task FindStalePendingChallengeIdsAsync_only_returns_pending_challenges_older_than_the_cutoff_up_to_the_batch_size()
+    public async Task FindStalePendingChallengeCandidatesAsync_only_returns_pending_challenges_older_than_the_cutoff_up_to_the_batch_size()
     {
         await using var db = fixture.CreateDbContext();
         var challenger = await PlayerSeeding.CreatePlayerAsync(db, "StaleChallenger", Now);
@@ -341,19 +341,239 @@ public sealed class VersusSeriesStoreTests(PostgresFixture fixture)
         }
 
         var cutoff = Now.AddDays(-30);
-        var stale = await store.FindStalePendingChallengeIdsAsync(cutoff, batchSize: 100, CancellationToken.None);
+        var stale = await store.FindStalePendingChallengeCandidatesAsync(cutoff, batchSize: 100, CancellationToken.None);
 
-        var staleIds = stale.ToHashSet();
+        var staleIds = stale.Select(candidate => candidate.Id).ToHashSet();
         Assert.Equal(2, stale.Count);
         Assert.Contains(old1.Id, staleIds);
         Assert.Contains(old2.Id, staleIds);
         Assert.DoesNotContain(fresh.Id, staleIds);
         Assert.DoesNotContain(alreadyAccepted.Id, staleIds);
+        Assert.All(stale, candidate => Assert.Equal(0, candidate.Revision));
 
-        var bounded = await store.FindStalePendingChallengeIdsAsync(cutoff, batchSize: 1, CancellationToken.None);
+        var bounded = await store.FindStalePendingChallengeCandidatesAsync(cutoff, batchSize: 1, CancellationToken.None);
         Assert.Single(bounded);
         // Oldest first, so successive bounded sweeps make monotonic progress.
-        Assert.Equal(old1.Id, bounded[0]);
+        Assert.Equal(old1.Id, bounded[0].Id);
+
+        foreach (var candidate in stale)
+        {
+            Assert.True(await store.TryExpireStalePendingChallengeAsync(
+                candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public async Task A_poisoned_oldest_candidate_cannot_starve_later_stale_challenges()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "PoisonSweepC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "PoisonSweepO", Now);
+        var poisonedCreatedAt = DateTimeOffset.UnixEpoch;
+        var healthyCreatedAt = poisonedCreatedAt.AddMinutes(1);
+        var poisoned = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, poisonedCreatedAt);
+        var healthy = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, healthyCreatedAt);
+        var setupStore = new VersusSeriesStore(setupDb);
+        await setupStore.AddAsync(poisoned, clientRequestId: null, CancellationToken.None);
+        await setupStore.AddAsync(healthy, clientRequestId: null, CancellationToken.None);
+
+        const string malformedStateJson = """{"SchemaVersion":2}""";
+        await setupDb.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE competitive_series SET "StateJson" = {malformedStateJson}::jsonb WHERE "Id" = {poisoned.Id.Value}""");
+
+        var cutoff = DateTimeOffset.UnixEpoch.AddDays(1);
+        await using var sweepDb = fixture.CreateDbContext();
+        var sweepStore = new VersusSeriesStore(sweepDb);
+        var firstBatch = await sweepStore.FindStalePendingChallengeCandidatesAsync(cutoff, batchSize: 1, CancellationToken.None);
+        var first = Assert.Single(firstBatch);
+        Assert.Equal(poisoned.Id, first.Id);
+        Assert.True(await sweepStore.TryExpireStalePendingChallengeAsync(
+            first.Id, first.Revision, cutoff, Now, CancellationToken.None));
+
+        var secondBatch = await sweepStore.FindStalePendingChallengeCandidatesAsync(cutoff, batchSize: 1, CancellationToken.None);
+        var second = Assert.Single(secondBatch);
+        Assert.Equal(healthy.Id, second.Id);
+        Assert.True(await sweepStore.TryExpireStalePendingChallengeAsync(
+            second.Id, second.Revision, cutoff, Now, CancellationToken.None));
+
+        await using var verifyDb = fixture.CreateDbContext();
+        var statuses = await verifyDb.VersusSeries
+            .Where(row => row.Id == poisoned.Id.Value || row.Id == healthy.Id.Value)
+            .Select(row => row.Status)
+            .ToListAsync();
+        Assert.Equal(2, statuses.Count);
+        Assert.All(statuses, status => Assert.Equal(nameof(SeriesStatus.Expired), status));
+        await Assert.ThrowsAsync<JsonException>(
+            () => new VersusSeriesStore(verifyDb).FindByIdAsync(poisoned.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Unsupported_schema_expires_without_rewriting_state_and_detail_read_still_fails()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "UnsupportedExpiryC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "UnsupportedExpiryO", Now);
+        var createdAt = DateTimeOffset.UnixEpoch.AddDays(10);
+        var series = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, createdAt);
+        await new VersusSeriesStore(setupDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
+
+        const string unsupportedStateJson = """{"SchemaVersion":999,"Rounds":[]}""";
+        await setupDb.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE competitive_series SET "StateJson" = {unsupportedStateJson}::jsonb WHERE "Id" = {series.Id.Value}""");
+
+        var cutoff = createdAt.AddDays(1);
+        var expiredAt = cutoff.AddMinutes(7);
+        await using var sweepDb = fixture.CreateDbContext();
+        var sweepStore = new VersusSeriesStore(sweepDb);
+        var before = await sweepDb.VersusSeries.AsNoTracking().SingleAsync(row => row.Id == series.Id.Value);
+        var candidate = Assert.Single(await sweepStore.FindStalePendingChallengeCandidatesAsync(
+            cutoff, batchSize: 1, CancellationToken.None));
+
+        Assert.True(await sweepStore.TryExpireStalePendingChallengeAsync(
+            candidate.Id, candidate.Revision, cutoff, expiredAt, CancellationToken.None));
+
+        await using var verifyDb = fixture.CreateDbContext();
+        var after = await verifyDb.VersusSeries.AsNoTracking().SingleAsync(row => row.Id == series.Id.Value);
+        Assert.Equal(nameof(SeriesStatus.Expired), after.Status);
+        Assert.Equal(candidate.Revision + 1, after.Revision);
+        Assert.Equal(expiredAt, after.UpdatedAt);
+        Assert.Equal(expiredAt, after.CompletedAt);
+        Assert.Equal(before.StateJson, after.StateJson);
+        Assert.Equal(before.ChallengerId, after.ChallengerId);
+        Assert.Equal(before.OpponentId, after.OpponentId);
+        Assert.Equal(before.TotalGames, after.TotalGames);
+        Assert.Equal(before.CurrentGameNumber, after.CurrentGameNumber);
+        Assert.Equal(before.WinnerId, after.WinnerId);
+        Assert.Equal(before.CreatedAt, after.CreatedAt);
+        Assert.Equal(before.ClientRequestId, after.ClientRequestId);
+
+        await Assert.ThrowsAsync<UnsupportedSeriesSchemaVersionException>(
+            () => new VersusSeriesStore(verifyDb).FindByIdAsync(series.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Relational_expiry_does_not_rewrite_healthy_nested_state()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "HealthyExpiryC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "HealthyExpiryO", Now);
+        var createdAt = DateTimeOffset.UnixEpoch.AddDays(20);
+        var series = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, createdAt);
+        await new VersusSeriesStore(setupDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
+        var before = await setupDb.VersusSeries.AsNoTracking().SingleAsync(row => row.Id == series.Id.Value);
+
+        var cutoff = createdAt.AddDays(1);
+        await using var sweepDb = fixture.CreateDbContext();
+        var sweepStore = new VersusSeriesStore(sweepDb);
+        var candidate = Assert.Single(await sweepStore.FindStalePendingChallengeCandidatesAsync(
+            cutoff, batchSize: 1, CancellationToken.None));
+        Assert.True(await sweepStore.TryExpireStalePendingChallengeAsync(
+            candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None));
+
+        await using var verifyDb = fixture.CreateDbContext();
+        var after = await verifyDb.VersusSeries.AsNoTracking().SingleAsync(row => row.Id == series.Id.Value);
+        Assert.Equal(before.StateJson, after.StateJson);
+    }
+
+    [Fact]
+    public async Task Concurrent_accept_wins_over_expiry_candidate_scanned_at_an_older_revision()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "AcceptExpiryC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "AcceptExpiryO", Now);
+        var createdAt = DateTimeOffset.UnixEpoch.AddDays(30);
+        var series = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, createdAt);
+        await new VersusSeriesStore(setupDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
+
+        var cutoff = createdAt.AddDays(1);
+        await using var sweepDb = fixture.CreateDbContext();
+        var sweepStore = new VersusSeriesStore(sweepDb);
+        var candidate = Assert.Single(await sweepStore.FindStalePendingChallengeCandidatesAsync(
+            cutoff, batchSize: 1, CancellationToken.None));
+
+        await using var acceptDb = fixture.CreateDbContext();
+        var acceptStore = new VersusSeriesStore(acceptDb);
+        var accepted = await acceptStore.FindByIdAsync(series.Id, CancellationToken.None);
+        accepted!.Accept(opponent, Now);
+        Assert.True(await acceptStore.TrySaveAsync(accepted, candidate.Revision, CancellationToken.None));
+
+        Assert.False(await sweepStore.TryExpireStalePendingChallengeAsync(
+            candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None));
+
+        await using var verifyDb = fixture.CreateDbContext();
+        var final = await new VersusSeriesStore(verifyDb).FindByIdAsync(series.Id, CancellationToken.None);
+        Assert.Equal(SeriesStatus.Active, final!.Status);
+        Assert.Equal(candidate.Revision + 1, final.Revision);
+    }
+
+    [Fact]
+    public async Task Two_sweep_workers_cannot_double_expire_the_same_revision()
+    {
+        await using var setupDb = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(setupDb, "DoubleExpiryC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(setupDb, "DoubleExpiryO", Now);
+        var createdAt = DateTimeOffset.UnixEpoch.AddDays(40);
+        var series = VersusSeries.CreateChallenge(
+            challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, createdAt);
+        await new VersusSeriesStore(setupDb).AddAsync(series, clientRequestId: null, CancellationToken.None);
+
+        var cutoff = createdAt.AddDays(1);
+        await using var scanDb = fixture.CreateDbContext();
+        var candidate = Assert.Single(await new VersusSeriesStore(scanDb)
+            .FindStalePendingChallengeCandidatesAsync(cutoff, batchSize: 1, CancellationToken.None));
+        await using var workerOneDb = fixture.CreateDbContext();
+        await using var workerTwoDb = fixture.CreateDbContext();
+        var workerOne = new VersusSeriesStore(workerOneDb);
+        var workerTwo = new VersusSeriesStore(workerTwoDb);
+
+        var results = await Task.WhenAll(
+            workerOne.TryExpireStalePendingChallengeAsync(
+                candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None),
+            workerTwo.TryExpireStalePendingChallengeAsync(
+                candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None));
+
+        Assert.Single(results, result => result);
+        Assert.Single(results, result => !result);
+        await using var verifyDb = fixture.CreateDbContext();
+        var final = await verifyDb.VersusSeries.AsNoTracking().SingleAsync(row => row.Id == series.Id.Value);
+        Assert.Equal(nameof(SeriesStatus.Expired), final.Status);
+        Assert.Equal(candidate.Revision + 1, final.Revision);
+    }
+
+    [Fact]
+    public async Task Equal_time_expiry_candidates_are_ordered_by_id_ascending()
+    {
+        await using var db = fixture.CreateDbContext();
+        var challenger = await PlayerSeeding.CreatePlayerAsync(db, "ExpiryOrderC", Now);
+        var opponent = await PlayerSeeding.CreatePlayerAsync(db, "ExpiryOrderO", Now);
+        var created = new List<VersusSeriesId>();
+        var store = new VersusSeriesStore(db);
+        var createdAt = DateTimeOffset.UnixEpoch.AddDays(50);
+        for (var i = 0; i < 5; i++)
+        {
+            var series = VersusSeries.CreateChallenge(
+                challenger, opponent, SeriesFormat.BestOf(3), DefaultRules, createdAt);
+            await store.AddAsync(series, clientRequestId: null, CancellationToken.None);
+            created.Add(series.Id);
+        }
+
+        var cutoff = createdAt.AddDays(1);
+        var candidates = await store.FindStalePendingChallengeCandidatesAsync(
+            cutoff, batchSize: 5, CancellationToken.None);
+
+        var expected = created.OrderBy(id => id.Value.ToString("D"), StringComparer.Ordinal).ToList();
+        Assert.Equal(expected, candidates.Select(candidate => candidate.Id).ToList());
+
+        foreach (var candidate in candidates)
+        {
+            Assert.True(await store.TryExpireStalePendingChallengeAsync(
+                candidate.Id, candidate.Revision, cutoff, Now, CancellationToken.None));
+        }
     }
 
     [Fact]

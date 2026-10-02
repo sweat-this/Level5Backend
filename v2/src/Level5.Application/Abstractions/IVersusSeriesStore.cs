@@ -63,11 +63,25 @@ public interface IVersusSeriesStore
     /// <summary>
     /// Finds up to <paramref name="batchSize"/> series still in <see cref="SeriesStatus.PendingAcceptance"/>
     /// whose <c>CreatedAt</c> is older than <paramref name="cutoff"/> - the background expiry
-    /// sweep's source query (bounded so one sweep tick can never scan or lock an unbounded number
-    /// of rows). Ordered by <c>CreatedAt</c> ascending so the oldest, most-overdue challenges are
-    /// always expired first across successive bounded runs.
+    /// sweep's relational-only source query (bounded so one sweep tick can never scan or lock an
+    /// unbounded number of rows). Ordered by <c>CreatedAt</c>, then <c>Id</c>, ascending so the
+    /// oldest, most-overdue challenges are always expired first in a deterministic order.
     /// </summary>
-    Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken);
+    Task<IReadOnlyList<StalePendingChallengeCandidate>> FindStalePendingChallengeCandidatesAsync(
+        DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// System-maintenance fast path for the exact lifecycle-only effects of
+    /// <see cref="VersusSeries.Expire"/>. Conditionally expires one stale pending row at
+    /// <paramref name="expectedRevision"/> without materializing or rewriting its JSON state.
+    /// The domain transition remains canonical for in-memory callers; this specialized operation
+    /// exists so malformed or unsupported persisted nested state cannot block expiry maintenance.
+    /// Returns false when the row disappeared, changed revision/status, or is no longer stale.
+    /// Database and cancellation failures propagate.
+    /// </summary>
+    Task<bool> TryExpireStalePendingChallengeAsync(
+        VersusSeriesId id, long expectedRevision, DateTimeOffset cutoff, DateTimeOffset expiredAt,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Persists a mutated series iff the stored revision still equals
@@ -77,3 +91,6 @@ public interface IVersusSeriesStore
     /// </summary>
     Task<bool> TrySaveAsync(VersusSeries series, long expectedRevision, CancellationToken cancellationToken);
 }
+
+/// <summary>A relational-only expiry candidate; no persistence row or nested state crosses the Application port.</summary>
+public readonly record struct StalePendingChallengeCandidate(VersusSeriesId Id, long Revision);
