@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Level5Backend.Controllers;
 using Level5Backend.Models;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Level5Backend.Tests;
@@ -213,5 +215,105 @@ public class HighscoresApiControllerTests
         Assert.Equal("42", row.GetProperty("totalPoints").GetRawText());
         Assert.Equal("Dr Blood", row.GetProperty("character").GetString());
         Assert.Equal("12.5", row.GetProperty("time").GetString());
+    }
+
+    [Fact]
+    public void PostHighscore_ReturnsGoneProblemDetails()
+    {
+        using var context = CreateContext();
+        var controller = new HighscoresApiController(context);
+
+        AssertRetired(controller.PostHighscore());
+    }
+
+    [Fact]
+    public void PostUnsubmittedHighscore_ReturnsGoneProblemDetails()
+    {
+        using var context = CreateContext();
+        var controller = new HighscoresApiController(context);
+
+        AssertRetired(controller.PostUnSubmittedHighscore());
+    }
+
+    [Fact]
+    public void PutHighscore_ReturnsGoneProblemDetails()
+    {
+        using var context = CreateContext();
+        var controller = new HighscoresApiController(context);
+
+        AssertRetired(controller.PutHighscore("score1"));
+    }
+
+    [Fact]
+    public void DeleteHighscore_ReturnsGoneProblemDetails()
+    {
+        using var context = CreateContext();
+        var controller = new HighscoresApiController(context);
+
+        AssertRetired(controller.DeleteHighscore(1));
+    }
+
+    [Fact]
+    public async Task RetiredMutationActions_DoNotQueryOrMutatePersistedScores()
+    {
+        string databaseName = Guid.NewGuid().ToString();
+        var options = new DbContextOptionsBuilder<Level5Context>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
+
+        await using (var seedContext = new Level5Context(options))
+        {
+            var persisted = MakeHighscore(id: 1, modeid: 1, totalPoints: 42);
+            persisted.Userid = 17;
+            persisted.Username = "persisted-owner";
+            seedContext.Highscores.Add(persisted);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using (var actionContext = new Level5Context(options))
+        {
+            var controller = new HighscoresApiController(actionContext);
+
+            AssertRetired(controller.PostHighscore());
+            AssertRetired(controller.PostUnSubmittedHighscore());
+            AssertRetired(controller.PutHighscore("score1"));
+            AssertRetired(controller.DeleteHighscore(1));
+
+            Assert.Empty(actionContext.ChangeTracker.Entries());
+        }
+
+        await using var verificationContext = new Level5Context(options);
+        var score = await verificationContext.Highscores.SingleAsync();
+        Assert.Equal(1, score.Id);
+        Assert.Equal("score1", score.Scoreid);
+        Assert.Equal(17, score.Userid);
+        Assert.Equal("persisted-owner", score.Username);
+        Assert.Equal(42, score.TotalPoints);
+    }
+
+    [Fact]
+    public void RetiredMutationActions_DoNotAcceptRequestBodyParameters()
+    {
+        var controllerType = typeof(HighscoresApiController);
+
+        Assert.Empty(controllerType.GetMethod(nameof(HighscoresApiController.PostHighscore))!.GetParameters());
+        Assert.Empty(controllerType.GetMethod(nameof(HighscoresApiController.PostUnSubmittedHighscore))!.GetParameters());
+        Assert.Equal(
+            [typeof(string)],
+            controllerType.GetMethod(nameof(HighscoresApiController.PutHighscore))!.GetParameters().Select(parameter => parameter.ParameterType));
+        Assert.Equal(
+            [typeof(int)],
+            controllerType.GetMethod(nameof(HighscoresApiController.DeleteHighscore))!.GetParameters().Select(parameter => parameter.ParameterType));
+    }
+
+    private static void AssertRetired(IActionResult result)
+    {
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status410Gone, objectResult.StatusCode);
+        Assert.Contains("application/problem+json", objectResult.ContentTypes);
+
+        var problem = Assert.IsType<ProblemDetails>(objectResult.Value);
+        Assert.Equal(StatusCodes.Status410Gone, problem.Status);
+        Assert.Equal("legacy_score_transport_retired", problem.Extensions["code"]);
     }
 }
