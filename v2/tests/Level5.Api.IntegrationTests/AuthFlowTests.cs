@@ -273,6 +273,24 @@ public sealed class AuthFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task A_previously_issued_access_token_remains_valid_after_the_account_is_disabled()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Yara");
+        await DisableAccountAsync(player.PlayerId);
+
+        var accountResponse = await player.Client.GetAsync("/api/v2/me");
+
+        Assert.Equal(HttpStatusCode.OK, accountResponse.StatusCode);
+        var account = await accountResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Disabled", account.GetProperty("status").GetString());
+
+        // CurrentPlayerProvider also resolves identity from the already-authenticated subject;
+        // disabling an account does not add a status lookup to the bearer-validation path.
+        var playerResponse = await player.Client.GetAsync("/api/v2/players/me");
+        Assert.Equal(HttpStatusCode.OK, playerResponse.StatusCode);
+    }
+
     /// <summary>
     /// There is no account-administration endpoint in this slice (by design - see the V2 README's
     /// non-goals), so disabling an account for this test reaches directly into the database, the

@@ -430,9 +430,10 @@ persistent rotating refresh sessions, logout/revocation, `AccountStatus` enforce
 centralized password policy.
 
 - **Access tokens**: short-lived JWTs (`Jwt:AccessTokenLifetimeMinutes`, default 15 minutes),
-  issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal - `sub` is the V2 `AccountId` and
-  nothing else identifying (no email, username, or status) - this was already true before this
-  slice and is unchanged by it.
+  issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal: `sub` is the V2 `AccountId` and
+  `jti` uniquely identifies the token; there is no email, username, account status, session id, or
+  other mutable account/session state in the token. The configured lifetime is applied from the
+  issuer's injected clock and is covered by a deterministic `JwtTokenIssuerTests` assertion.
 - **Refresh sessions**: `AuthSession` (`Level5.Domain.Identity`) is a persistent, rotating
   session - stable id, owning `AccountId`, a one-way hash of the current refresh credential
   (`RefreshTokenHash`), `CreatedAt`/`ExpiresAt`/`RevokedAt`, and a `Revision` used exactly like
@@ -475,13 +476,27 @@ centralized password policy.
   refresh/logout endpoints touch `auth_sessions`. If a product requirement later demands immediate
   revocation of already-issued access tokens, that is a stateful-JWT-validation decision to make
   deliberately (e.g. a token denylist), not something to introduce silently.
-- **Disabled accounts**: checked in `LoginUseCase` (after password verification, so a disabled
-  account takes the same password-hashing cost as an active one and isn't distinguishable by
-  response timing) and in `RefreshSessionUseCase`. A `Disabled` account can neither log in nor
-  refresh; both fail with the same generic contract (`invalid_credentials` / `invalid_refresh_token`)
-  used for every other failure mode in that endpoint. There is no account-status-changing endpoint
-  in this slice (still a non-goal) - integration tests flip `Status` directly in the database, the
-  same way a future admin tool eventually would.
+- **Disabled accounts (explicit bounded-revocation policy)**: `LoginUseCase` checks status after
+  password verification, so a disabled account takes the same password-hashing cost as an active
+  one and is not distinguishable by response timing. `RefreshSessionUseCase` checks status before
+  rotating the refresh credential or issuing a new access token. A `Disabled` account therefore
+  cannot establish or renew authenticated access: new login fails as `invalid_credentials`, and
+  refresh fails as `invalid_refresh_token`. It does **not** mean all already-issued bearer tokens
+  are synchronously invalidated. An access JWT issued before the account was disabled remains valid
+  until its existing `exp`, and `GET /api/v2/me` reports the account's current `Disabled` status
+  during that interval. This is the same fundamental stateless-JWT characteristic described above
+  for logout/session revocation: ordinary bearer validation does not query `accounts` or
+  `auth_sessions`. With the default access-token lifetime, the theoretical maximum post-disable
+  access window is approximately 15 minutes; configuration can change that bound. There is no
+  account-status-changing endpoint in this slice (still a non-goal) - integration tests flip
+  `Status` directly in the database, the same way a future admin tool eventually would.
+- **Immediate-cutoff escalation trigger**: if disabling later becomes an emergency security or
+  moderation action - for example for compromised accounts, financial/economic operations,
+  high-value competitive enforcement, or a formal moderation system - create a separate
+  architecture issue for stateful access-token revocation. That issue should evaluate, rather than
+  preselect, per-request account-state validation, session/security-version validation,
+  access-token/`jti` denylisting, and cache/gateway-assisted revocation, including their latency,
+  availability, consistency, and operational tradeoffs.
 - **`GET /api/v2/me`**: the private authenticated-account view - `AccountId`, `Username`, `Status`,
   `PlayerId`, `CreatedAt`. Deliberately separate from `GET /api/v2/players/me` (the public in-game
   `PlayerProfile`). Claim parsing (`sub` -> `AccountId`) lives in exactly one place,
