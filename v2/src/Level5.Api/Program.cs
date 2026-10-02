@@ -143,7 +143,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
         ValidateAudience = true,
         ValidIssuer = jwt["Issuer"],
         ValidAudience = jwt["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!))
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!)),
+        // Access-token expiry is the documented upper bound for bounded revocation. The
+        // framework default permits a token for five minutes beyond exp, which would silently
+        // extend the default disabled-account access window from 15 to roughly 20 minutes.
+        ClockSkew = TimeSpan.Zero
     };
 });
 

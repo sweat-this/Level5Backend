@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Level5.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Level5.Api.IntegrationTests;
@@ -39,6 +41,16 @@ public sealed class AuthFlowTests(ApiFactory factory)
         var response = await client.GetAsync("/api/v2/players/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void Bearer_validation_applies_no_clock_skew_to_access_token_expiry()
+    {
+        var options = factory.Services
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+
+        Assert.Equal(TimeSpan.Zero, options.TokenValidationParameters.ClockSkew);
     }
 
     [Fact]
@@ -271,6 +283,24 @@ public sealed class AuthFlowTests(ApiFactory factory)
         var response = await factory.CreateClient().PostAsJsonAsync("/api/v2/auth/refresh", new { refreshToken = player.RefreshToken });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_previously_issued_access_token_remains_valid_after_the_account_is_disabled()
+    {
+        var player = await factory.RegisterNewPlayerAsync("Yara");
+        await DisableAccountAsync(player.PlayerId);
+
+        var accountResponse = await player.Client.GetAsync("/api/v2/me");
+
+        Assert.Equal(HttpStatusCode.OK, accountResponse.StatusCode);
+        var account = await accountResponse.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        Assert.Equal("Disabled", account.GetProperty("status").GetString());
+
+        // CurrentPlayerProvider also resolves identity from the already-authenticated subject;
+        // disabling an account does not add a status lookup to the bearer-validation path.
+        var playerResponse = await player.Client.GetAsync("/api/v2/players/me");
+        Assert.Equal(HttpStatusCode.OK, playerResponse.StatusCode);
     }
 
     /// <summary>
