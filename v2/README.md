@@ -433,7 +433,10 @@ centralized password policy.
   issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal: `sub` is the V2 `AccountId` and
   `jti` uniquely identifies the token; there is no email, username, account status, session id, or
   other mutable account/session state in the token. The configured lifetime is applied from the
-  issuer's injected clock and is covered by a deterministic `JwtTokenIssuerTests` assertion.
+  issuer's injected clock and is covered by a deterministic `JwtTokenIssuerTests` assertion using
+  a non-default lifetime. Bearer validation applies zero clock skew, so the token stops being
+  accepted at its encoded `exp` rather than receiving the framework's default five-minute grace
+  period.
 - **Refresh sessions**: `AuthSession` (`Level5.Domain.Identity`) is a persistent, rotating
   session - stable id, owning `AccountId`, a one-way hash of the current refresh credential
   (`RefreshTokenHash`), `CreatedAt`/`ExpiresAt`/`RevokedAt`, and a `Revision` used exactly like

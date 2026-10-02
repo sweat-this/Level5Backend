@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Level5.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Level5.Api.IntegrationTests;
@@ -39,6 +41,16 @@ public sealed class AuthFlowTests(ApiFactory factory)
         var response = await client.GetAsync("/api/v2/players/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void Bearer_validation_applies_no_clock_skew_to_access_token_expiry()
+    {
+        var options = factory.Services
+            .GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+
+        Assert.Equal(TimeSpan.Zero, options.TokenValidationParameters.ClockSkew);
     }
 
     [Fact]
