@@ -112,9 +112,7 @@ namespace Level5Backend.Controllers
         }
 
         // Which stat a mode id is ranked by. Centralizes the mode-id groupings that used to be
-        // duplicated across the Filtered/All endpoints below (they were kept in exact sync by hand);
-        // applyHighscoreDefaults's per-modeid display-name switch is a separate, legitimately 1:1 lookup
-        // (several modeids sharing a metric still get distinct display names) so it isn't folded in.
+        // duplicated across the Filtered/All endpoints below (they were kept in exact sync by hand).
         private enum ScoreMetric { TotalPoints, MaxShotMade, TotalDistance, Time, ConsecutiveShots, EnemiesKilled }
 
         private static ScoreMetric? GetScoreMetric(int modeid) => modeid switch
@@ -305,202 +303,38 @@ namespace Level5Backend.Controllers
             }).ToList();
         }
 
-        //--------------------- HTTP PUT ---------------------------------------------------
-        // PUT: api/Highscores/scoreid/5
-        /// <summary>
-        /// Replace an existing high score's data. Despite the name, this does not insert - a
-        /// scoreid that doesn't already exist returns 404 (see the DbUpdateConcurrencyException
-        /// handling below).
-        /// </summary>
+        //--------------------- RETIRED HTTP MUTATIONS ------------------------------------
         [Authorize]
         [HttpPut("scoreid/{scoreid}")]
-        public async Task<IActionResult> PutHighscore(string scoreid, Highscore highscores)
-        {
-            if (scoreid != highscores.Scoreid)
-            {
-                return BadRequest();
-            }
+        public IActionResult PutHighscore(string scoreid) => LegacyScoreTransportRetired();
 
-            if (!TryGetCallerUserid(out int callerUserid) || highscores.Userid != callerUserid)
-            {
-                return Forbid();
-            }
-
-            // The route/lookup key is scoreid, not Id - the client is never asked to know or send
-            // the server-assigned numeric Id, so highscores.Id here is always the default (0).
-            // Setting EntityState.Modified directly on it would generate "UPDATE ... WHERE id = 0",
-            // which matches no row and throws DbUpdateConcurrencyException on every single call.
-            // Loading the tracked row by scoreid first and copying values onto it (which carries the
-            // real Id) is what makes the update actually target the right row.
-            var existing = await _context.Highscores.FirstOrDefaultAsync(h => h.Scoreid == scoreid);
-            if (existing == null)
-            {
-                return NotFound();
-            }
-
-            // server-derived, never trust whatever the client put in the request body - same as
-            // PostHighscore/PostUnSubmittedHighscore, this was previously only enforced on create,
-            // so a PUT could still overwrite it with an arbitrary client-supplied value
-            highscores.Ipaddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-            // If the client's PUT body omits modeName/sniperModeName/difficulty (not every caller
-            // round-trips every field), this backfills them instead of overwriting the existing
-            // value with null/0 - SetValues below writes every property as given.
-            applyHighscoreDefaults(highscores);
-
-            // Id is part of the key, so SetValues refuses to touch it if the source and target
-            // disagree - highscores.Id is always 0 (the client never sends it), so it has to be
-            // aligned with the real Id before copying the rest of the properties across.
-            highscores.Id = existing.Id;
-            _context.Entry(existing).CurrentValues.SetValues(highscores);
-
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                // A genuine race - existing was deleted between the lookup above and SaveChanges.
-                if (!ScoreIdExists(scoreid))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
-            }
-
-            return NoContent();
-        }
-        //--------------------- HTTP POST Unsubmitted Highscores ---------------------------------------------------
-        // POST: api/Highscores
-        /// <summary>
-        /// Create new high score
-        /// </summary>
-        /// 
         [Authorize]
         [EnableCors("ApiCors")]
         [HttpPost]
         [Route("unsubmitted")]
-        public async Task<ActionResult<List<Highscore>>> PostUnSubmittedHighscore([FromBody] List<Highscore> highscores)
-        {
-            if (highscores == null) { return BadRequest(); }
+        public IActionResult PostUnSubmittedHighscore() => LegacyScoreTransportRetired();
 
-            if (!TryGetCallerUserid(out int callerUserid) || !await _context.Users.AnyAsync(u => u.Userid == callerUserid))
-            {
-                return Forbid();
-            }
-
-            // one batched lookup instead of two queries per item (was N+1 before)
-            var incomingScoreIds = highscores.Select(h => h.Scoreid).ToList();
-            var existingScoreIds = (await _context.Highscores
-                .Where(e => incomingScoreIds.Contains(e.Scoreid))
-                .Select(e => e.Scoreid)
-                .ToListAsync())
-                .ToHashSet();
-
-            List<Highscore> list = new List<Highscore>();
-            string? callerIp = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-            foreach (var highscore in highscores)
-            {
-                // skip (not abort) anything that's a duplicate, missing a username, or doesn't
-                // belong to the authenticated caller - one bad item shouldn't drop the rest of
-                // the batch, which is what the previous "break" did.
-                if (existingScoreIds.Contains(highscore.Scoreid)
-                    || string.IsNullOrEmpty(highscore.Username)
-                    || highscore.Userid != callerUserid)
-                {
-                    continue;
-                }
-
-                // server-derived, never trust whatever the client put in the request body
-                highscore.Ipaddress = callerIp;
-                applyHighscoreDefaults(highscore);
-                _context.Highscores.Add(highscore);
-                list.Add(highscore);
-            }
-
-            await _context.SaveChangesAsync();
-            return list;
-        }
-
-        //--------------------- HTTP POST Highscore ---------------------------------------------------
-        // POST: api/Highscores
-        /// <summary>
-        /// Create new high score
-        /// </summary>
         [Authorize]
         [HttpPost]
-        public async Task<ActionResult<Highscore>> PostHighscore([FromBody] Highscore highscore)
-        {
-            if (!TryGetCallerUserid(out int callerUserid) || highscore.Userid != callerUserid)
-            {
-                return Forbid();
-            }
+        public IActionResult PostHighscore() => LegacyScoreTransportRetired();
 
-            // check if unique scoreid already exists in database
-            if (await _context.Highscores.AnyAsync(e => e.Scoreid == highscore.Scoreid))
-            {
-                return Conflict();
-            }
-            // if empty Username or userid NOT in user table
-            if (string.IsNullOrEmpty(highscore.Username) || !await _context.Users.AnyAsync(e => e.Userid == highscore.Userid))
-            {
-                return BadRequest();
-            }
-
-            // server-derived, never trust whatever the client put in the request body
-            highscore.Ipaddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-            applyHighscoreDefaults(highscore);
-            _context.Highscores.Add(highscore);
-            await _context.SaveChangesAsync();
-
-            // ServerStats is recomputed periodically by ServerStatsBackgroundService, not inline here -
-            // it used to run synchronously on every single POST, scanning the entire Highscores table.
-
-            return CreatedAtAction(nameof(GetAllHighscores), new { id = highscore.Id }, highscore);
-        }
-
-        //--------------------- HTTP DELETE HighScore ---------------------------------------------------
-        /// <summary>
-        /// Delete high score by score id
-        /// </summary>
         [Authorize]
         [HttpDelete("{id}")]
-        public async Task<ActionResult<Highscore>> DeleteHighscore(int id)
+        public IActionResult DeleteHighscore(int id) => LegacyScoreTransportRetired();
+
+        private ObjectResult LegacyScoreTransportRetired()
         {
-            var highscores = await _context.Highscores.FindAsync(id);
-            if (highscores == null)
+            var problem = new ProblemDetails
             {
-                return NotFound();
-            }
+                Status = StatusCodes.Status410Gone,
+                Title = "Legacy score transport retired",
+                Detail = "Legacy V1 high-score mutations are no longer supported."
+            };
+            problem.Extensions["code"] = "legacy_score_transport_retired";
 
-            if (!TryGetCallerUserid(out int callerUserid) || highscores.Userid != callerUserid)
-            {
-                return Forbid();
-            }
-
-            _context.Highscores.Remove(highscores);
-            await _context.SaveChangesAsync();
-
-            return highscores;
-        }
-
-        //--------------------- UTILITY FUNCTIONS ---------------------------------------------------
-        private bool ScoreIdExists(string scoreid)
-        {
-            return _context.Highscores.Any(e => e.Scoreid == scoreid);
-        }
-
-        // the JWT issued by TokenController carries the authenticated user's id as a "Userid"
-        // claim - mutating endpoints use this to confirm the caller owns the score being touched.
-        private bool TryGetCallerUserid(out int userid)
-        {
-            var claim = User.FindFirst("Userid")?.Value;
-            return int.TryParse(claim, out userid);
+            var result = StatusCode(StatusCodes.Status410Gone, problem);
+            result.ContentTypes.Add("application/problem+json");
+            return result;
         }
 
         /// <summary>
@@ -537,116 +371,6 @@ namespace Level5Backend.Controllers
                 .CountAsync();
 
             return count;
-        }
-
-        private void applyHighscoreDefaults(Highscore highscores)
-        {
-            // if modename is null, insert based on modeid
-            if (String.IsNullOrEmpty(highscores.ModeName))
-            {
-                {
-                    switch (highscores.Modeid)
-                    {
-                        case 1:
-                            highscores.ModeName = "Total Points";
-                            break;
-                        case 2:
-                            highscores.ModeName = "Total 3 Pointers";
-                            break;
-                        case 3:
-                            highscores.ModeName = "Total 4 Pointers";
-                            break;
-                        case 4:
-                            highscores.ModeName = "Total 7 Pointers";
-                            break;
-                        case 6:
-                            highscores.ModeName = "Total Distance";
-                            break;
-                        case 7:
-                            highscores.ModeName = "Spot up some 3s";
-                            break;
-                        case 8:
-                            highscores.ModeName = "Spot up some 4s";
-                            break;
-                        case 9:
-                            highscores.ModeName = "Spot up some All";
-                            break;
-                        case 10:
-                            highscores.ModeName = "Moneyball 3s";
-                            break;
-                        case 11:
-                            highscores.ModeName = "Moneyball 4s";
-                            break;
-                        case 12:
-                            highscores.ModeName = "Moneyball All";
-                            break;
-                        case 14:
-                            highscores.ModeName = "Consecutive Shots";
-                            break;
-                        case 15:
-                            highscores.ModeName = "In the Pocket";
-                            break;
-                        case 16:
-                            highscores.ModeName = "3 point Contest";
-                            break;
-                        case 17:
-                            highscores.ModeName = "4 point Contest";
-                            break;
-                        case 18:
-                            highscores.ModeName = "All point Contest";
-                            break;
-                        case 19:
-                            highscores.ModeName = "Points by Distance";
-                            break;
-                        case 20:
-                            highscores.ModeName = "Bash up some Nerds";
-                            break;
-                        case 21:
-                            highscores.ModeName = "Battle Royal";
-                            break;
-                        case 22:
-                            highscores.ModeName = "Cage Match";
-                            break;
-                        case 23:
-                            highscores.ModeName = "Versus";
-                            break;
-                        case 24:
-                            highscores.ModeName = "7 point Contest";
-                            break;
-                        case 25:
-                            highscores.ModeName = "Spot up some 7s";
-                            break;
-                        case 26:
-                            highscores.ModeName = "Beat tha Computahs";
-                            break;
-                        case 98:
-                            highscores.ModeName = "Arcade";
-                            break;
-                        case 99:
-                            highscores.ModeName = "Free Play";
-                            break;
-                        default:
-                            highscores.ModeName = "none";
-                            break;
-                    }
-                }
-                // No SaveChanges here - every call site persists this via its own SaveChangesAsync()
-                // right after (Add() for the POST endpoints, CurrentValues.SetValues() for
-                // PutHighscore), so a SaveChanges call in here would either do nothing yet (POST) or
-                // be redundant (PUT). It used to run once per loop iteration in
-                // PostUnSubmittedHighscore, which meant a sync, blocking round-trip that flushed
-                // previously-added-but-unsaved rows
-                // early - the batch's single SaveChangesAsync() after the loop is enough.
-            }
-
-            // Same idea as ModeName above: fall back to the DB column's own default instead of
-            // requiring every client to send this explicitly.
-            if (String.IsNullOrEmpty(highscores.SniperModeName))
-            {
-                highscores.SniperModeName = "none";
-            }
-
-            highscores.Difficulty ??= 1;
         }
 
         private static void HideHighScoreDetails(List<Highscore> highscores)

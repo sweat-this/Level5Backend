@@ -4,11 +4,9 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Level5Backend.Models;
 
-// StringLength caps below mirror the column widths declared in Level5Context - without them, an
-// over-length value wasn't rejected until Postgres threw on insert, surfacing as a 500 instead of
-// a 400. Ipaddress is deliberately left unannotated: HighscoresApiController always overwrites it
-// with a server-derived value, so validating whatever a client happened to send there would just
-// reject otherwise-valid requests for a field that's discarded anyway.
+// StringLength caps mirror the persisted column widths declared in Level5Context. The legacy V1
+// API now treats Highscore as a read-only historical model; its existing nullable and unannotated
+// fields remain aligned with the stored schema rather than defining a mutation request contract.
 public partial class Highscore
 {
     public int Id { get; set; }
@@ -48,11 +46,8 @@ public partial class Highscore
     [Required, StringLength(45)]
     public string Date { get; set; } = null!;
 
-    // Nullable so omitting it can be told apart from explicitly sending 0 - the DB column defaults
-    // this to 1, but EF always writes an explicit value on insert (it doesn't fall back to SQL
-    // defaults for values it's given), so a plain non-nullable int would have silently stored 0
-    // for any client that left this out, instead of the intended default. updateModeName backfills
-    // it the same way it already does for ModeName/SniperModeName.
+    // Nullable to preserve the historical model and schema shape. The database default remains 1,
+    // but the retired V1 score API no longer inserts or updates this value.
     public int? Difficulty { get; set; }
 
     public float Time { get; set; }
@@ -77,10 +72,8 @@ public partial class Highscore
 
     public int SniperMode { get; set; }
 
-    // Nullable, not [Required] - the DB column defaults this to 'none' (see Level5Context), which
-    // only ever takes effect if EF is told to omit the value entirely; a non-nullable/required C#
-    // property meant no client could submit a score without explicitly sending this. updateModeName
-    // below now backfills it the same way it already does for ModeName.
+    // Nullable to preserve historical rows and the existing database contract. The database
+    // default remains 'none' (see Level5Context), but V1 score mutations are retired.
     [StringLength(45)]
     public string? SniperModeName { get; set; }
 
