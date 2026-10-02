@@ -35,8 +35,11 @@ database outages, and a scripted local database workflow (see
 future hosted deployment: a dedicated non-root deployment image, a pinned local `dotnet-ef` tool,
 and a deterministic EF migration bundle, all built and verified by CI on every push/PR (see
 [Deployment artifacts](#deployment-artifacts)) - no hosting provider, PostgreSQL instance, or
-staging/production environment has been selected or provisioned by this repository. Not yet built:
-leaderboards, richer profiles, notifications, anything in the
+staging/production environment has been selected or provisioned by this repository. V2 also has
+authenticated general match-result ingestion and server-policy-ranked, modifier-filterable,
+cursor-paginated leaderboards; their authority boundary is defined in the
+[general match-result and leaderboard trust contract](docs/general-match-result-leaderboard-trust-contract.md).
+Not yet built: richer profiles, notifications, anything in the
 [Non-goals](#non-goals-for-this-slice) list below.
 
 ## Why a separate solution
@@ -111,8 +114,14 @@ assembly.
   [Friends: requests and friendship lifecycle](#friends-requests-and-friendship-lifecycle).
 - **Competition** (`Level5.Domain.Competition`): `VersusSeries`, the aggregate root for a
   correspondence match. See [Competition domain](#competition-domain-versusseries) below.
+- **Results** (`Level5.Domain.Results`): immutable, authenticated client-reported ordinary-match
+  results, with server-derived player identity and receipt time. See the
+  [general match-result and leaderboard trust contract](docs/general-match-result-leaderboard-trust-contract.md).
+- **Leaderboards** (`Level5.Domain.Leaderboards` plus application/infrastructure policy and query
+  seams): server-owned mode policies, deterministic ordering, optional modifier filters, and
+  bounded cursor pagination over eligible ordinary results.
 
-Deliberately not modeled yet: leaderboards, progression, matchmaking, notifications - see
+Deliberately not modeled yet: progression, matchmaking, notifications - see
 [Non-goals](#non-goals-for-this-slice).
 
 ## Competition domain: `VersusSeries`
@@ -779,7 +788,8 @@ Identity password hashing + minimal-claim JWTs + rotating refresh sessions vs. t
 scheme), identifiers (UUIDv7 vs. sequential ints), timestamps (`DateTimeOffset` vs. formatted
 strings), persistence model (domain-derived hybrid schema vs. a scaffolded 1:1 table mapping).
 
-**Deferred (explicitly out of scope for this slice):** highscores/leaderboards, `ServerStats`,
+**Deferred (explicitly out of scope for this slice):** migration of legacy highscore/leaderboard
+data into V2, `ServerStats`,
 `ServerMessages`, `UserReport`, admin/dev endpoints (including any account-status-changing
 endpoint - disabling an account is still a direct-database operation, see
 [Authentication and sessions](#authentication-and-sessions)), email verification, password reset,

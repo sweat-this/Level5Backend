@@ -94,6 +94,27 @@ public sealed class LeaderboardsFlowTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Every_accepted_result_remains_visible_for_the_same_player_across_levels()
+    {
+        const int modeId = 8; // CompletionTimeSeconds / LowerWins, exclusive to this test
+        var alice = await factory.RegisterNewPlayerAsync("LBMultiResultAlice");
+        await SubmitAsync(alice, modeId, totalPoints: 20, metric: "CompletionTimeSeconds", levelId: 2);
+        await SubmitAsync(alice, modeId, totalPoints: 10, metric: "CompletionTimeSeconds", levelId: 11);
+
+        var response = await alice.Client.GetAsync($"/api/v2/leaderboards/{modeId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+        var items = page.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.All(
+            items,
+            item => Assert.Equal(alice.PlayerId, item.GetProperty("player").GetProperty("playerId").GetGuid()));
+        Assert.Equal([11, 2], items.Select(item => item.GetProperty("levelId").GetInt32()));
+        Assert.Equal([10, 20], items.Select(item => item.GetProperty("value").GetDouble()));
+    }
+
+    [Fact]
     public async Task Public_player_identity_is_projected_and_private_fields_are_never_serialized()
     {
         const int modeId = 16;
