@@ -75,16 +75,37 @@ public sealed class VersusSeriesStore(Level5V2DbContext db) : IVersusSeriesStore
                 (r.ChallengerId == playerId.Value || r.OpponentId == playerId.Value) && TerminalStatusNames.Contains(r.Status)),
             limit, cursor, SeriesListPaging.HistoryScope, cancellationToken);
 
-    public async Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<StalePendingChallengeCandidate>> FindStalePendingChallengeCandidatesAsync(
+        DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
     {
-        var ids = await db.VersusSeries.AsNoTracking()
+        var candidates = await db.VersusSeries.AsNoTracking()
             .Where(r => r.Status == nameof(SeriesStatus.PendingAcceptance) && r.CreatedAt < cutoff)
-            .OrderBy(r => r.CreatedAt)
+            .OrderBy(r => r.CreatedAt).ThenBy(r => r.Id)
             .Take(batchSize)
-            .Select(r => r.Id)
+            .Select(r => new { r.Id, r.Revision })
             .ToListAsync(cancellationToken);
 
-        return [.. ids.Select(id => new VersusSeriesId(id))];
+        return [.. candidates.Select(candidate => new StalePendingChallengeCandidate(
+            new VersusSeriesId(candidate.Id), candidate.Revision))];
+    }
+
+    public async Task<bool> TryExpireStalePendingChallengeAsync(
+        VersusSeriesId id, long expectedRevision, DateTimeOffset cutoff, DateTimeOffset expiredAt,
+        CancellationToken cancellationToken)
+    {
+        var affected = await db.VersusSeries
+            .Where(r => r.Id == id.Value
+                && r.Status == nameof(SeriesStatus.PendingAcceptance)
+                && r.Revision == expectedRevision
+                && r.CreatedAt < cutoff)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(r => r.Status, nameof(SeriesStatus.Expired))
+                .SetProperty(r => r.Revision, expectedRevision + 1)
+                .SetProperty(r => r.UpdatedAt, expiredAt)
+                .SetProperty(r => r.CompletedAt, expiredAt),
+                cancellationToken);
+
+        return affected == 1;
     }
 
     /// <summary>Intermediate EF projection for a summary row - carries the actual creation time (for the DTO) separately from the keyset sort key, which differs between queries (see <see cref="PageByCompletedAtAsync"/>).</summary>

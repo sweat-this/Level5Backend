@@ -91,17 +91,37 @@ public sealed class InMemoryVersusSeriesStore : IVersusSeriesStore
             _rows.Values.Where(s => (s.ChallengerId == playerId || s.OpponentId == playerId) && TerminalStatuses.Contains(s.Status)),
             s => s.CompletedAt ?? s.CreatedAt, limit, cursor, SeriesListPaging.HistoryScope));
 
-    public Task<IReadOnlyList<VersusSeriesId>> FindStalePendingChallengeIdsAsync(DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<StalePendingChallengeCandidate>> FindStalePendingChallengeCandidatesAsync(
+        DateTimeOffset cutoff, int batchSize, CancellationToken cancellationToken)
     {
-        IReadOnlyList<VersusSeriesId> ids =
+        IReadOnlyList<StalePendingChallengeCandidate> candidates =
         [
             .. _rows.Values
                 .Where(s => s.Status == SeriesStatus.PendingAcceptance && s.CreatedAt < cutoff)
-                .OrderBy(s => s.CreatedAt)
+                .OrderBy(s => s.CreatedAt).ThenBy(s => s.Id.Value)
                 .Take(batchSize)
-                .Select(s => s.Id)
+                .Select(s => new StalePendingChallengeCandidate(s.Id, _storedRevisions[s.Id.Value]))
         ];
-        return Task.FromResult(ids);
+        return Task.FromResult(candidates);
+    }
+
+    public Task<bool> TryExpireStalePendingChallengeAsync(
+        VersusSeriesId id, long expectedRevision, DateTimeOffset cutoff, DateTimeOffset expiredAt,
+        CancellationToken cancellationToken)
+    {
+        if (!_rows.TryGetValue(id.Value, out var series)
+            || _storedRevisions[id.Value] != expectedRevision
+            || series.Status != SeriesStatus.PendingAcceptance
+            || series.CreatedAt >= cutoff)
+        {
+            return Task.FromResult(false);
+        }
+
+        var updated = Clone(series);
+        updated.Expire(expiredAt);
+        _rows[id.Value] = updated;
+        _storedRevisions[id.Value] = updated.Revision;
+        return Task.FromResult(true);
     }
 
     /// <summary>
