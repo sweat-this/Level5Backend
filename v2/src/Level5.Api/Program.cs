@@ -149,23 +149,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 
 builder.Services.AddAuthorization();
 
-// Shared by register/login - both are brute-force/enumeration surfaces. Kept tight in
-// Production; relaxed elsewhere so local dev and the integration test suite (which share one
-// partition key under TestServer, since it has no real remote IP) aren't rate-limited against
-// each other.
+// Each auth operation has its own per-IP budget so traffic to one endpoint cannot starve the
+// others. This intentionally increases the theoretical Production aggregate for one IP from five
+// auth requests/minute total to five requests/minute for each of four operations; there is no
+// second aggregate limiter. Non-Production stays relaxed so local development and integration
+// tests that share TestServer's partition key do not interfere with one another.
 var authRequestLimit = builder.Environment.IsProduction() ? 5 : 1000;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("AuthPolicy", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = authRequestLimit,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
+    options.AddPolicy(AuthRateLimitPolicyNames.Register,
+        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+    options.AddPolicy(AuthRateLimitPolicyNames.Login,
+        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+    options.AddPolicy(AuthRateLimitPolicyNames.Refresh,
+        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+    options.AddPolicy(AuthRateLimitPolicyNames.Logout,
+        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
 });
 
 var app = builder.Build();
@@ -204,6 +204,16 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 });
 
 app.Run();
+
+static RateLimitPartition<string> CreateAuthRateLimitPartition(HttpContext httpContext, int permitLimit) =>
+    RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permitLimit,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
 
 // Exposed for WebApplicationFactory-based integration tests.
 public partial class Program;
