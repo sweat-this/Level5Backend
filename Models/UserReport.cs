@@ -9,9 +9,9 @@ public partial class UserReport
 
     public string Report { get; set; } = null!;
 
-    public int Userid { get; set; }
+    public int? Userid { get; set; }
 
-    public string UserName { get; set; } = null!;
+    public string? UserName { get; set; }
 
     public string Os { get; set; } = null!;
 
