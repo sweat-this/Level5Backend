@@ -1,4 +1,5 @@
 using Level5Backend.Models;
+using Level5Backend.RateLimiting;
 using Level5Backend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
@@ -117,6 +118,13 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+    // Anonymous bug reports need a bounded abuse budget without sharing counters with login or
+    // registration. The client IP is the only server-observed partition available to this legacy
+    // anonymous endpoint.
+    options.AddPolicy(UserReportRateLimitPolicy.Name, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: UserReportRateLimitPolicy.GetPartitionKey(httpContext),
+            factory: _ => UserReportRateLimitPolicy.CreateOptions()));
 });
 
 var app = builder.Build();

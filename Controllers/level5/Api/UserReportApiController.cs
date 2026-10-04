@@ -6,7 +6,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Level5Backend.Models;
+using Level5Backend.RateLimiting;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Level5Backend.Controllers
 {
@@ -45,35 +47,38 @@ namespace Level5Backend.Controllers
                 .ToListAsync();
         }
 
+        [EnableRateLimiting(UserReportRateLimitPolicy.Name)]
         [HttpPost]
         public async Task<ActionResult<User>> PostUserReport(UserReport userReport)
         {
-            // Deliberately not [Authorize] - reports may legitimately come in before login (e.g. a
-            // crash report). But when a valid token IS present, trust it over whatever Userid/
-            // UserName the client put in the body - those fields aren't otherwise verified against
-            // the caller at all.
-            if (TryGetCallerUserid(out int callerUserid))
-            {
-                userReport.Userid = callerUserid;
-                userReport.UserName = User.FindFirst("username")?.Value ?? userReport.UserName;
-            }
-
-            // server-derived, never trust whatever the client put in the request body - same as
-            // Highscore.Ipaddress
-            userReport.Ipaddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-            // empty text
-            if (String.IsNullOrEmpty(userReport.Report))
+            if (string.IsNullOrWhiteSpace(userReport.Report) || userReport.Report.Length > 255)
             {
                 return BadRequest();
             }
-            // text exists
-            if (await ReportTextExistsAsync(userReport.Userid, userReport.Report))
+
+            // Report submission deliberately remains anonymous-capable. Attribution is all-or-
+            // nothing: only the complete signed claim pair issued by TokenController is trusted.
+            // Local profile/body identity is never an authenticated server principal.
+            userReport.Userid = null;
+            userReport.UserName = null;
+            if (TryGetAuthenticatedReporter(out int callerUserid, out string callerUserName))
+            {
+                userReport.Userid = callerUserid;
+                userReport.UserName = callerUserName;
+            }
+
+            // Server-derived, never trust request values for network or receipt metadata.
+            userReport.Ipaddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+            userReport.Date = DateTime.UtcNow;
+
+            // Exact-text deduplication only has meaning for authenticated legacy attribution.
+            // Anonymous callers submitting the same text are not proven to be the same person.
+            if (userReport.Userid.HasValue
+                && await ReportTextExistsAsync(userReport.Userid.Value, userReport.Report))
             {
                 return Conflict();
             }
 
-            userReport.Date = DateTime.UtcNow;
             try
             {
                 _context.UserReports.Add(userReport);
@@ -99,12 +104,26 @@ namespace Level5Backend.Controllers
             return await _context.UserReports.AnyAsync(e => e.Userid == userid && e.Report == report);
         }
 
-        // the JWT issued by TokenController carries the authenticated user's id as a "Userid"
-        // claim - false here just means no valid token was presented, not an error.
-        private bool TryGetCallerUserid(out int userid)
+        private bool TryGetAuthenticatedReporter(out int userid, out string userName)
         {
-            var claim = User.FindFirst("Userid")?.Value;
-            return int.TryParse(claim, out userid);
+            userid = default;
+            userName = string.Empty;
+
+            if (User.Identity?.IsAuthenticated != true
+                || !int.TryParse(User.FindFirst("Userid")?.Value, out userid))
+            {
+                return false;
+            }
+
+            string? usernameClaim = User.FindFirst("username")?.Value;
+            if (string.IsNullOrWhiteSpace(usernameClaim))
+            {
+                userid = default;
+                return false;
+            }
+
+            userName = usernameClaim;
+            return true;
         }
     }
 }
