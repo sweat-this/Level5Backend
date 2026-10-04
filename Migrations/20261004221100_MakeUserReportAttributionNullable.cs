@@ -32,6 +32,17 @@ namespace Level5Backend.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // Reports accepted anonymously after Up() have no attribution. Restore the historical
+            // client sentinel before reapplying NOT NULL so an emergency rollback remains viable.
+            // Treat either missing half as anonymous to preserve the pair's all-or-nothing invariant.
+            migrationBuilder.Sql(
+                """
+                UPDATE "UserReport"
+                SET "userid" = 999,
+                    "userName" = 'not logged in'
+                WHERE "userid" IS NULL OR "userName" IS NULL;
+                """);
+
             migrationBuilder.AlterColumn<int>(
                 name: "userid",
                 table: "UserReport",

@@ -2,10 +2,12 @@ using Level5Backend.Models;
 using Level5Backend.RateLimiting;
 using Level5Backend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Net;
 using System.Text;
 using System.Threading.RateLimiting;
 
@@ -65,6 +67,26 @@ builder.Services.AddHostedService<ServerStatsBackgroundService>();
 // For container/orchestrator liveness-readiness probes - there was previously no way to tell from
 // outside the process whether the app could actually reach Postgres.
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
+
+// The public API is reached through Cloudflare. Only configured proxy addresses may replace the
+// connection address with X-Forwarded-For; trusting forwarded headers from arbitrary callers would
+// let them choose their own rate-limit partition and forge the IP stored with a report.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+
+    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+    {
+        options.KnownProxies.Add(IPAddress.Parse(proxy));
+    }
+
+    foreach (var network in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [])
+    {
+        var cidr = System.Net.IPNetwork.Parse(network);
+        options.KnownIPNetworks.Add(cidr);
+    }
+});
 
 // TokenController issues JWTs signed with Jwt:Key/Issuer/Audience; without registering a matching
 // authentication scheme here, every [Authorize]-protected endpoint 500s instead of 401ing, since
@@ -128,6 +150,8 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+// Must run before every consumer of RemoteIpAddress, including report attribution and rate limits.
+app.UseForwardedHeaders();
 // First so it can catch exceptions thrown by everything downstream, including other middleware.
 app.UseExceptionHandler();
 
@@ -153,3 +177,6 @@ app.UseRateLimiter();
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.Run();
+
+// Exposed for WebApplicationFactory-based middleware integration tests.
+public partial class Program;
