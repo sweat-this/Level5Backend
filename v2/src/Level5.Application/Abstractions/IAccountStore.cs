@@ -21,4 +21,13 @@ public interface IAccountStore
 
     /// <summary>Stages only private email and verification fields for the next unit-of-work commit.</summary>
     Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Atomically advances the account's session generation when it still matches the generation
+    /// validated by the caller's active security session.
+    /// </summary>
+    Task<bool> TryAdvanceSessionGenerationAsync(
+        AccountId accountId,
+        long expectedSessionGeneration,
+        CancellationToken cancellationToken);
 }

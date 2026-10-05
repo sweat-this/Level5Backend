@@ -66,10 +66,12 @@ public sealed class Account
     /// <summary>Changes the user credential and invalidates every older refresh-session generation.</summary>
     public void ChangePassword(string newPasswordHash)
     {
-        var nextGeneration = checked(SessionGeneration + 1);
         PasswordHash = newPasswordHash;
-        SessionGeneration = nextGeneration;
+        AdvanceSessionGeneration();
     }
+
+    /// <summary>Invalidates every refresh session stamped with the current generation.</summary>
+    public void AdvanceSessionGeneration() => SessionGeneration = checked(SessionGeneration + 1);
 
     /// <summary>
     /// Installs an unverified recovery-email candidate. A verified address is immutable here:

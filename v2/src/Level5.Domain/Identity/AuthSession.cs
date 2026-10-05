@@ -17,8 +17,10 @@ public sealed class AuthSession
     public AccountId AccountId { get; private set; }
     public string RefreshTokenHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset LastRefreshedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
+    public ClientKind ClientKind { get; private set; }
     public long SessionGeneration { get; private set; }
     public long Revision { get; private set; }
 
@@ -27,8 +29,10 @@ public sealed class AuthSession
         AccountId accountId,
         string refreshTokenHash,
         DateTimeOffset createdAt,
+        DateTimeOffset lastRefreshedAt,
         DateTimeOffset expiresAt,
         DateTimeOffset? revokedAt,
+        ClientKind clientKind,
         long revision,
         long sessionGeneration)
     {
@@ -36,25 +40,37 @@ public sealed class AuthSession
         AccountId = accountId;
         RefreshTokenHash = refreshTokenHash;
         CreatedAt = createdAt;
+        LastRefreshedAt = lastRefreshedAt;
         ExpiresAt = expiresAt;
         RevokedAt = revokedAt;
+        ClientKind = clientKind;
         Revision = revision;
         SessionGeneration = sessionGeneration;
     }
 
-    public static AuthSession Create(AccountId accountId, string refreshTokenHash, DateTimeOffset now, TimeSpan lifetime, long sessionGeneration = 0)
-        => new(AuthSessionId.New(), accountId, refreshTokenHash, now, now + lifetime, revokedAt: null, revision: 0, sessionGeneration);
+    public static AuthSession Create(
+        AccountId accountId,
+        string refreshTokenHash,
+        DateTimeOffset now,
+        TimeSpan lifetime,
+        long sessionGeneration = 0,
+        ClientKind clientKind = ClientKind.Unknown)
+        => new(AuthSessionId.New(), accountId, refreshTokenHash, now, now, now + lifetime,
+            revokedAt: null, clientKind, revision: 0, sessionGeneration);
 
     public static AuthSession Rehydrate(
         AuthSessionId id,
         AccountId accountId,
         string refreshTokenHash,
         DateTimeOffset createdAt,
+        DateTimeOffset lastRefreshedAt,
         DateTimeOffset expiresAt,
         DateTimeOffset? revokedAt,
+        ClientKind clientKind,
         long revision,
         long sessionGeneration = 0)
-        => new(id, accountId, refreshTokenHash, createdAt, expiresAt, revokedAt, revision, sessionGeneration);
+        => new(id, accountId, refreshTokenHash, createdAt, lastRefreshedAt, expiresAt, revokedAt,
+            clientKind, revision, sessionGeneration);
 
     /// <summary>Whether the current refresh credential on this session can still be exchanged for a new access token.</summary>
     public bool CanRefresh(DateTimeOffset now) => RevokedAt is null && now < ExpiresAt;
@@ -76,6 +92,7 @@ public sealed class AuthSession
         }
 
         RefreshTokenHash = newRefreshTokenHash;
+        LastRefreshedAt = now;
         ExpiresAt = now + lifetime;
         Revision++;
     }

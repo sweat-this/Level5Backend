@@ -66,6 +66,7 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code),
         Level5.Application.Identity.InvalidCredentialsException e => (StatusCodes.Status401Unauthorized, e.Code),
         Level5.Application.Identity.InvalidRefreshTokenException e => (StatusCodes.Status401Unauthorized, e.Code),
+        Level5.Application.Identity.ReauthenticationRequiredException e => (StatusCodes.Status401Unauthorized, e.Code),
         Level5.Application.Identity.InvalidPasswordResetException e => (StatusCodes.Status400BadRequest, e.Code),
         Level5.Application.Identity.CurrentPasswordInvalidException e => (StatusCodes.Status401Unauthorized, e.Code),
         Level5.Application.Identity.AccountSecurityActionForbiddenException e => (StatusCodes.Status403Forbidden, e.Code),

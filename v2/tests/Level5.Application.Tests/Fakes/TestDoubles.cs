@@ -67,8 +67,8 @@ public sealed class FakePasswordHasher : IPasswordHasher
 
 public sealed class FakeTokenIssuer : ITokenIssuer
 {
-    public AccessToken IssueAccessToken(AccountId accountId)
-        => new($"token-for-{accountId}", DateTimeOffset.UtcNow.AddMinutes(15));
+    public AccessToken IssueAccessToken(AccountId accountId, AuthSessionId authSessionId)
+        => new($"token-for-{accountId}-{authSessionId}", DateTimeOffset.UtcNow.AddMinutes(15));
 }
 
 public sealed class NoOpUnitOfWork : IUnitOfWork
@@ -282,8 +282,60 @@ public sealed class InMemoryAuthSessionStore : IAuthSessionStore
     public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
         => TrySaveAsync(session, expectedRevision, cancellationToken);
 
+    public Task<long?> FindActiveGenerationAsync(AccountId accountId, AuthSessionId sessionId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var session = _rows.GetValueOrDefault(sessionId.Value);
+        return Task.FromResult(session is not null && session.AccountId == accountId && session.CanRefresh(now)
+            ? (long?)session.SessionGeneration
+            : null);
+    }
+
+    public Task<IReadOnlyList<AuthSessionSummary>> ListActiveAsync(
+        AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<AuthSessionSummary> result = _rows.Values
+            .Where(session => session.AccountId == accountId &&
+                              session.SessionGeneration == sessionGeneration &&
+                              session.CanRefresh(now))
+            .OrderByDescending(session => session.LastRefreshedAt)
+            .ThenByDescending(session => session.CreatedAt)
+            .ThenByDescending(session => session.Id.Value)
+            .Select(session => new AuthSessionSummary(
+                session.Id, session.ClientKind, session.CreatedAt, session.LastRefreshedAt,
+                session.ExpiresAt, session.Id == currentSessionId))
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task RevokeActiveAsync(
+        AccountId accountId, AuthSessionId sessionId, long sessionGeneration,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var session = _rows.GetValueOrDefault(sessionId.Value);
+        if (session is not null && session.AccountId == accountId &&
+            session.SessionGeneration == sessionGeneration && session.CanRefresh(now))
+        {
+            session.Revoke(now);
+            _storedRevisions[session.Id.Value] = session.Revision;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async Task RevokeOtherActiveAsync(
+        AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        foreach (var session in _rows.Values.Where(session => session.Id != currentSessionId))
+        {
+            await RevokeActiveAsync(accountId, session.Id, sessionGeneration, now, cancellationToken);
+        }
+    }
+
     private static AuthSession Clone(AuthSession source) => AuthSession.Rehydrate(
-        source.Id, source.AccountId, source.RefreshTokenHash, source.CreatedAt, source.ExpiresAt, source.RevokedAt, source.Revision, source.SessionGeneration);
+        source.Id, source.AccountId, source.RefreshTokenHash, source.CreatedAt, source.LastRefreshedAt,
+        source.ExpiresAt, source.RevokedAt, source.ClientKind, source.Revision, source.SessionGeneration);
 }
 
 /// <summary>Simulates a genuine infrastructure failure (e.g. the database is unreachable) on every lookup, to prove RefreshSessionUseCase/LogoutUseCase let it propagate rather than mistranslating it into an auth failure.</summary>
@@ -303,6 +355,18 @@ public sealed class ThrowingAuthSessionStore : IAuthSessionStore
 
     public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
         => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task<long?> FindActiveGenerationAsync(AccountId accountId, AuthSessionId sessionId, DateTimeOffset now, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task<IReadOnlyList<AuthSessionSummary>> ListActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task RevokeActiveAsync(AccountId accountId, AuthSessionId sessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task RevokeOtherActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
 }
 
 /// <summary>Delegates reads to a real store but fails the write - simulates the database going down between loading a session and persisting its rotation/revocation.</summary>
@@ -321,6 +385,18 @@ public sealed class ThrowingOnSaveAuthSessionStore(IAuthSessionStore inner) : IA
         => throw new InvalidOperationException("Simulated infrastructure failure.");
 
     public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task<long?> FindActiveGenerationAsync(AccountId accountId, AuthSessionId sessionId, DateTimeOffset now, CancellationToken cancellationToken)
+        => inner.FindActiveGenerationAsync(accountId, sessionId, now, cancellationToken);
+
+    public Task<IReadOnlyList<AuthSessionSummary>> ListActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
+        => inner.ListActiveAsync(accountId, currentSessionId, sessionGeneration, now, cancellationToken);
+
+    public Task RevokeActiveAsync(AccountId accountId, AuthSessionId sessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task RevokeOtherActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken)
         => throw new InvalidOperationException("Simulated infrastructure failure.");
 }
 
@@ -356,5 +432,17 @@ public sealed class InMemoryAccountStore : IAccountStore
     {
         _accounts[account.Id.Value] = account;
         return Task.CompletedTask;
+    }
+
+    public Task<bool> TryAdvanceSessionGenerationAsync(AccountId accountId, long expectedSessionGeneration, CancellationToken cancellationToken)
+    {
+        if (!_accounts.TryGetValue(accountId.Value, out var account) ||
+            account.SessionGeneration != expectedSessionGeneration)
+        {
+            return Task.FromResult(false);
+        }
+
+        account.AdvanceSessionGeneration();
+        return Task.FromResult(true);
     }
 }

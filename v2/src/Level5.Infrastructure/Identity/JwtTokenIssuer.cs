@@ -10,11 +10,12 @@ namespace Level5.Infrastructure.Identity;
 
 /// <summary>
 /// Issues short-lived JWT access tokens. The token carries only what authorization needs - the
-/// account id as <c>sub</c> - and never email, name, or other profile data.
+/// account id as <c>sub</c> and originating auth-session id as <c>sid</c> - and never email,
+/// name, session generation, or other profile/session data.
 /// </summary>
 public sealed class JwtTokenIssuer(IOptions<JwtOptions> options, IClock clock) : ITokenIssuer
 {
-    public AccessToken IssueAccessToken(AccountId accountId)
+    public AccessToken IssueAccessToken(AccountId accountId, AuthSessionId authSessionId)
     {
         var settings = options.Value;
         var expiresAt = clock.UtcNow.AddMinutes(settings.AccessTokenLifetimeMinutes);
@@ -22,6 +23,7 @@ public sealed class JwtTokenIssuer(IOptions<JwtOptions> options, IClock clock) :
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, accountId.Value.ToString()),
+            new Claim(JwtRegisteredClaimNames.Sid, authSessionId.Value.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.CreateVersion7().ToString())
         };
 

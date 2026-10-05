@@ -63,6 +63,22 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
         row.EmailVerifiedAt = account.EmailVerifiedAt;
     }
 
+    public async Task<bool> TryAdvanceSessionGenerationAsync(
+        AccountId accountId,
+        long expectedSessionGeneration,
+        CancellationToken cancellationToken)
+    {
+        var activeStatus = AccountStatus.Active.ToString();
+        var affected = await db.Accounts
+            .Where(account => account.Id == accountId.Value &&
+                              account.Status == activeStatus &&
+                              account.SessionGeneration == expectedSessionGeneration)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(account => account.SessionGeneration, account => account.SessionGeneration + 1),
+                cancellationToken);
+        return affected == 1;
+    }
+
     private static Account ToDomain(AccountRow row)
         => Account.Rehydrate(
             new AccountId(row.Id),

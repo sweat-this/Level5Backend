@@ -6,7 +6,11 @@ using Level5.Domain.Players;
 
 namespace Level5.Application.Identity;
 
-public sealed record RegisterAccountRequest(string Username, string Password, string DisplayName);
+public sealed record RegisterAccountRequest(
+    string Username,
+    string Password,
+    string DisplayName,
+    ClientKind ClientKind = ClientKind.Unknown);
 
 public sealed record RegisterAccountResult(
     AccountId AccountId,
@@ -56,12 +60,14 @@ public sealed class RegisterAccountUseCase(
         await playerProfileStore.AddAsync(profile, cancellationToken);
 
         var refreshToken = refreshTokenGenerator.Generate();
-        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime, account.SessionGeneration);
+        var session = AuthSession.Create(
+            account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime,
+            account.SessionGeneration, request.ClientKind);
         await authSessionStore.AddAsync(session, cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var accessToken = tokenIssuer.IssueAccessToken(account.Id);
+        var accessToken = tokenIssuer.IssueAccessToken(account.Id, session.Id);
         return new RegisterAccountResult(account.Id, profile.Id, tag.Value, accessToken, refreshToken.RawValue, session.ExpiresAt);
     }
 

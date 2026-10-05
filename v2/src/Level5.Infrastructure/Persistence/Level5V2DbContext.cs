@@ -55,6 +55,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasKey(e => e.Id);
             // SHA-256 hex digest is 64 chars; headroom left in case the hashing scheme changes.
             entity.Property(e => e.RefreshTokenHash).HasMaxLength(128);
+            entity.Property(e => e.ClientKind).HasMaxLength(16);
             entity.HasIndex(e => e.RefreshTokenHash).IsUnique();
             entity.HasIndex(e => e.AccountId);
             // The optimistic-concurrency token: rotation/revocation writes are conditioned on this
