@@ -909,6 +909,83 @@
         }
       }
     },
+    "/api/v2/platform/me/entitlements": {
+      "get": {
+        "tags": [
+          "PlatformEntitlements"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActiveEntitlementResponseDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActiveEntitlementResponseDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ActiveEntitlementResponseDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/platform/me/entitlements/{productId}": {
+      "get": {
+        "tags": [
+          "PlatformEntitlements"
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductAccessResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductAccessResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductAccessResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/players/by-tag/{tag}": {
       "get": {
         "tags": [
@@ -1674,6 +1751,23 @@
         },
         "additionalProperties": false
       },
+      "ActiveEntitlementResponseDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "AttemptDescriptorDto": {
         "type": "object",
         "properties": {
@@ -2208,6 +2302,27 @@
         },
         "additionalProperties": false
       },
+      "ProductAccessResponseDto": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "hasAccess": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "PublicPlayerSummaryDto": {
         "type": "object",
         "properties": {
@@ -2528,6 +2643,9 @@
     },
     {
       "name": "MatchResults"
+    },
+    {
+      "name": "PlatformEntitlements"
     },
     {
       "name": "Players"
