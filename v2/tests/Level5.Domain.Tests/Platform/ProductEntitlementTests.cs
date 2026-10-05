@@ -96,6 +96,29 @@ public sealed class ProductEntitlementTests
     }
 
     [Fact]
+    public void Grant_rejects_an_undefined_entitlement_kind()
+    {
+        Assert.Throws<InvalidEntitlementKindException>(() => ProductEntitlement.Grant(
+            _playerId,
+            Level5,
+            (EntitlementKind)999,
+            Now));
+    }
+
+    [Fact]
+    public void Rehydrate_rejects_an_undefined_entitlement_kind()
+    {
+        Assert.Throws<InvalidEntitlementKindException>(() => ProductEntitlement.Rehydrate(
+            _playerId,
+            Level5,
+            (EntitlementKind)999,
+            Now,
+            expiresAt: null,
+            revokedAt: null,
+            revision: 0));
+    }
+
+    [Fact]
     public void Rejected_regrant_does_not_change_current_state_or_revision()
     {
         var entitlement = ProductEntitlement.Grant(_playerId, Level5, EntitlementKind.Owned, Now);
@@ -104,6 +127,21 @@ public sealed class ProductEntitlementTests
             EntitlementKind.Demo,
             Now.AddHours(1),
             Now.AddMinutes(30)));
+
+        Assert.Equal(EntitlementKind.Owned, entitlement.Kind);
+        Assert.Equal(Now, entitlement.GrantedAt);
+        Assert.Null(entitlement.ExpiresAt);
+        Assert.Equal(0, entitlement.Revision);
+    }
+
+    [Fact]
+    public void Rejected_regrant_with_an_undefined_kind_does_not_change_current_state_or_revision()
+    {
+        var entitlement = ProductEntitlement.Grant(_playerId, Level5, EntitlementKind.Owned, Now);
+
+        Assert.Throws<InvalidEntitlementKindException>(() => entitlement.Regrant(
+            (EntitlementKind)999,
+            Now.AddHours(1)));
 
         Assert.Equal(EntitlementKind.Owned, entitlement.Kind);
         Assert.Equal(Now, entitlement.GrantedAt);

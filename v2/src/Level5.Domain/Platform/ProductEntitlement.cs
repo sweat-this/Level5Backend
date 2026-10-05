@@ -42,6 +42,7 @@ public sealed class ProductEntitlement
         DateTimeOffset now,
         DateTimeOffset? expiresAt = null)
     {
+        ValidateKind(kind);
         ValidateExpiry(now, expiresAt);
         return new ProductEntitlement(playerId, productId, kind, now, expiresAt, revokedAt: null, revision: 0);
     }
@@ -54,7 +55,10 @@ public sealed class ProductEntitlement
         DateTimeOffset? expiresAt,
         DateTimeOffset? revokedAt,
         long revision)
-        => new(playerId, productId, kind, grantedAt, expiresAt, revokedAt, revision);
+    {
+        ValidateKind(kind);
+        return new ProductEntitlement(playerId, productId, kind, grantedAt, expiresAt, revokedAt, revision);
+    }
 
     public bool HasAccess(DateTimeOffset now)
         => RevokedAt is null && (ExpiresAt is null || now < ExpiresAt.Value);
@@ -62,6 +66,7 @@ public sealed class ProductEntitlement
     /// <summary>Replaces the current grant deliberately; no entitlement-kind precedence exists.</summary>
     public void Regrant(EntitlementKind kind, DateTimeOffset now, DateTimeOffset? expiresAt = null)
     {
+        ValidateKind(kind);
         ValidateExpiry(now, expiresAt);
         Kind = kind;
         GrantedAt = now;
@@ -82,12 +87,29 @@ public sealed class ProductEntitlement
         Revision++;
     }
 
+    private static void ValidateKind(EntitlementKind kind)
+    {
+        if (!Enum.IsDefined(kind))
+        {
+            throw new InvalidEntitlementKindException("Entitlement kind is not recognized.");
+        }
+    }
+
     private static void ValidateExpiry(DateTimeOffset grantedAt, DateTimeOffset? expiresAt)
     {
         if (expiresAt is not null && expiresAt <= grantedAt)
         {
             throw new InvalidEntitlementExpiryException("Entitlement expiry must be later than its grant time.");
         }
+    }
+}
+
+public sealed class InvalidEntitlementKindException : DomainException
+{
+    public override string Code => "invalid_entitlement_kind";
+
+    public InvalidEntitlementKindException(string message) : base(message)
+    {
     }
 }
 
