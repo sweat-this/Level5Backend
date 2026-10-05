@@ -11,6 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reject tracked build output
+        shell: bash
+        run: |
+          if git ls-files | grep -Eq '(^|/)(bin|obj)/'; then
+            echo "::error::Generated build output under bin/ or obj/ must not be committed."
+            exit 1
+          fi
+
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
