@@ -33,7 +33,9 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         // auth.login.failure / reason_category
         "bad_username_format", "unknown_account", "bad_password", "account_disabled",
         // auth.refresh.outcome / outcome
-        "success", "unknown", "expired", "revoked", "account_inactive", "replay_conflict",
+        "success", "unknown", "expired", "revoked", "account_inactive", "generation_mismatch", "replay_conflict",
+        // auth.password_recovery.delivery / outcome
+        "delivered", "unavailable", "faulted",
         // series.concurrency.conflict / operation
         "start_attempt", "complete_attempt", "accept_challenge", "decline_challenge", "cancel_challenge",
         // challenge.create.replay_or_conflict / outcome
@@ -188,6 +190,16 @@ public sealed class MetricsLabelSafetyTests : IDisposable
             new FakeRefreshTokenGenerator(), new FakeAuthSessionPolicy(), new FakeTokenIssuer(), clock);
         await Assert.ThrowsAsync<InvalidRefreshTokenException>(() => refreshAlwaysConflicting.ExecuteAsync(new RefreshSessionRequest(replayAccount.RefreshToken), CancellationToken.None));
 
+        // auth.password_recovery.delivery: delivered, unavailable, faulted. Each account gets its
+        // own challenge store so the persistent cooldown cannot hide a later delivery outcome.
+        await DrivePasswordRecoveryDeliveryAsync(
+            "metricsrecoveryok", "metrics-recovery-ok@example.com", new FakePasswordRecoveryDelivery());
+        await DrivePasswordRecoveryDeliveryAsync(
+            "metricsrecoveryoff", "metrics-recovery-off@example.com",
+            new FakePasswordRecoveryDelivery { Outcome = PasswordRecoveryDeliveryOutcome.Unavailable });
+        await DrivePasswordRecoveryDeliveryAsync(
+            "metricsrecoveryfault", "metrics-recovery-fault@example.com", new ThrowingPasswordRecoveryDelivery());
+
         // challenge.create.replay_or_conflict: created, idempotent_replay, conflict.
         var seriesStore = new InMemoryVersusSeriesStore();
         var friendships = new InMemoryFriendshipStore();
@@ -250,13 +262,36 @@ public sealed class MetricsLabelSafetyTests : IDisposable
                 .ExecuteAsync(new CompleteAttemptRequest(opponent, created.Id, 1, opponentStarted.AttemptId, AttemptResult.OfScore(30)), CancellationToken.None));
 
         return sensitiveValues;
+
+        async Task DrivePasswordRecoveryDeliveryAsync(
+            string username,
+            string email,
+            IPasswordRecoveryDelivery delivery)
+        {
+            var recoveryAccount = Account.Rehydrate(
+                AccountId.New(), Username.Create(username), Email.Create(email), AccountStatus.Active,
+                hasher.Hash("P@ssw0rd!"), clock.UtcNow, clock.UtcNow);
+            await accounts.AddAsync(recoveryAccount, CancellationToken.None);
+            sensitiveValues.Add(recoveryAccount.Id.Value.ToString());
+            sensitiveValues.Add(email);
+
+            await new RequestPasswordResetUseCase(
+                    accounts,
+                    new InMemoryPasswordResetChallengeStore(),
+                    new FakePasswordResetTokenGenerator(),
+                    new FakePasswordRecoveryPolicy(),
+                    delivery,
+                    new NoOpUnitOfWork(),
+                    clock)
+                .ExecuteAsync(new RequestPasswordResetRequest(email), CancellationToken.None);
+        }
     }
 
     private static async Task DisableAccountAsync(InMemoryAccountStore accounts, Level5.Domain.Ids.AccountId accountId)
     {
         var account = await accounts.FindByIdAsync(accountId, CancellationToken.None);
         var disabled = Account.Rehydrate(account!.Id, account.Username, account.Email, AccountStatus.Disabled, account.PasswordHash, account.CreatedAt);
-        await accounts.UpdateAsync(disabled, CancellationToken.None);
+        await accounts.StageCredentialUpdateAsync(disabled, account.SessionGeneration, CancellationToken.None);
     }
 
     /// <summary>Mirrors AlwaysConflictingVersusSeriesStore (Competition/ConcurrencyTests.cs): a store whose write always loses the race, to drive `auth.refresh.outcome{outcome=replay_conflict}` without depending on real thread timing.</summary>
@@ -266,5 +301,16 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         public Task<AuthSession?> FindByRefreshTokenHashAsync(string refreshTokenHash, CancellationToken cancellationToken) => inner.FindByRefreshTokenHashAsync(refreshTokenHash, cancellationToken);
         public Task AddAsync(AuthSession session, CancellationToken cancellationToken) => inner.AddAsync(session, cancellationToken);
         public Task<bool> TrySaveAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
+    }
+
+    private sealed class ThrowingPasswordRecoveryDelivery : IPasswordRecoveryDelivery
+    {
+        public Task<PasswordRecoveryDeliveryOutcome> DeliverAsync(
+            Email destination,
+            string rawToken,
+            DateTimeOffset expiresAt,
+            CancellationToken cancellationToken)
+            => throw new InvalidOperationException("Simulated provider failure.");
     }
 }

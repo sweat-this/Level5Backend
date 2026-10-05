@@ -64,6 +64,18 @@ public sealed class AuthRateLimitTests
             client, "/api/v2/email-verification/complete", HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task Password_security_operations_have_independent_buckets()
+    {
+        await using var factory = new ProductionAuthRateLimitFactory();
+        using var client = CreateClient(factory);
+
+        await AssertAllowsFiveThenRateLimitsAsync(client, "/api/v2/auth/password-reset/request");
+        await AssertAllowsFiveThenRateLimitsAsync(client, "/api/v2/auth/password-reset/complete");
+        await AssertAllowsFiveThenRateLimitsAsync(client, "/api/v2/me/password");
+        await AssertAllowsFiveThenRateLimitsAsync(client, "/api/v2/auth/login");
+    }
+
     private static HttpClient CreateClient(WebApplicationFactory<Program> factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -153,8 +165,9 @@ internal sealed class MissingAccountStore : IAccountStore
 {
     public Task<Account?> FindByIdAsync(AccountId id, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
     public Task<Account?> FindByUsernameAsync(Username username, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
+    public Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken) => Task.FromResult(false);
     public Task AddAsync(Account account, CancellationToken cancellationToken) => Task.CompletedTask;
-    public Task UpdateAsync(Account account, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StageCredentialUpdateAsync(Account account, long expectedSessionGeneration, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken) => Task.CompletedTask;
 }

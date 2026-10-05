@@ -14,6 +14,20 @@ public class AccountTests
         var account = Account.Register(Username.Create("patrick"), "hash", Now);
 
         Assert.Equal(AccountStatus.Active, account.Status);
+        Assert.Equal(0, account.SessionGeneration);
+    }
+
+    [Fact]
+    public void Credential_change_increments_generation_but_hash_maintenance_does_not()
+    {
+        var account = Account.Register(Username.Create("patrick"), "hash", Now);
+
+        account.MaintainPasswordHash("rehash");
+        Assert.Equal(0, account.SessionGeneration);
+
+        account.ChangePassword("new-hash");
+        Assert.Equal(1, account.SessionGeneration);
+        Assert.Equal("new-hash", account.PasswordHash);
     }
 
     [Fact]

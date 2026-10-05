@@ -37,13 +37,22 @@ public static class ApplicationMetrics
 
     /// <summary>
     /// Refresh-session attempts, by outcome. Tag <c>outcome</c>: <c>success</c>, <c>unknown</c>,
-    /// <c>expired</c>, <c>revoked</c>, <c>account_inactive</c>, <c>replay_conflict</c> (lost the
+    /// <c>expired</c>, <c>revoked</c>, <c>account_inactive</c>, <c>generation_mismatch</c>,
+    /// <c>replay_conflict</c> (lost the
     /// optimistic-concurrency race - the presented credential had already been rotated or revoked
     /// by another request). As with logins, this internal breakdown does not change the single
     /// generic <c>invalid_refresh_token</c> response every failure mode shares.
     /// </summary>
     public static readonly Counter<long> RefreshOutcomes =
         Meter.CreateCounter<long>("auth.refresh.outcome", description: "Refresh-session attempts, by outcome.");
+
+    /// <summary>
+    /// Password-recovery delivery attempts. Tag <c>outcome</c>: <c>delivered</c>,
+    /// <c>unavailable</c>, or <c>faulted</c>. No destination, account, token, or exception data is
+    /// attached because this is an anonymous account-enumeration boundary.
+    /// </summary>
+    public static readonly Counter<long> PasswordRecoveryDeliveryOutcomes =
+        Meter.CreateCounter<long>("auth.password_recovery.delivery", description: "Password-recovery delivery outcomes without identity labels.");
 
     /// <summary>
     /// A series mutation exhausted its bounded reload-and-reevaluate retries

@@ -18,6 +18,7 @@ public sealed class Account
     public DateTimeOffset? EmailVerifiedAt { get; private set; }
     public AccountStatus Status { get; private set; }
     public string PasswordHash { get; private set; }
+    public long SessionGeneration { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
     private Account(
@@ -27,7 +28,8 @@ public sealed class Account
         DateTimeOffset? emailVerifiedAt,
         AccountStatus status,
         string passwordHash,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        long sessionGeneration)
     {
         if (email is null && emailVerifiedAt is not null)
         {
@@ -40,11 +42,12 @@ public sealed class Account
         EmailVerifiedAt = emailVerifiedAt;
         Status = status;
         PasswordHash = passwordHash;
+        SessionGeneration = sessionGeneration;
         CreatedAt = createdAt;
     }
 
     public static Account Register(Username username, string passwordHash, DateTimeOffset now, Email? email = null)
-        => new(AccountId.New(), username, email, emailVerifiedAt: null, AccountStatus.Active, passwordHash, now);
+        => new(AccountId.New(), username, email, emailVerifiedAt: null, AccountStatus.Active, passwordHash, now, sessionGeneration: 0);
 
     public static Account Rehydrate(
         AccountId id,
@@ -53,10 +56,20 @@ public sealed class Account
         AccountStatus status,
         string passwordHash,
         DateTimeOffset createdAt,
-        DateTimeOffset? emailVerifiedAt = null)
-        => new(id, username, email, emailVerifiedAt, status, passwordHash, createdAt);
+        DateTimeOffset? emailVerifiedAt = null,
+        long sessionGeneration = 0)
+        => new(id, username, email, emailVerifiedAt, status, passwordHash, createdAt, sessionGeneration);
 
-    public void ChangePasswordHash(string newPasswordHash) => PasswordHash = newPasswordHash;
+    /// <summary>Updates only hash representation during a transparent login upgrade.</summary>
+    public void MaintainPasswordHash(string newPasswordHash) => PasswordHash = newPasswordHash;
+
+    /// <summary>Changes the user credential and invalidates every older refresh-session generation.</summary>
+    public void ChangePassword(string newPasswordHash)
+    {
+        var nextGeneration = checked(SessionGeneration + 1);
+        PasswordHash = newPasswordHash;
+        SessionGeneration = nextGeneration;
+    }
 
     /// <summary>
     /// Installs an unverified recovery-email candidate. A verified address is immutable here:

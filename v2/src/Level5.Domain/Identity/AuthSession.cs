@@ -19,6 +19,7 @@ public sealed class AuthSession
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
+    public long SessionGeneration { get; private set; }
     public long Revision { get; private set; }
 
     private AuthSession(
@@ -28,7 +29,8 @@ public sealed class AuthSession
         DateTimeOffset createdAt,
         DateTimeOffset expiresAt,
         DateTimeOffset? revokedAt,
-        long revision)
+        long revision,
+        long sessionGeneration)
     {
         Id = id;
         AccountId = accountId;
@@ -37,10 +39,11 @@ public sealed class AuthSession
         ExpiresAt = expiresAt;
         RevokedAt = revokedAt;
         Revision = revision;
+        SessionGeneration = sessionGeneration;
     }
 
-    public static AuthSession Create(AccountId accountId, string refreshTokenHash, DateTimeOffset now, TimeSpan lifetime)
-        => new(AuthSessionId.New(), accountId, refreshTokenHash, now, now + lifetime, revokedAt: null, revision: 0);
+    public static AuthSession Create(AccountId accountId, string refreshTokenHash, DateTimeOffset now, TimeSpan lifetime, long sessionGeneration = 0)
+        => new(AuthSessionId.New(), accountId, refreshTokenHash, now, now + lifetime, revokedAt: null, revision: 0, sessionGeneration);
 
     public static AuthSession Rehydrate(
         AuthSessionId id,
@@ -49,8 +52,9 @@ public sealed class AuthSession
         DateTimeOffset createdAt,
         DateTimeOffset expiresAt,
         DateTimeOffset? revokedAt,
-        long revision)
-        => new(id, accountId, refreshTokenHash, createdAt, expiresAt, revokedAt, revision);
+        long revision,
+        long sessionGeneration = 0)
+        => new(id, accountId, refreshTokenHash, createdAt, expiresAt, revokedAt, revision, sessionGeneration);
 
     /// <summary>Whether the current refresh credential on this session can still be exchanged for a new access token.</summary>
     public bool CanRefresh(DateTimeOffset now) => RevokedAt is null && now < ExpiresAt;

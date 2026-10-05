@@ -56,7 +56,7 @@ public sealed class RegisterAccountUseCase(
         await playerProfileStore.AddAsync(profile, cancellationToken);
 
         var refreshToken = refreshTokenGenerator.Generate();
-        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime);
+        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime, account.SessionGeneration);
         await authSessionStore.AddAsync(session, cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);

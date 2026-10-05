@@ -67,8 +67,9 @@ public sealed class LoginUseCase(
 
         if (verification == PasswordVerificationResult.SuccessRehashNeeded)
         {
-            account.ChangePasswordHash(passwordHasher.Hash(request.Password));
-            await accountStore.UpdateAsync(account, cancellationToken);
+            var expectedGeneration = account.SessionGeneration;
+            account.MaintainPasswordHash(passwordHasher.Hash(request.Password));
+            await accountStore.StageCredentialUpdateAsync(account, expectedGeneration, cancellationToken);
         }
 
         var profile = await playerProfileStore.FindByAccountIdAsync(account.Id, cancellationToken)
@@ -76,7 +77,7 @@ public sealed class LoginUseCase(
 
         var now = clock.UtcNow;
         var refreshToken = refreshTokenGenerator.Generate();
-        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime);
+        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime, account.SessionGeneration);
         await authSessionStore.AddAsync(session, cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);

@@ -20,4 +20,7 @@ public interface IAuthSessionStore
     /// rotation/revocation wins.
     /// </summary>
     Task<bool> TrySaveAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken);
+
+    /// <summary>Rotates only if the session revision and owning active account generation still match.</summary>
+    Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken);
 }

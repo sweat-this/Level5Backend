@@ -13,4 +13,5 @@ public sealed class AuthSessionRow
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public long Revision { get; set; }
+    public long SessionGeneration { get; set; }
 }

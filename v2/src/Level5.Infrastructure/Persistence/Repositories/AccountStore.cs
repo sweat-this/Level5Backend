@@ -20,6 +20,13 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken)
+    {
+        var row = await db.Accounts.SingleOrDefaultAsync(
+            a => a.EmailCanonical == email.Canonical && a.EmailVerifiedAt != null, cancellationToken);
+        return row is null ? null : ToDomain(row);
+    }
+
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => db.Accounts.AnyAsync(a => a.UsernameCanonical == username.Canonical, cancellationToken);
 
@@ -35,15 +42,17 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
             EmailVerifiedAt = account.EmailVerifiedAt,
             Status = account.Status.ToString(),
             PasswordHash = account.PasswordHash,
+            SessionGeneration = account.SessionGeneration,
             CreatedAt = account.CreatedAt
         }, cancellationToken);
     }
 
-    public async Task UpdateAsync(Account account, CancellationToken cancellationToken)
+    public async Task StageCredentialUpdateAsync(Account account, long expectedSessionGeneration, CancellationToken cancellationToken)
     {
         var row = await db.Accounts.SingleAsync(a => a.Id == account.Id.Value, cancellationToken);
         row.PasswordHash = account.PasswordHash;
-        row.Status = account.Status.ToString();
+        row.SessionGeneration = account.SessionGeneration;
+        db.Entry(row).Property(r => r.SessionGeneration).OriginalValue = expectedSessionGeneration;
     }
 
     public async Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken)
@@ -62,5 +71,6 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
             Enum.Parse<AccountStatus>(row.Status),
             row.PasswordHash,
             row.CreatedAt,
-            row.EmailVerifiedAt);
+            row.EmailVerifiedAt,
+            row.SessionGeneration);
 }
