@@ -60,6 +60,7 @@ public sealed class EmailVerificationUseCaseTests
             new(account.Id, Password, "first@example.com"), CancellationToken.None);
         var first = await _challenges.FindByAccountIdAsync(account.Id, CancellationToken.None);
 
+        _clock.UtcNow += _policy.ResendCooldown;
         await RequestUseCase().ExecuteAsync(
             new(account.Id, Password, "second@example.com"), CancellationToken.None);
         var second = await _challenges.FindByAccountIdAsync(account.Id, CancellationToken.None);
@@ -67,6 +68,28 @@ public sealed class EmailVerificationUseCaseTests
         Assert.Equal("second@example.com", account.Email!.Value);
         Assert.NotEqual(first!.TokenHash, second!.TokenHash);
         Assert.Equal(1, second.Revision);
+    }
+
+    [Fact]
+    public async Task Request_enforces_the_persistent_account_cooldown_before_mutating_or_delivering()
+    {
+        var account = await AddAccountAsync();
+        await RequestUseCase().ExecuteAsync(
+            new(account.Id, Password, "first@example.com"), CancellationToken.None);
+        var first = await _challenges.FindByAccountIdAsync(account.Id, CancellationToken.None);
+
+        await Assert.ThrowsAsync<EmailVerificationCooldownException>(() =>
+            RequestUseCase().ExecuteAsync(
+                new(account.Id, Password, "first@example.com"), CancellationToken.None));
+        await Assert.ThrowsAsync<EmailVerificationCooldownException>(() =>
+            RequestUseCase().ExecuteAsync(
+                new(account.Id, Password, "replacement@example.com"), CancellationToken.None));
+
+        var unchanged = await _challenges.FindByAccountIdAsync(account.Id, CancellationToken.None);
+        Assert.Equal("first@example.com", account.Email!.Value);
+        Assert.Equal(first!.TokenHash, unchanged!.TokenHash);
+        Assert.Equal(first.Revision, unchanged.Revision);
+        Assert.Single(_delivery.Deliveries);
     }
 
     [Fact]

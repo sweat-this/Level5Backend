@@ -544,16 +544,17 @@ address is immutable in this flow (issue #64 owns changes). `GET /api/v2/me/emai
 self-only status projection, and resend never accepts a replacement target.
 
 Email verification uses one `email_verification_challenges` row per account. A CSPRNG produces a
-256-bit base64url credential, only its SHA-256 hash is stored, and every request/resend rotates the
-credential. The target email snapshot binds the credential to the attached address. Completion is
-an anonymous POST body operation (`POST /api/v2/email-verification/complete`): possession of the
-credential proves mailbox control. Account verification and challenge consumption commit in one
-`SaveChanges`; revision concurrency permits one completion winner and replays receive the same
+256-bit base64url credential, only its SHA-256 hash is stored, and every accepted request/resend
+rotates the credential. The target email snapshot binds the credential to the attached address.
+Completion is an anonymous POST body operation (`POST /api/v2/email-verification/complete`):
+possession of the credential proves mailbox control. Account verification and challenge consumption
+commit in one `SaveChanges`; revision concurrency permits one completion winner and replays receive the same
 generic failure as unknown, expired, superseded, or mismatched credentials.
 
 `EmailVerification:TokenLifetimeHours` (default 24) and
-`EmailVerification:ResendCooldownMinutes` (default 5) are validated at startup. The cooldown is
-persisted through the challenge's `IssuedAt`, so changing IPs or API instances cannot bypass it.
+`EmailVerification:ResendCooldownMinutes` (default 5) are validated at startup. Both request and
+resend dispatches enforce the cooldown persisted through the challenge's `IssuedAt`, so changing
+IPs, API instances, or endpoints cannot bypass it.
 Persistence always commits before delivery. `IEmailVerificationDelivery` is provider-neutral; the
 default adapter deliberately returns `email_verification_delivery_unavailable` without logging the
 raw token. A real provider adapter is therefore an explicit production operational dependency, and

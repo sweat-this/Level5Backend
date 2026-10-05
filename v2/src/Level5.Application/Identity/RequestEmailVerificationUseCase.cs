@@ -38,14 +38,20 @@ public sealed class RequestEmailVerificationUseCase(
         }
 
         var targetEmail = Email.Create(request.Email);
-        if (!account.AttachOrReplaceUnverifiedEmail(targetEmail))
+        if (account.EmailVerifiedAt is not null && !account.AttachOrReplaceUnverifiedEmail(targetEmail))
         {
             return new RequestEmailVerificationResult(AlreadyVerified: true, ExpiresAt: null);
         }
 
         var now = clock.UtcNow;
-        var token = tokenGenerator.Generate();
         var challenge = await challengeStore.FindByAccountIdAsync(account.Id, cancellationToken);
+        if (challenge is not null && now < challenge.IssuedAt + policy.ResendCooldown)
+        {
+            throw new EmailVerificationCooldownException();
+        }
+
+        account.AttachOrReplaceUnverifiedEmail(targetEmail);
+        var token = tokenGenerator.Generate();
         if (challenge is null)
         {
             challenge = EmailVerificationChallenge.Create(account.Id, targetEmail, token.Hash, now, policy.TokenLifetime);

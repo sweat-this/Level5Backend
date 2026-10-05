@@ -195,7 +195,8 @@ verified address cannot be changed by this flow; issue #64 owns that lifecycle.
 target-address snapshot and only a SHA-256 hash of a 256-bit opaque credential. Credentials expire
 after the configured lifetime, rotate on resend, and are single-use through optimistic concurrency.
 The configured operational defaults are a 24-hour token lifetime and a five-minute persistent
-per-account resend cooldown, supplemented by independent per-IP endpoint limits.
+per-account dispatch cooldown shared by request and resend, supplemented by independent per-IP
+endpoint limits.
 
 An unverified stored email remains contact data, not proof of control, and must never authorize a
 password reset. Public PlayerProfile projections and JWTs remain email-free. Delivery is behind a

@@ -172,6 +172,61 @@ public sealed class EmailVerificationFlowTests(ApiFactory factory)
     }
 
     [Fact]
+    public async Task Request_route_cannot_bypass_the_persistent_account_cooldown()
+    {
+        var player = await factory.RegisterNewPlayerAsync("EmailRequestCooldown");
+        var email = $"requestcooldown{Guid.NewGuid():N}@example.com";
+        var replacement = $"replacement{Guid.NewGuid():N}@example.com";
+        var request = new
+        {
+            currentPassword = "P@ssw0rd123!",
+            email
+        };
+
+        var accepted = await player.Client.PostAsJsonAsync("/api/v2/me/email/verification", request);
+        Assert.Equal(HttpStatusCode.Accepted, accepted.StatusCode);
+
+        var accountId = await GetAccountIdAsync(player.Client);
+        string tokenHash;
+        long revision;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Level5V2DbContext>();
+            var challenge = await db.EmailVerificationChallenges.AsNoTracking()
+                .SingleAsync(c => c.AccountId == accountId);
+            tokenHash = challenge.TokenHash;
+            revision = challenge.Revision;
+        }
+
+        var sameTarget = await player.Client.PostAsJsonAsync("/api/v2/me/email/verification", request);
+        Assert.Equal(HttpStatusCode.TooManyRequests, sameTarget.StatusCode);
+        Assert.Equal("email_verification_cooldown", await ReadCodeAsync(sameTarget));
+
+        var replacementTarget = await player.Client.PostAsJsonAsync("/api/v2/me/email/verification", new
+        {
+            currentPassword = "P@ssw0rd123!",
+            email = replacement
+        });
+        Assert.Equal(HttpStatusCode.TooManyRequests, replacementTarget.StatusCode);
+        Assert.Equal("email_verification_cooldown", await ReadCodeAsync(replacementTarget));
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Level5V2DbContext>();
+            var unchanged = await db.EmailVerificationChallenges.AsNoTracking()
+                .SingleAsync(c => c.AccountId == accountId);
+            Assert.Equal(tokenHash, unchanged.TokenHash);
+            Assert.Equal(revision, unchanged.Revision);
+        }
+
+        var status = await player.Client.GetFromJsonAsync<JsonElement>("/api/v2/me/email", JsonOptions);
+        Assert.Equal(email, status.GetProperty("email").GetString());
+        var deliveries = factory.Services.GetRequiredService<CapturingEmailVerificationDelivery>().Deliveries;
+        Assert.Single(deliveries, delivery => delivery.Destination == email);
+        Assert.DoesNotContain(deliveries, delivery => delivery.Destination == replacement);
+    }
+
+    [Fact]
     public async Task Public_player_and_registration_contracts_remain_email_free()
     {
         var player = await factory.RegisterNewPlayerAsync("EmailPrivacy");
