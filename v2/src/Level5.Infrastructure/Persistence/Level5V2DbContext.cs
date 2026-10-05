@@ -9,6 +9,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<AccountRow> Accounts => Set<AccountRow>();
     public DbSet<AuthSessionRow> AuthSessions => Set<AuthSessionRow>();
     public DbSet<EmailVerificationChallengeRow> EmailVerificationChallenges => Set<EmailVerificationChallengeRow>();
+    public DbSet<PasswordResetChallengeRow> PasswordResetChallenges => Set<PasswordResetChallengeRow>();
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
@@ -32,6 +33,20 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // enforces uniqueness only when an email is actually present - unlimited accounts
             // with no email can coexist.
             entity.HasIndex(e => e.EmailCanonical).IsUnique();
+            entity.Property(e => e.SessionGeneration).IsConcurrencyToken();
+        });
+
+        modelBuilder.Entity<PasswordResetChallengeRow>(entity =>
+        {
+            entity.ToTable("password_reset_challenges");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TargetEmail).HasMaxLength(320);
+            entity.Property(e => e.TargetEmailCanonical).HasMaxLength(320);
+            entity.Property(e => e.TokenHash).HasMaxLength(64);
+            entity.HasIndex(e => e.AccountId).IsUnique();
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne<AccountRow>().WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuthSessionRow>(entity =>

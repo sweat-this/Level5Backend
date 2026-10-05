@@ -63,6 +63,12 @@ public sealed class RefreshSessionUseCase(
             throw new InvalidRefreshTokenException();
         }
 
+        if (account.SessionGeneration != session.SessionGeneration)
+        {
+            ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "generation_mismatch");
+            throw new InvalidRefreshTokenException();
+        }
+
         var profile = await playerProfileStore.FindByAccountIdAsync(account.Id, cancellationToken)
             ?? throw new InvalidOperationException($"Account {account.Id} has no player profile.");
 
@@ -70,7 +76,7 @@ public sealed class RefreshSessionUseCase(
         var newRefreshToken = refreshTokenGenerator.Generate();
         session.Rotate(newRefreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime);
 
-        var saved = await authSessionStore.TrySaveAsync(session, expectedRevision, cancellationToken);
+        var saved = await authSessionStore.TryRotateForActiveGenerationAsync(session, expectedRevision, cancellationToken);
         if (!saved)
         {
             // Someone else already rotated or revoked this exact session between our lookup and

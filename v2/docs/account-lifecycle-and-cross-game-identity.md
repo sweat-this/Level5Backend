@@ -1,6 +1,6 @@
 # Account lifecycle and cross-game identity
 
-Status: requirements baseline; implementation deliberately deferred
+Status: current architecture baseline through issue #59
 
 Audited: 2026-10-02
 
@@ -205,36 +205,38 @@ delivery fails explicitly so an explicit resend remains possible.
 
 ## 5. Password lifecycle
 
-**Current fact.** There is no password-change or forgotten-password endpoint/use case. The domain's
-`ChangePasswordHash` method currently supports transparent rehash during successful login; its
-existence does not define a user-facing password lifecycle.
+**Current fact (issue #59).** Verified private Account email is the only password-recovery factor.
+An unverified address is contact data only. Anonymous reset requests always return `202 Accepted`
+for syntactically valid email input, including unknown, unverified, disabled, cooled-down, and
+delivery-unavailable cases.
 
 ### Authenticated password change
 
-**Decision required.** Define:
-
-- whether current-password confirmation is always required or recent strong authentication can
-  substitute;
-- password-policy and password-reuse expectations;
-- whether changing a password revokes the current refresh session, all other refresh sessions, or
-  all refresh sessions including the caller's;
-- whether the caller receives a replacement session after the change;
-- notification requirements and safe failure behavior.
+**Selected policy.** `POST /api/v2/me/password` requires bearer authentication and the current
+password, reuses the existing password policy, and returns no replacement credentials. A successful
+change increments `Account.SessionGeneration`, invalidating every existing refresh session,
+including the caller's. A failed change does not increment the generation.
 
 ### Forgotten-password recovery
 
-**Decision required.** Define the verification factor before implementation. Under the current
-credential set, there is no verified factor capable of authorizing a reset. If verified email is
-selected, define single-use token hashing/storage, expiry, resend behavior, rate limits, generic
-responses that resist account enumeration, and what support path exists when the factor is lost.
+**Selected policy.** Password reset uses a dedicated one-per-account challenge bound to the verified
+canonical email. The raw 256-bit base64url token is delivered only through the provider-neutral
+delivery port; persistence stores its SHA-256 hash. The operational defaults are a one-hour lifetime
+and five-minute persistent per-account request cooldown, both validated configuration rather than
+domain constants. Completion is single-use and atomic with the password/generation change.
+
+The default delivery adapter reports `Unavailable` without throwing or changing the enumeration-
+safe HTTP response. The application boundary also collapses unexpected provider faults into that
+same response and records only a low-cardinality outcome, never an address, account identifier,
+token, or exception text. Production recovery is therefore not operationally usable until
+operations configures a real delivery adapter.
 
 ### Token revocation policy
 
-**Decision required.** Password change/reset must explicitly choose its refresh-session effect:
-
-- keep the current refresh session and revoke others;
-- revoke all refresh sessions and require login; or
-- another deliberately specified policy.
+**Selected requirement.** Reset and authenticated change invalidate all existing refresh sessions
+by incrementing `Account.SessionGeneration`. Each `AuthSession` captures the generation at login;
+refresh rotation is one database decision conditioned on session revision, active account status,
+and matching generation. Existing rows migrated at generation zero remain mutually valid.
 
 **Selected requirement.** Preserve the certified stateless access-token policy unless a stronger
 requirement is separately approved. Under that policy, revoking refresh sessions stops future token
@@ -336,8 +338,8 @@ diagnostics.
 | Display-name update | Implemented for the caller's PlayerProfile | Shared platform profile | None for current behavior |
 | Email attachment | Implemented: authenticated Active account plus current password; unverified targets replaceable | Optional verified recovery email | Verified-address change remains #64 |
 | Email verification | Implemented: expiring, rotating, single-use hashed challenge with cooldown and generic failures | Only verified email may become a recovery factor | Production delivery provider remains operational work |
-| Password change | Not implemented | Deferred | Reauthentication and refresh-session revocation policy |
-| Password recovery | Not implemented; no verified recovery factor | Blocked by recovery-factor decision | Verified factor, reset-token rules, session revocation, support fallback |
+| Password change | Implemented: authenticated current-password confirmation and global refresh invalidation | Client discards its session and logs in again | Production UI remains follow-up work |
+| Password recovery | Implemented: verified-email-only, enumeration-safe request and single-use reset | Global refresh invalidation; access JWTs remain bounded by `exp` | Production delivery adapter and recovery UI remain operational follow-up work |
 | Account disable | Domain status and login/refresh enforcement exist; no status-changing API | Existing bounded revocation remains authoritative | Actor/authorization, reason/audit, reactivation, notification, token cutoff |
 | Data export | Not implemented | Deferred | Scope, shared-data privacy, format/delivery, retention and requester verification |
 | Account deletion/anonymization | Not implemented; restrictive FKs prevent naive deletion | Deferred | Hard-delete vs retain vs anonymize; legal/retention/shared-history rules |
@@ -381,7 +383,7 @@ retention plan first.
 This work does not implement or approve:
 
 - verification emails or an email provider;
-- password reset or password change;
+- password-history, breached-password, MFA, or immediate access-token revocation systems;
 - account deletion or anonymization;
 - export generation;
 - OAuth/social login or new auth providers;

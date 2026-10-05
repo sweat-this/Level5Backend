@@ -42,6 +42,22 @@ public sealed class AuthSessionStore(Level5V2DbContext db) : IAuthSessionStore
         return affected == 1;
     }
 
+    public async Task<bool> TryRotateForActiveGenerationAsync(
+        AuthSession session, long expectedRevision, CancellationToken cancellationToken)
+    {
+        var affected = await db.AuthSessions
+            .Where(r => r.Id == session.Id.Value &&
+                        r.Revision == expectedRevision &&
+                        db.Accounts.Any(a => a.Id == r.AccountId &&
+                                             a.Status == AccountStatus.Active.ToString() &&
+                                             a.SessionGeneration == r.SessionGeneration))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(r => r.RefreshTokenHash, session.RefreshTokenHash)
+                .SetProperty(r => r.ExpiresAt, session.ExpiresAt)
+                .SetProperty(r => r.Revision, session.Revision), cancellationToken);
+        return affected == 1;
+    }
+
     private static AuthSessionRow ToRow(AuthSession session) => new()
     {
         Id = session.Id.Value,
@@ -50,7 +66,8 @@ public sealed class AuthSessionStore(Level5V2DbContext db) : IAuthSessionStore
         CreatedAt = session.CreatedAt,
         ExpiresAt = session.ExpiresAt,
         RevokedAt = session.RevokedAt,
-        Revision = session.Revision
+        Revision = session.Revision,
+        SessionGeneration = session.SessionGeneration
     };
 
     private static AuthSession ToDomain(AuthSessionRow row)
@@ -61,5 +78,6 @@ public sealed class AuthSessionStore(Level5V2DbContext db) : IAuthSessionStore
             row.CreatedAt,
             row.ExpiresAt,
             row.RevokedAt,
-            row.Revision);
+            row.Revision,
+            row.SessionGeneration);
 }

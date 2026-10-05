@@ -15,5 +15,6 @@ public sealed class AccountRow
     public DateTimeOffset? EmailVerifiedAt { get; set; }
     public required string Status { get; set; }
     public required string PasswordHash { get; set; }
+    public long SessionGeneration { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

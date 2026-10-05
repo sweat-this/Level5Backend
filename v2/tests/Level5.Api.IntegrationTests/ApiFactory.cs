@@ -65,6 +65,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<CapturingEmailVerificationDelivery>();
             services.AddSingleton<IEmailVerificationDelivery>(provider =>
                 provider.GetRequiredService<CapturingEmailVerificationDelivery>());
+            services.RemoveAll<IPasswordRecoveryDelivery>();
+            services.AddSingleton<CapturingPasswordRecoveryDelivery>();
+            services.AddSingleton<IPasswordRecoveryDelivery>(provider =>
+                provider.GetRequiredService<CapturingPasswordRecoveryDelivery>());
         });
     }
 }
@@ -87,6 +91,20 @@ public sealed class CapturingEmailVerificationDelivery : IEmailVerificationDeliv
 }
 
 public sealed record CapturedEmailVerification(string Destination, string RawToken, DateTimeOffset ExpiresAt);
+
+public sealed class CapturingPasswordRecoveryDelivery : IPasswordRecoveryDelivery
+{
+    private readonly ConcurrentQueue<CapturedPasswordRecovery> _deliveries = new();
+    public IReadOnlyCollection<CapturedPasswordRecovery> Deliveries => _deliveries.ToArray();
+    public Task<PasswordRecoveryDeliveryOutcome> DeliverAsync(
+        Email destination, string rawToken, DateTimeOffset expiresAt, CancellationToken cancellationToken)
+    {
+        _deliveries.Enqueue(new(destination.Value, rawToken, expiresAt));
+        return Task.FromResult(PasswordRecoveryDeliveryOutcome.Delivered);
+    }
+}
+
+public sealed record CapturedPasswordRecovery(string Destination, string RawToken, DateTimeOffset ExpiresAt);
 
 [CollectionDefinition(Name)]
 public sealed class ApiCollection : ICollectionFixture<ApiFactory>

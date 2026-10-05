@@ -81,7 +81,7 @@ public class RefreshSessionUseCaseTests
         var registered = await _register.ExecuteAsync(new RegisterAccountRequest("erin", "P@ssw0rd!", "Erin"), CancellationToken.None);
         var account = await _accounts.FindByIdAsync(registered.AccountId, CancellationToken.None);
         var disabled = Account.Rehydrate(account!.Id, account.Username, account.Email, AccountStatus.Disabled, account.PasswordHash, account.CreatedAt);
-        await _accounts.UpdateAsync(disabled, CancellationToken.None);
+        await _accounts.StageCredentialUpdateAsync(disabled, account.SessionGeneration, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidRefreshTokenException>(() =>
             _refresh.ExecuteAsync(new RefreshSessionRequest(registered.RefreshToken), CancellationToken.None));

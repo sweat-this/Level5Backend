@@ -82,7 +82,7 @@ public class LoginUseCaseTests
         var registered = await _register.ExecuteAsync(new RegisterAccountRequest("frank", "P@ssw0rd!", "Frank"), CancellationToken.None);
         var account = await _accounts.FindByIdAsync(registered.AccountId, CancellationToken.None);
         var disabled = Account.Rehydrate(account!.Id, account.Username, account.Email, AccountStatus.Disabled, account.PasswordHash, account.CreatedAt);
-        await _accounts.UpdateAsync(disabled, CancellationToken.None);
+        await _accounts.StageCredentialUpdateAsync(disabled, account.SessionGeneration, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
             _login.ExecuteAsync(new LoginRequest("frank", "P@ssw0rd!"), CancellationToken.None));
@@ -94,7 +94,7 @@ public class LoginUseCaseTests
         var registered = await _register.ExecuteAsync(new RegisterAccountRequest("grace", "P@ssw0rd!", "Grace"), CancellationToken.None);
         var account = await _accounts.FindByIdAsync(registered.AccountId, CancellationToken.None);
         var disabled = Account.Rehydrate(account!.Id, account.Username, account.Email, AccountStatus.Disabled, account.PasswordHash, account.CreatedAt);
-        await _accounts.UpdateAsync(disabled, CancellationToken.None);
+        await _accounts.StageCredentialUpdateAsync(disabled, account.SessionGeneration, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
             _login.ExecuteAsync(new LoginRequest("grace", "P@ssw0rd!"), CancellationToken.None));

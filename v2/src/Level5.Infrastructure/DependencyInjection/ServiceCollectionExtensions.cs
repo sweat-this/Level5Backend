@@ -54,6 +54,11 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<PasswordRecoveryOptions>()
+            .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<IPlayerProfileStore, PlayerProfileStore>();
         services.AddScoped<IFriendshipStore, FriendshipStore>();
@@ -62,6 +67,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILeaderboardQuery, LeaderboardQuery>();
         services.AddScoped<IAuthSessionStore, AuthSessionStore>();
         services.AddScoped<IEmailVerificationChallengeStore, EmailVerificationChallengeStore>();
+        services.AddScoped<IPasswordResetChallengeStore, PasswordResetChallengeStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
@@ -70,6 +76,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEmailVerificationTokenGenerator, EmailVerificationTokenGenerator>();
         services.AddSingleton<IEmailVerificationPolicy, EmailVerificationPolicy>();
         services.AddSingleton<IEmailVerificationDelivery, UnavailableEmailVerificationDelivery>();
+        services.AddSingleton<IPasswordResetTokenGenerator, PasswordResetTokenGenerator>();
+        services.AddSingleton<IPasswordRecoveryPolicy, PasswordRecoveryPolicy>();
+        services.AddSingleton<IPasswordRecoveryDelivery, UnavailablePasswordRecoveryDelivery>();
         services.AddSingleton<IAuthSessionPolicy, AuthSessionPolicy>();
         services.AddSingleton<IChallengeExpiryPolicy, ChallengeExpiryPolicy>();
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();

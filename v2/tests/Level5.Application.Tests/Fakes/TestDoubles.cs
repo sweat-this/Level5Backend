@@ -137,6 +137,54 @@ public sealed class FakeEmailVerificationDelivery : IEmailVerificationDelivery
     }
 }
 
+public sealed class FakePasswordRecoveryPolicy : IPasswordRecoveryPolicy
+{
+    public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromHours(1);
+    public TimeSpan RequestCooldown { get; set; } = TimeSpan.FromMinutes(5);
+}
+
+public sealed class FakePasswordResetTokenGenerator : IPasswordResetTokenGenerator
+{
+    private int _sequence;
+    public GeneratedPasswordResetToken Generate()
+    {
+        var raw = $"reset-token-{++_sequence}";
+        return new(raw, Hash(raw));
+    }
+    public string Hash(string rawValue) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawValue)));
+}
+
+public sealed class FakePasswordRecoveryDelivery : IPasswordRecoveryDelivery
+{
+    public PasswordRecoveryDeliveryOutcome Outcome { get; set; } = PasswordRecoveryDeliveryOutcome.Delivered;
+    public List<(Email Destination, string RawToken)> Deliveries { get; } = [];
+    public Task<PasswordRecoveryDeliveryOutcome> DeliverAsync(Email destination, string rawToken, DateTimeOffset expiresAt, CancellationToken cancellationToken)
+    {
+        Deliveries.Add((destination, rawToken));
+        return Task.FromResult(Outcome);
+    }
+}
+
+public sealed class InMemoryPasswordResetChallengeStore : IPasswordResetChallengeStore
+{
+    private PasswordResetChallenge? _challenge;
+    public Task<PasswordResetChallenge?> FindByAccountIdAsync(AccountId accountId, CancellationToken cancellationToken)
+        => Task.FromResult(_challenge?.AccountId == accountId ? Clone(_challenge) : null);
+    public Task<PasswordResetChallenge?> FindByTokenHashAsync(string tokenHash, CancellationToken cancellationToken)
+        => Task.FromResult(_challenge?.TokenHash == tokenHash ? Clone(_challenge) : null);
+    public Task AddAsync(PasswordResetChallenge challenge, CancellationToken cancellationToken)
+    {
+        _challenge = Clone(challenge); return Task.CompletedTask;
+    }
+    public Task StageUpdateAsync(PasswordResetChallenge challenge, CancellationToken cancellationToken)
+    {
+        _challenge = Clone(challenge); return Task.CompletedTask;
+    }
+    private static PasswordResetChallenge Clone(PasswordResetChallenge source) => PasswordResetChallenge.Rehydrate(
+        source.Id, source.AccountId, source.TargetEmail, source.TokenHash, source.IssuedAt,
+        source.ExpiresAt, source.ConsumedAt, source.Revision);
+}
+
 public sealed class TrackingUnitOfWork : IUnitOfWork
 {
     public bool Saved { get; private set; }
@@ -231,8 +279,11 @@ public sealed class InMemoryAuthSessionStore : IAuthSessionStore
         return Task.FromResult(true);
     }
 
+    public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
+        => TrySaveAsync(session, expectedRevision, cancellationToken);
+
     private static AuthSession Clone(AuthSession source) => AuthSession.Rehydrate(
-        source.Id, source.AccountId, source.RefreshTokenHash, source.CreatedAt, source.ExpiresAt, source.RevokedAt, source.Revision);
+        source.Id, source.AccountId, source.RefreshTokenHash, source.CreatedAt, source.ExpiresAt, source.RevokedAt, source.Revision, source.SessionGeneration);
 }
 
 /// <summary>Simulates a genuine infrastructure failure (e.g. the database is unreachable) on every lookup, to prove RefreshSessionUseCase/LogoutUseCase let it propagate rather than mistranslating it into an auth failure.</summary>
@@ -248,6 +299,9 @@ public sealed class ThrowingAuthSessionStore : IAuthSessionStore
         => throw new InvalidOperationException("Simulated infrastructure failure.");
 
     public Task<bool> TrySaveAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
         => throw new InvalidOperationException("Simulated infrastructure failure.");
 }
 
@@ -265,6 +319,9 @@ public sealed class ThrowingOnSaveAuthSessionStore(IAuthSessionStore inner) : IA
 
     public Task<bool> TrySaveAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
         => throw new InvalidOperationException("Simulated infrastructure failure.");
+
+    public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken)
+        => throw new InvalidOperationException("Simulated infrastructure failure.");
 }
 
 public sealed class InMemoryAccountStore : IAccountStore
@@ -277,6 +334,9 @@ public sealed class InMemoryAccountStore : IAccountStore
     public Task<Account?> FindByUsernameAsync(Username username, CancellationToken cancellationToken)
         => Task.FromResult(_accounts.Values.SingleOrDefault(a => a.Username.Canonical == username.Canonical));
 
+    public Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken)
+        => Task.FromResult(_accounts.Values.SingleOrDefault(a => a.EmailVerifiedAt is not null && a.Email?.Canonical == email.Canonical));
+
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => Task.FromResult(_accounts.Values.Any(a => a.Username.Canonical == username.Canonical));
 
@@ -286,7 +346,7 @@ public sealed class InMemoryAccountStore : IAccountStore
         return Task.CompletedTask;
     }
 
-    public Task UpdateAsync(Account account, CancellationToken cancellationToken)
+    public Task StageCredentialUpdateAsync(Account account, long expectedSessionGeneration, CancellationToken cancellationToken)
     {
         _accounts[account.Id.Value] = account;
         return Task.CompletedTask;

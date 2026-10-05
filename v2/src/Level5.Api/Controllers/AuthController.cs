@@ -29,7 +29,9 @@ public sealed class AuthController(
     RegisterAccountUseCase registerAccount,
     LoginUseCase login,
     RefreshSessionUseCase refreshSession,
-    LogoutUseCase logout) : ControllerBase
+    LogoutUseCase logout,
+    RequestPasswordResetUseCase requestPasswordReset,
+    CompletePasswordResetUseCase completePasswordReset) : ControllerBase
 {
     [HttpPost("register")]
     [EnableRateLimiting(AuthRateLimitPolicyNames.Register)]
@@ -75,4 +77,25 @@ public sealed class AuthController(
         await logout.ExecuteAsync(new LogoutRequest(request.RefreshToken), cancellationToken);
         return NoContent();
     }
+
+    [HttpPost("password-reset/request")]
+    [EnableRateLimiting(PasswordSecurityRateLimitPolicyNames.ResetRequest)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> RequestPasswordReset(PasswordResetRequestDto request, CancellationToken cancellationToken)
+    {
+        await requestPasswordReset.ExecuteAsync(new(request.Email), cancellationToken);
+        return Accepted();
+    }
+
+    [HttpPost("password-reset/complete")]
+    [EnableRateLimiting(PasswordSecurityRateLimitPolicyNames.ResetComplete)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> CompletePasswordReset(PasswordResetCompleteDto request, CancellationToken cancellationToken)
+    {
+        await completePasswordReset.ExecuteAsync(new(request.ResetToken, request.NewPassword), cancellationToken);
+        return NoContent();
+    }
 }
+
+public sealed record PasswordResetRequestDto(string Email);
+public sealed record PasswordResetCompleteDto(string ResetToken, string NewPassword);

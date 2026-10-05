@@ -92,6 +92,9 @@ builder.Services.AddScoped<GetMyEmailStatusUseCase>();
 builder.Services.AddScoped<RequestEmailVerificationUseCase>();
 builder.Services.AddScoped<ResendEmailVerificationUseCase>();
 builder.Services.AddScoped<CompleteEmailVerificationUseCase>();
+builder.Services.AddScoped<RequestPasswordResetUseCase>();
+builder.Services.AddScoped<CompletePasswordResetUseCase>();
+builder.Services.AddScoped<ChangePasswordUseCase>();
 builder.Services.AddScoped<ResolvePlayerByTagUseCase>();
 builder.Services.AddScoped<UpdateMyPlayerProfileUseCase>();
 builder.Services.AddScoped<GetMyPlayerProfileUseCase>();
@@ -178,6 +181,12 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy(EmailVerificationRateLimitPolicyNames.Resend,
         httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
     options.AddPolicy(EmailVerificationRateLimitPolicyNames.Complete,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(PasswordSecurityRateLimitPolicyNames.ResetRequest,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(PasswordSecurityRateLimitPolicyNames.ResetComplete,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(PasswordSecurityRateLimitPolicyNames.Change,
         httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
 });
 

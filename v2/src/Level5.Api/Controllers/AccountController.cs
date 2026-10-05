@@ -10,6 +10,7 @@ public sealed record CurrentAccountResponseDto(Guid AccountId, string Username, 
 public sealed record MyEmailStatusResponseDto(string? Email, bool IsVerified, DateTimeOffset? VerifiedAt);
 public sealed record RequestEmailVerificationDto(string CurrentPassword, string Email);
 public sealed record EmailVerificationDispatchResponseDto(bool AlreadyVerified, DateTimeOffset? ExpiresAt);
+public sealed record ChangePasswordDto(string CurrentPassword, string NewPassword);
 
 /// <summary>
 /// The private authenticated-account identity - deliberately separate from
@@ -24,6 +25,7 @@ public sealed class AccountController(
     GetMyEmailStatusUseCase getMyEmailStatus,
     RequestEmailVerificationUseCase requestEmailVerification,
     ResendEmailVerificationUseCase resendEmailVerification,
+    ChangePasswordUseCase changePassword,
     ICurrentAccountAccessor currentAccount) : ControllerBase
 {
     [HttpGet("me")]
@@ -64,5 +66,14 @@ public sealed class AccountController(
         var result = await resendEmailVerification.ExecuteAsync(
             currentAccount.GetCurrentAccountId(), cancellationToken);
         return Accepted(new EmailVerificationDispatchResponseDto(AlreadyVerified: false, result.ExpiresAt));
+    }
+
+    [HttpPost("me/password")]
+    [EnableRateLimiting(PasswordSecurityRateLimitPolicyNames.Change)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> ChangePassword(ChangePasswordDto request, CancellationToken cancellationToken)
+    {
+        await changePassword.ExecuteAsync(new(currentAccount.GetCurrentAccountId(), request.CurrentPassword, request.NewPassword), cancellationToken);
+        return NoContent();
     }
 }

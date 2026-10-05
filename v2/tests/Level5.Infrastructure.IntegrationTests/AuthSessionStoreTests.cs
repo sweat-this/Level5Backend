@@ -162,4 +162,75 @@ public sealed class AuthSessionStoreTests(PostgresFixture fixture)
         Assert.NotEqual(rawSecret, storedValue);
         Assert.Equal(hash, storedValue);
     }
+
+    [Fact]
+    public async Task Conditional_rotation_loses_after_account_generation_changes()
+    {
+        var accountId = await SeedAccountAsync();
+        var session = AuthSession.Create(accountId, $"hash-{Guid.NewGuid():N}", Now, Lifetime, sessionGeneration: 0);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(setup).AddAsync(session, default);
+            await setup.SaveChangesAsync();
+        }
+
+        await using var refreshDb = fixture.CreateDbContext();
+        var refreshStore = new AuthSessionStore(refreshDb);
+        var loadedSession = await refreshStore.FindByIdAsync(session.Id, default);
+
+        await using (var changeDb = fixture.CreateDbContext())
+        {
+            var accounts = new AccountStore(changeDb);
+            var account = await accounts.FindByIdAsync(accountId, default);
+            account!.ChangePassword("changed");
+            await accounts.StageCredentialUpdateAsync(account, 0, default);
+            await changeDb.SaveChangesAsync();
+        }
+
+        loadedSession!.Rotate($"rotated-{Guid.NewGuid():N}", Now, Lifetime);
+        Assert.False(await refreshStore.TryRotateForActiveGenerationAsync(loadedSession, 0, default));
+
+        var current = AuthSession.Create(accountId, $"current-{Guid.NewGuid():N}", Now, Lifetime, sessionGeneration: 1);
+        await using var currentDb = fixture.CreateDbContext();
+        var currentStore = new AuthSessionStore(currentDb);
+        await currentStore.AddAsync(current, default);
+        await currentDb.SaveChangesAsync();
+        current.Rotate($"current-rotated-{Guid.NewGuid():N}", Now, Lifetime);
+        Assert.True(await currentStore.TryRotateForActiveGenerationAsync(current, 0, default));
+    }
+
+    [Fact]
+    public async Task Rotation_that_wins_before_password_change_still_cannot_rotate_again_after_change()
+    {
+        var accountId = await SeedAccountAsync();
+        var session = AuthSession.Create(accountId, $"hash-{Guid.NewGuid():N}", Now, Lifetime, 0);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(setup).AddAsync(session, default);
+            await setup.SaveChangesAsync();
+        }
+
+        await using (var refreshDb = fixture.CreateDbContext())
+        {
+            var store = new AuthSessionStore(refreshDb);
+            var loaded = await store.FindByIdAsync(session.Id, default);
+            loaded!.Rotate($"winner-{Guid.NewGuid():N}", Now, Lifetime);
+            Assert.True(await store.TryRotateForActiveGenerationAsync(loaded, 0, default));
+        }
+
+        await using (var changeDb = fixture.CreateDbContext())
+        {
+            var accounts = new AccountStore(changeDb);
+            var account = await accounts.FindByIdAsync(accountId, default);
+            account!.ChangePassword("changed");
+            await accounts.StageCredentialUpdateAsync(account, 0, default);
+            await changeDb.SaveChangesAsync();
+        }
+
+        await using var retryDb = fixture.CreateDbContext();
+        var retryStore = new AuthSessionStore(retryDb);
+        var retry = await retryStore.FindByIdAsync(session.Id, default);
+        retry!.Rotate($"retry-{Guid.NewGuid():N}", Now, Lifetime);
+        Assert.False(await retryStore.TryRotateForActiveGenerationAsync(retry, 1, default));
+    }
 }
