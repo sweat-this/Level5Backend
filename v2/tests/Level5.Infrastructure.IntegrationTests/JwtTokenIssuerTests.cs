@@ -34,11 +34,18 @@ public sealed class JwtTokenIssuerTests
             Options.Create(MakeOptions(configuredLifetimeMinutes)),
             new StubClock(fixedNow));
 
-        var token = issuer.IssueAccessToken(AccountId.New());
+        var accountId = AccountId.New();
+        var sessionId = AuthSessionId.New();
+        var token = issuer.IssueAccessToken(accountId, sessionId);
         var encodedToken = new JwtSecurityTokenHandler().ReadJwtToken(token.Value);
         var expectedExpiry = fixedNow.AddMinutes(configuredLifetimeMinutes);
 
         Assert.Equal(expectedExpiry, token.ExpiresAt);
         Assert.Equal(expectedExpiry.UtcDateTime, encodedToken.ValidTo);
+        Assert.Equal(accountId.Value.ToString(), encodedToken.Subject);
+        Assert.Equal(sessionId.Value.ToString(), encodedToken.Claims.Single(claim => claim.Type == JwtRegisteredClaimNames.Sid).Value);
+        Assert.NotNull(encodedToken.Id);
+        Assert.DoesNotContain(encodedToken.Claims, claim => claim.Type is
+            "email" or "username" or "player_id" or "session_generation" or "client_kind" or "refresh_token");
     }
 }

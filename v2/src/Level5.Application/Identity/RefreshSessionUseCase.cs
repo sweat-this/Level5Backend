@@ -88,7 +88,7 @@ public sealed class RefreshSessionUseCase(
 
         ApplicationMetrics.RefreshOutcomes.Increment(ApplicationMetrics.OutcomeTag, "success");
 
-        var accessToken = tokenIssuer.IssueAccessToken(account.Id);
+        var accessToken = tokenIssuer.IssueAccessToken(account.Id, session.Id);
         return new RefreshSessionResult(account.Id, profile.Id, accessToken, newRefreshToken.RawValue, session.ExpiresAt);
     }
 }

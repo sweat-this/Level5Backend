@@ -171,6 +171,91 @@
         }
       }
     },
+    "/api/v2/me/sessions": {
+      "get": {
+        "tags": [
+          "AccountSessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountSessionResponseDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountSessionResponseDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountSessionResponseDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/me/sessions/{sessionId}": {
+      "delete": {
+        "tags": [
+          "AccountSessions"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v2/me/sessions/revoke-others": {
+      "post": {
+        "tags": [
+          "AccountSessions"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v2/me/sessions/revoke-all": {
+      "post": {
+        "tags": [
+          "AccountSessions"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/v2/auth/register": {
       "post": {
         "tags": [
@@ -1561,6 +1646,34 @@
         },
         "additionalProperties": false
       },
+      "AccountSessionResponseDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientKind": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastRefreshedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isCurrent": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "AttemptDescriptorDto": {
         "type": "object",
         "properties": {
@@ -2397,6 +2510,9 @@
   "tags": [
     {
       "name": "Account"
+    },
+    {
+      "name": "AccountSessions"
     },
     {
       "name": "Auth"

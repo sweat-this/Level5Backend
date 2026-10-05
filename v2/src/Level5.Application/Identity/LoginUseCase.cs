@@ -5,7 +5,7 @@ using Level5.Domain.Ids;
 
 namespace Level5.Application.Identity;
 
-public sealed record LoginRequest(string Username, string Password);
+public sealed record LoginRequest(string Username, string Password, ClientKind ClientKind = ClientKind.Unknown);
 
 public sealed record LoginResult(
     AccountId AccountId,
@@ -77,12 +77,14 @@ public sealed class LoginUseCase(
 
         var now = clock.UtcNow;
         var refreshToken = refreshTokenGenerator.Generate();
-        var session = AuthSession.Create(account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime, account.SessionGeneration);
+        var session = AuthSession.Create(
+            account.Id, refreshToken.Hash, now, sessionPolicy.RefreshTokenLifetime,
+            account.SessionGeneration, request.ClientKind);
         await authSessionStore.AddAsync(session, cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var accessToken = tokenIssuer.IssueAccessToken(account.Id);
+        var accessToken = tokenIssuer.IssueAccessToken(account.Id, session.Id);
         return new LoginResult(account.Id, profile.Id, accessToken, refreshToken.RawValue, session.ExpiresAt);
     }
 }

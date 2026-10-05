@@ -17,6 +17,8 @@ public class AuthSessionTests
 
         Assert.Equal(0, session.Revision);
         Assert.Null(session.RevokedAt);
+        Assert.Equal(Now, session.LastRefreshedAt);
+        Assert.Equal(ClientKind.Unknown, session.ClientKind);
         Assert.Equal(Now + Lifetime, session.ExpiresAt);
         Assert.True(session.CanRefresh(Now));
     }
@@ -49,6 +51,7 @@ public class AuthSessionTests
         session.Rotate("hash-2", rotateAt, Lifetime);
 
         Assert.Equal("hash-2", session.RefreshTokenHash);
+        Assert.Equal(rotateAt, session.LastRefreshedAt);
         Assert.Equal(rotateAt + Lifetime, session.ExpiresAt);
         Assert.Equal(1, session.Revision);
     }
@@ -60,6 +63,7 @@ public class AuthSessionTests
 
         Assert.Throws<SessionNotRefreshableException>(() =>
             session.Rotate("hash-2", Now + Lifetime, Lifetime));
+        Assert.Equal(Now, session.LastRefreshedAt);
     }
 
     [Fact]
@@ -70,6 +74,7 @@ public class AuthSessionTests
 
         Assert.Throws<SessionNotRefreshableException>(() =>
             session.Rotate("hash-2", Now, Lifetime));
+        Assert.Equal(Now, session.LastRefreshedAt);
     }
 
     [Fact]
@@ -101,14 +106,18 @@ public class AuthSessionTests
         var id = AuthSessionId.New();
         var revokedAt = Now + TimeSpan.FromHours(1);
 
-        var session = AuthSession.Rehydrate(id, _accountId, "hash-1", Now, Now + Lifetime, revokedAt, revision: 3);
+        var session = AuthSession.Rehydrate(
+            id, _accountId, "hash-1", Now, Now + TimeSpan.FromMinutes(5), Now + Lifetime,
+            revokedAt, ClientKind.Unity, revision: 3);
 
         Assert.Equal(id, session.Id);
         Assert.Equal(_accountId, session.AccountId);
         Assert.Equal("hash-1", session.RefreshTokenHash);
         Assert.Equal(Now, session.CreatedAt);
+        Assert.Equal(Now + TimeSpan.FromMinutes(5), session.LastRefreshedAt);
         Assert.Equal(Now + Lifetime, session.ExpiresAt);
         Assert.Equal(revokedAt, session.RevokedAt);
+        Assert.Equal(ClientKind.Unity, session.ClientKind);
         Assert.Equal(3, session.Revision);
     }
 }

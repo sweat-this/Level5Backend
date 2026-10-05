@@ -302,6 +302,10 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         public Task AddAsync(AuthSession session, CancellationToken cancellationToken) => inner.AddAsync(session, cancellationToken);
         public Task<bool> TrySaveAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
         public Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<long?> FindActiveGenerationAsync(AccountId accountId, AuthSessionId sessionId, DateTimeOffset now, CancellationToken cancellationToken) => inner.FindActiveGenerationAsync(accountId, sessionId, now, cancellationToken);
+        public Task<IReadOnlyList<AuthSessionSummary>> ListActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken) => inner.ListActiveAsync(accountId, currentSessionId, sessionGeneration, now, cancellationToken);
+        public Task RevokeActiveAsync(AccountId accountId, AuthSessionId sessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken) => inner.RevokeActiveAsync(accountId, sessionId, sessionGeneration, now, cancellationToken);
+        public Task RevokeOtherActiveAsync(AccountId accountId, AuthSessionId currentSessionId, long sessionGeneration, DateTimeOffset now, CancellationToken cancellationToken) => inner.RevokeOtherActiveAsync(accountId, currentSessionId, sessionGeneration, now, cancellationToken);
     }
 
     private sealed class ThrowingPasswordRecoveryDelivery : IPasswordRecoveryDelivery

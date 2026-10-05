@@ -38,6 +38,8 @@ public sealed class AuthSessionStoreTests(PostgresFixture fixture)
         Assert.Equal(accountId, reloaded!.AccountId);
         Assert.Equal("hash-of-refresh-token", reloaded.RefreshTokenHash);
         Assert.Null(reloaded.RevokedAt);
+        Assert.Equal(Now, reloaded.LastRefreshedAt, TimeSpan.FromMilliseconds(1));
+        Assert.Equal(ClientKind.Unknown, reloaded.ClientKind);
         Assert.Equal(0, reloaded.Revision);
     }
 
@@ -94,10 +96,10 @@ public sealed class AuthSessionStoreTests(PostgresFixture fixture)
         var sessionA = await storeA.FindByIdAsync(original.Id, CancellationToken.None);
         var sessionB = await storeB.FindByIdAsync(original.Id, CancellationToken.None);
 
-        sessionA!.Rotate($"hash-a-{Guid.NewGuid():N}", Now, Lifetime);
+        sessionA!.Rotate($"hash-a-{Guid.NewGuid():N}", Now.AddMinutes(1), Lifetime);
         var savedA = await storeA.TrySaveAsync(sessionA, expectedRevision: 0, CancellationToken.None);
 
-        sessionB!.Rotate($"hash-b-{Guid.NewGuid():N}", Now, Lifetime);
+        sessionB!.Rotate($"hash-b-{Guid.NewGuid():N}", Now.AddMinutes(2), Lifetime);
         var savedB = await storeB.TrySaveAsync(sessionB, expectedRevision: 0, CancellationToken.None);
 
         Assert.True(savedA);
@@ -106,6 +108,7 @@ public sealed class AuthSessionStoreTests(PostgresFixture fixture)
         await using var verifyDb = fixture.CreateDbContext();
         var final = await new AuthSessionStore(verifyDb).FindByIdAsync(original.Id, CancellationToken.None);
         Assert.Equal(sessionA.RefreshTokenHash, final!.RefreshTokenHash);
+        Assert.Equal(sessionA.LastRefreshedAt, final.LastRefreshedAt, TimeSpan.FromMilliseconds(1));
         Assert.Equal(1, final.Revision);
     }
 
@@ -232,5 +235,98 @@ public sealed class AuthSessionStoreTests(PostgresFixture fixture)
         var retry = await retryStore.FindByIdAsync(session.Id, default);
         retry!.Rotate($"retry-{Guid.NewGuid():N}", Now, Lifetime);
         Assert.False(await retryStore.TryRotateForActiveGenerationAsync(retry, 1, default));
+    }
+
+    [Fact]
+    public async Task Revoke_committing_before_refresh_makes_the_stale_rotation_lose()
+    {
+        var accountId = await SeedAccountAsync();
+        var session = AuthSession.Create(accountId, $"race-{Guid.NewGuid():N}", Now, Lifetime);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(setup).AddAsync(session, default);
+            await setup.SaveChangesAsync();
+        }
+
+        await using var refreshDb = fixture.CreateDbContext();
+        var stale = await new AuthSessionStore(refreshDb).FindByIdAsync(session.Id, default);
+
+        await using (var revokeDb = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(revokeDb).RevokeActiveAsync(
+                accountId, session.Id, session.SessionGeneration, Now.AddMinutes(1), default);
+        }
+
+        stale!.Rotate($"rotated-{Guid.NewGuid():N}", Now.AddMinutes(1), Lifetime);
+        Assert.False(await new AuthSessionStore(refreshDb).TryRotateForActiveGenerationAsync(stale, 0, default));
+
+        await using var verify = fixture.CreateDbContext();
+        Assert.NotNull((await new AuthSessionStore(verify).FindByIdAsync(session.Id, default))!.RevokedAt);
+    }
+
+    [Fact]
+    public async Task Refresh_committing_before_revoke_is_still_revoked_in_its_new_state()
+    {
+        var accountId = await SeedAccountAsync();
+        var session = AuthSession.Create(accountId, $"race-{Guid.NewGuid():N}", Now, Lifetime);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(setup).AddAsync(session, default);
+            await setup.SaveChangesAsync();
+        }
+
+        await using (var refreshDb = fixture.CreateDbContext())
+        {
+            var store = new AuthSessionStore(refreshDb);
+            var loaded = await store.FindByIdAsync(session.Id, default);
+            loaded!.Rotate($"rotated-{Guid.NewGuid():N}", Now.AddMinutes(1), Lifetime);
+            Assert.True(await store.TryRotateForActiveGenerationAsync(loaded, 0, default));
+        }
+
+        await using (var revokeDb = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(revokeDb).RevokeActiveAsync(
+                accountId, session.Id, session.SessionGeneration, Now.AddMinutes(2), default);
+        }
+
+        await using var verify = fixture.CreateDbContext();
+        var final = await new AuthSessionStore(verify).FindByIdAsync(session.Id, default);
+        Assert.NotNull(final!.RevokedAt);
+        Assert.Equal(2, final.Revision);
+        Assert.Equal(Now.AddMinutes(1), final.LastRefreshedAt, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task Revoke_others_catches_a_target_that_rotated_first_and_preserves_current_session()
+    {
+        var accountId = await SeedAccountAsync();
+        var current = AuthSession.Create(accountId, $"current-{Guid.NewGuid():N}", Now, Lifetime);
+        var target = AuthSession.Create(accountId, $"target-{Guid.NewGuid():N}", Now, Lifetime);
+        await using (var setup = fixture.CreateDbContext())
+        {
+            var store = new AuthSessionStore(setup);
+            await store.AddAsync(current, default);
+            await store.AddAsync(target, default);
+            await setup.SaveChangesAsync();
+        }
+
+        await using (var refreshDb = fixture.CreateDbContext())
+        {
+            var store = new AuthSessionStore(refreshDb);
+            var loaded = await store.FindByIdAsync(target.Id, default);
+            loaded!.Rotate($"rotated-{Guid.NewGuid():N}", Now.AddMinutes(1), Lifetime);
+            Assert.True(await store.TryRotateForActiveGenerationAsync(loaded, 0, default));
+        }
+
+        await using (var revokeDb = fixture.CreateDbContext())
+        {
+            await new AuthSessionStore(revokeDb).RevokeOtherActiveAsync(
+                accountId, current.Id, current.SessionGeneration, Now.AddMinutes(2), default);
+        }
+
+        await using var verify = fixture.CreateDbContext();
+        var storeVerify = new AuthSessionStore(verify);
+        Assert.Null((await storeVerify.FindByIdAsync(current.Id, default))!.RevokedAt);
+        Assert.NotNull((await storeVerify.FindByIdAsync(target.Id, default))!.RevokedAt);
     }
 }

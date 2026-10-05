@@ -3,6 +3,14 @@ using Level5.Domain.Ids;
 
 namespace Level5.Application.Abstractions;
 
+public sealed record AuthSessionSummary(
+    AuthSessionId SessionId,
+    ClientKind ClientKind,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastRefreshedAt,
+    DateTimeOffset ExpiresAt,
+    bool IsCurrent);
+
 public interface IAuthSessionStore
 {
     Task<AuthSession?> FindByIdAsync(AuthSessionId id, CancellationToken cancellationToken);
@@ -23,4 +31,35 @@ public interface IAuthSessionStore
 
     /// <summary>Rotates only if the session revision and owning active account generation still match.</summary>
     Task<bool> TryRotateForActiveGenerationAsync(AuthSession session, long expectedRevision, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns the caller session's generation only when the signed account/session pair is
+    /// currently active. This is the account-security surface's deliberately scoped stateful guard.
+    /// </summary>
+    Task<long?> FindActiveGenerationAsync(
+        AccountId accountId,
+        AuthSessionId sessionId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<AuthSessionSummary>> ListActiveAsync(
+        AccountId accountId,
+        AuthSessionId currentSessionId,
+        long sessionGeneration,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task RevokeActiveAsync(
+        AccountId accountId,
+        AuthSessionId sessionId,
+        long sessionGeneration,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task RevokeOtherActiveAsync(
+        AccountId accountId,
+        AuthSessionId currentSessionId,
+        long sessionGeneration,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
 }

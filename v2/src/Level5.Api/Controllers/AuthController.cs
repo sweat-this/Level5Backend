@@ -31,14 +31,16 @@ public sealed class AuthController(
     RefreshSessionUseCase refreshSession,
     LogoutUseCase logout,
     RequestPasswordResetUseCase requestPasswordReset,
-    CompletePasswordResetUseCase completePasswordReset) : ControllerBase
+    CompletePasswordResetUseCase completePasswordReset,
+    IClientKindAccessor clientKind) : ControllerBase
 {
     [HttpPost("register")]
     [EnableRateLimiting(AuthRateLimitPolicyNames.Register)]
     public async Task<ActionResult<AccessTokenResponseDto>> Register(RegisterRequestDto request, CancellationToken cancellationToken)
     {
         var result = await registerAccount.ExecuteAsync(
-            new RegisterAccountRequest(request.Username, request.Password, request.DisplayName), cancellationToken);
+            new RegisterAccountRequest(request.Username, request.Password, request.DisplayName, clientKind.GetClientKind()),
+            cancellationToken);
 
         return Ok(new AccessTokenResponseDto(
             result.AccessToken.Value, result.AccessToken.ExpiresAt, result.PlayerId.Value,
@@ -49,7 +51,8 @@ public sealed class AuthController(
     [EnableRateLimiting(AuthRateLimitPolicyNames.Login)]
     public async Task<ActionResult<AccessTokenResponseDto>> Login(LoginRequestDto request, CancellationToken cancellationToken)
     {
-        var result = await login.ExecuteAsync(new LoginRequest(request.Username, request.Password), cancellationToken);
+        var result = await login.ExecuteAsync(
+            new LoginRequest(request.Username, request.Password, clientKind.GetClientKind()), cancellationToken);
 
         return Ok(new AccessTokenResponseDto(
             result.AccessToken.Value, result.AccessToken.ExpiresAt, result.PlayerId.Value,

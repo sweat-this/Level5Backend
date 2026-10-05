@@ -95,6 +95,11 @@ builder.Services.AddScoped<CompleteEmailVerificationUseCase>();
 builder.Services.AddScoped<RequestPasswordResetUseCase>();
 builder.Services.AddScoped<CompletePasswordResetUseCase>();
 builder.Services.AddScoped<ChangePasswordUseCase>();
+builder.Services.AddScoped<AccountSecuritySessionGuard>();
+builder.Services.AddScoped<ListAccountSessionsUseCase>();
+builder.Services.AddScoped<RevokeAccountSessionUseCase>();
+builder.Services.AddScoped<RevokeOtherAccountSessionsUseCase>();
+builder.Services.AddScoped<RevokeAllAccountSessionsUseCase>();
 builder.Services.AddScoped<ResolvePlayerByTagUseCase>();
 builder.Services.AddScoped<UpdateMyPlayerProfileUseCase>();
 builder.Services.AddScoped<GetMyPlayerProfileUseCase>();
@@ -124,6 +129,8 @@ builder.Services.AddScoped<ExpireStalePendingChallengesUseCase>();
 builder.Services.AddHostedService<ChallengeExpirySweepService>();
 
 builder.Services.AddScoped<ICurrentAccountAccessor, CurrentAccountAccessor>();
+builder.Services.AddScoped<ICurrentAuthSessionAccessor, CurrentAuthSessionAccessor>();
+builder.Services.AddScoped<IClientKindAccessor, ClientKindAccessor>();
 builder.Services.AddScoped<ICurrentPlayerProvider, CurrentPlayerProvider>();
 
 builder.Services.AddCors(options =>

@@ -10,8 +10,10 @@ public sealed class AuthSessionRow
     public Guid AccountId { get; set; }
     public required string RefreshTokenHash { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastRefreshedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
+    public required string ClientKind { get; set; }
     public long Revision { get; set; }
     public long SessionGeneration { get; set; }
 }

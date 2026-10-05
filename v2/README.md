@@ -62,7 +62,7 @@ Not yet built: richer profiles, notifications, anything in the
 | Area | Finding | Decision |
 |---|---|---|
 | Runtime | .NET 10, ASP.NET Core, EF Core 10, Npgsql 10, Postgres 18 (already migrated from MySQL) | Reuse the same stack for V2 - no reason to diverge |
-| Auth | Hand-rolled `TokenController` issuing JWTs, password hashed with a custom scheme, no ASP.NET Identity | V2 uses `Microsoft.AspNetCore.Identity`'s `PasswordHasher<T>` behind an `IPasswordHasher` port; JWT issuance behind `ITokenIssuer`; claims kept to `sub` only (no email/name) |
+| Auth | Hand-rolled `TokenController` issuing JWTs, password hashed with a custom scheme, no ASP.NET Identity | V2 uses `Microsoft.AspNetCore.Identity`'s `PasswordHasher<T>` behind an `IPasswordHasher` port; JWT issuance behind `ITokenIssuer`; claims kept to `sub`, `sid`, and per-token `jti` only (no email/name/profile/session-generation data) |
 | Identity model | Sequential `int` PKs; `Signupdate`/`Lastlogin` stored as `varchar(45)` strings, not real timestamps | V2 uses UUIDv7 (`Guid.CreateVersion7()`) for all IDs and `DateTimeOffset` everywhere; no int PKs, no string timestamps. `Account` carries a minimal `AccountStatus` (`Active`/`Disabled`, defaulting `Active`) and an optional private, normalized `Email` - see [Domain boundaries](#domain-boundaries-this-slice) |
 | Persistence | Scaffolded EF model 1:1 with a MySQL-derived schema (e.g. `Highscores.Difficulty` defaults hidden in `HasDefaultValueSql`) | V2's schema is derived from the domain, not reverse-engineered from a table; see [Persistence](#persistence) |
 | Tests | Legacy has a single controller-level test project (`Level5Backend.Tests`), added on `dev` after this audit began; no domain or integration coverage | V2 ships with domain, application, infrastructure-integration, API-integration, and architecture tests from the start |
@@ -433,16 +433,18 @@ persistent rotating refresh sessions, logout/revocation, `AccountStatus` enforce
 centralized password policy.
 
 - **Access tokens**: short-lived JWTs (`Jwt:AccessTokenLifetimeMinutes`, default 15 minutes),
-  issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal: `sub` is the V2 `AccountId` and
-  `jti` uniquely identifies the token; there is no email, username, account status, session id, or
-  other mutable account/session state in the token. The configured lifetime is applied from the
+  issued by `ITokenIssuer`/`JwtTokenIssuer`. Claims stay minimal: `sub` is the V2 `AccountId`,
+  `sid` is the stable `AuthSessionId` that issued the token, and `jti` uniquely identifies each
+  individual access token. There is no email, username, player id, account status, session
+  generation, refresh state, or client metadata in the token. The configured lifetime is applied from the
   issuer's injected clock and is covered by a deterministic `JwtTokenIssuerTests` assertion using
   a non-default lifetime. Bearer validation applies zero clock skew, so the token stops being
   accepted at its encoded `exp` rather than receiving the framework's default five-minute grace
   period.
 - **Refresh sessions**: `AuthSession` (`Level5.Domain.Identity`) is a persistent, rotating
   session - stable id, owning `AccountId`, a one-way hash of the current refresh credential
-  (`RefreshTokenHash`), `CreatedAt`/`ExpiresAt`/`RevokedAt`, and a `Revision` used exactly like
+  (`RefreshTokenHash`), `CreatedAt`/`LastRefreshedAt`/`ExpiresAt`/`RevokedAt`, coarse display-only
+  `ClientKind` (`Unknown`/`Web`/`Unity`), and a `Revision` used exactly like
   `VersusSeries.Revision` for optimistic concurrency. Default lifetime is 30 days
   (`Sessions:RefreshTokenLifetimeDays`), extended on every successful rotation.
 - **Refresh credential security**: the raw refresh secret is 256 bits from
@@ -464,6 +466,21 @@ centralized password policy.
   old credential is unusable immediately afterward. Covered by
   `AuthSessionStoreTests.TrySaveAsync_rotation_wins_on_the_correct_revision_and_loses_on_a_stale_one`
   against real Postgres.
+- **Self-service session security**: `GET /api/v2/me/sessions` returns only `SessionId`,
+  `ClientKind`, `CreatedAt`, `LastRefreshedAt`, `ExpiresAt`, and signed-`sid`-derived `IsCurrent`.
+  `DELETE /api/v2/me/sessions/{sessionId}`, `POST /api/v2/me/sessions/revoke-others`, and
+  `POST /api/v2/me/sessions/revoke-all` provide idempotent targeted, keep-current, and global
+  revocation. An active session requires an Active account, matching account/generation, no
+  revocation, and future expiry. These endpoints alone perform the stateful `sub + sid` guard;
+  tokens issued before `sid` was introduced continue to work on existing authenticated APIs but
+  receive `401 reauthentication_required` here. Revoke-one and revoke-others use set-based updates
+  that increment `Revision`, so refresh cannot escape either database commit ordering. Revoke-all
+  advances `Account.SessionGeneration` once and does not scan or rewrite session rows.
+- **Client metadata privacy**: register/login may send `X-SweatThis-Client: web|unity`; missing,
+  unrecognized, or arbitrary values persist only as `Unknown`. It is display metadata, never an
+  authorization input. No raw User-Agent, IP/location history, device/hardware/installation id,
+  fingerprint, advertising id, refresh credential/hash, or session generation is exposed in the
+  session view.
 - **One stable failure contract for refresh**: unknown, expired, revoked, already-rotated
   (replayed), and "owned by a non-`Active` account" all surface as the same `401` /
   `invalid_refresh_token` - a client can never learn which one occurred.
@@ -478,8 +495,8 @@ centralized password policy.
 - **Access-token behavior after logout/revocation (explicit policy)**: revoking a refresh session
   stops it from minting *future* access tokens; it does **not** invalidate an access token already
   issued from it, which remains valid until its own short expiry. There is deliberately no
-  database lookup on the bearer-authenticated request path to check session state - only the
-  refresh/logout endpoints touch `auth_sessions`. If a product requirement later demands immediate
+  database lookup on the general bearer-authenticated request path to check session state - only
+  refresh/logout and the scoped self-service session-security endpoints touch `auth_sessions`. If a product requirement later demands immediate
   revocation of already-issued access tokens, that is a stateful-JWT-validation decision to make
   deliberately (e.g. a token denylist), not something to introduce silently.
 - **Disabled accounts (explicit bounded-revocation policy)**: `LoginUseCase` checks status after
