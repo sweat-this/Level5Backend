@@ -29,7 +29,7 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         }
         else if (status == StatusCodes.Status503ServiceUnavailable)
         {
-            logger.LogError(exception, "Database unavailable processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+            logger.LogError(exception, "Service unavailable processing {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
             ApiMetrics.UnhandledServerErrors.Add(1, new KeyValuePair<string, object?>(ApiMetrics.CodeTag, code));
         }
 
@@ -66,6 +66,14 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code),
         Level5.Application.Identity.InvalidCredentialsException e => (StatusCodes.Status401Unauthorized, e.Code),
         Level5.Application.Identity.InvalidRefreshTokenException e => (StatusCodes.Status401Unauthorized, e.Code),
+        Level5.Application.Identity.CurrentPasswordInvalidException e => (StatusCodes.Status401Unauthorized, e.Code),
+        Level5.Application.Identity.AccountSecurityActionForbiddenException e => (StatusCodes.Status403Forbidden, e.Code),
+        Level5.Application.Identity.EmailUnavailableException e => (StatusCodes.Status409Conflict, e.Code),
+        Level5.Application.Identity.EmailVerificationCooldownException e => (StatusCodes.Status429TooManyRequests, e.Code),
+        Level5.Application.Identity.InvalidEmailVerificationException e => (StatusCodes.Status400BadRequest, e.Code),
+        Level5.Application.Identity.EmailVerificationDeliveryUnavailableException e => (StatusCodes.Status503ServiceUnavailable, e.Code),
+        Level5.Domain.Identity.VerifiedEmailChangeNotAllowedException =>
+            (StatusCodes.Status409Conflict, "verified_email_change_not_allowed"),
         FriendshipRequiredException e => (StatusCodes.Status403Forbidden, e.Code),
         ConflictException e => (StatusCodes.Status409Conflict, e.Code),
         ValidationFailedException e => (StatusCodes.Status400BadRequest, e.Code),

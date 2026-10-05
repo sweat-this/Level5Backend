@@ -524,15 +524,40 @@ centralized password policy.
   hands out credentials for state that was not actually persisted.
 - **Configuration**: `Sessions:RefreshTokenLifetimeDays` (default 30, range 1-365), validated at
   startup the same way `Jwt:*` is (`ValidateDataAnnotations().ValidateOnStart()`), set via
-  `dotnet user-secrets` locally or `Sessions__RefreshTokenLifetimeDays` in production. No new
-  required configuration beyond this - refresh-token hashing and password-policy limits are fixed
-  constants, not configuration surface, since nothing in this slice needs them tunable.
-- **Rate limiting**: register, login, refresh, and logout each have an independent per-IP
+  `dotnet user-secrets` locally or `Sessions__RefreshTokenLifetimeDays` in production. Refresh-token
+  hashing and password-policy limits remain fixed constants; email-verification timing is the
+  separately validated operational configuration documented below.
+- **Rate limiting**: register, login, refresh, logout, email-verification request, resend, and
+  completion each have an independent per-IP
   fixed-window budget (see [Local development](#local-development) below). The current Production
   configuration permits five requests per minute for each operation, rather than five requests per
-  minute shared across all four. This intentionally increases the theoretical per-IP aggregate to
-  20 auth requests per minute; no second aggregate limiter is applied. Non-Production permits 1000
+  minute shared across all seven. This intentionally permits a theoretical per-IP aggregate of 35
+  requests per minute; no second aggregate limiter is applied. Non-Production permits 1000
   requests per minute for each operation so local and integration-test traffic does not interfere.
+
+### Optional verified recovery email
+
+Registration remains exactly `username + password + displayName`; an account is fully usable with
+no email. An authenticated Active account can install or replace an unverified private address only
+after current-password verification through `POST /api/v2/me/email/verification`. A verified
+address is immutable in this flow (issue #64 owns changes). `GET /api/v2/me/email` is the private
+self-only status projection, and resend never accepts a replacement target.
+
+Email verification uses one `email_verification_challenges` row per account. A CSPRNG produces a
+256-bit base64url credential, only its SHA-256 hash is stored, and every request/resend rotates the
+credential. The target email snapshot binds the credential to the attached address. Completion is
+an anonymous POST body operation (`POST /api/v2/email-verification/complete`): possession of the
+credential proves mailbox control. Account verification and challenge consumption commit in one
+`SaveChanges`; revision concurrency permits one completion winner and replays receive the same
+generic failure as unknown, expired, superseded, or mismatched credentials.
+
+`EmailVerification:TokenLifetimeHours` (default 24) and
+`EmailVerification:ResendCooldownMinutes` (default 5) are validated at startup. The cooldown is
+persisted through the challenge's `IssuedAt`, so changing IPs or API instances cannot bypass it.
+Persistence always commits before delivery. `IEmailVerificationDelivery` is provider-neutral; the
+default adapter deliberately returns `email_verification_delivery_unavailable` without logging the
+raw token. A real provider adapter is therefore an explicit production operational dependency, and
+failed delivery leaves recoverable unverified state that a later explicit resend can rotate.
 
 ## Public player identity and self-update
 
@@ -706,6 +731,12 @@ is uniquely indexed - the database itself enforces that two sessions never share
 credential representation - and `revision` is the optimistic-concurrency token
 `AuthSessionStore.TrySaveAsync` conditions its writes on, exactly like `competitive_series.revision`.
 
+**`accounts` <-> `email_verification_challenges`**: `accounts.email_verified_at` is nullable and
+the migration gives historical emails no verification timestamp. The challenge table has a
+restricting account FK plus unique indexes on `account_id` (one logical challenge per account) and
+`token_hash` (one-way credential lookup). `revision` is an optimistic-concurrency token; the
+target's display and canonical forms are stored as an issuance-time snapshot.
+
 **`player_profiles` <-> social/correspondence (issue #20)**: every persisted player reference in
 `friend_requests`, `friendships`, and `competitive_series` is a real, database-enforced foreign key
 to `player_profiles.id`, all `ON DELETE RESTRICT`:
@@ -762,7 +793,8 @@ canonicalization - correct or otherwise - is needed at all.
 
 **PostgreSQL foundation hardening (no third rebaseline).** That hardening pass re-audited the chain
 and deliberately left it as-is: `InitialCreate` → `AddMatchResults` →
-`ConvertMatchResultModeAndLevelIdsToInteger` → `AddMatchResultsModeIdIndex`. The canonicalization
+`ConvertMatchResultModeAndLevelIdsToInteger` → `AddMatchResultsModeIdIndex` →
+`AddCompetitiveSeriesStatusCreatedAtIndex` → `AddEmailVerificationFoundation`. The canonicalization
 hazard and the missing player foreign keys that would have justified squashing were already
 resolved by the #20 rebaseline above (`SchemaTests` pins both), and this project has already
 committed to additive migrations from #20 onward - `MatchResultsMigrationUpgradeTests` exercises
@@ -814,7 +846,7 @@ strings), persistence model (domain-derived hybrid schema vs. a scaffolded 1:1 t
 data into V2, `ServerStats`,
 `ServerMessages`, `UserReport`, admin/dev endpoints (including any account-status-changing
 endpoint - disabling an account is still a direct-database operation, see
-[Authentication and sessions](#authentication-and-sessions)), email verification, password reset,
+[Authentication and sessions](#authentication-and-sessions)), password reset,
 account recovery, MFA, OAuth/social login, device/session-management UI, refresh-token
 families/reuse-compromise tracking, a token denylist, public profile fields beyond display
 name/tag/avatar-id, any of the [non-goals](#non-goals-for-this-slice) below.
@@ -1157,6 +1189,11 @@ serve traffic
   - `Jwt__Key` (≥32 characters), `Jwt__Issuer`, `Jwt__Audience` - validated at startup
     (`ValidateOnStart()`); a missing/short key fails the host immediately, not on first login
   - `Sessions__RefreshTokenLifetimeDays` (optional, defaults to 30)
+  - `EmailVerification__TokenLifetimeHours` (optional, defaults to 24) and
+    `EmailVerification__ResendCooldownMinutes` (optional, defaults to 5)
+  - production email verification also requires replacing the fail-closed default
+    `IEmailVerificationDelivery` registration with an operational provider adapter; no provider or
+    provider secret is selected by this repository yet
   - `Telemetry__Otlp__Endpoint` (optional - set only where a collector exists)
   - `ForwardedHeaders__KnownProxies` / `ForwardedHeaders__KnownNetworks` (only if deployed behind a
     reverse proxy/load balancer - see [Running behind a reverse proxy](#running-behind-a-reverse-proxy))
@@ -1184,7 +1221,7 @@ serve traffic
     errors/timeouts.
   - *`503 service_unavailable` responses*: a transient database failure outlived the bounded retry
     budget, or timed out (see [PostgreSQL resiliency](#postgresql-resiliency-and-connection-budget)); the paired
-    `Database unavailable processing ...` log entry carries the underlying Npgsql exception.
+  `Service unavailable processing ...` log entry carries the underlying exception.
   - *5xx spikes*: `http.server.5xx` (tag `code`) plus the `ApiExceptionHandler`
     `LogError(exception, "Unhandled exception processing {Method} {Path}", ...)` entries that
     accompany every one of them - the log line has the exception detail the metric deliberately

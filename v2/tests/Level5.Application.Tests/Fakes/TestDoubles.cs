@@ -94,6 +94,94 @@ public sealed class FakeAuthSessionPolicy : IAuthSessionPolicy
     public TimeSpan RefreshTokenLifetime { get; set; } = TimeSpan.FromDays(30);
 }
 
+public sealed class FakeEmailVerificationPolicy : IEmailVerificationPolicy
+{
+    public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromHours(24);
+    public TimeSpan ResendCooldown { get; set; } = TimeSpan.FromMinutes(5);
+}
+
+public sealed class FakeEmailVerificationTokenGenerator : IEmailVerificationTokenGenerator
+{
+    private int _sequence;
+
+    public GeneratedEmailVerificationToken Generate()
+    {
+        var raw = $"email-token-{++_sequence}";
+        return new GeneratedEmailVerificationToken(raw, Hash(raw));
+    }
+
+    public string Hash(string rawValue)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawValue)));
+}
+
+public sealed class FakeEmailVerificationDelivery : IEmailVerificationDelivery
+{
+    public List<(Email Destination, string RawToken, DateTimeOffset ExpiresAt)> Deliveries { get; } = [];
+    public bool ThrowOnDelivery { get; set; }
+    public Action? OnDelivery { get; set; }
+
+    public Task DeliverAsync(
+        Email destination,
+        string rawToken,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        OnDelivery?.Invoke();
+        if (ThrowOnDelivery)
+        {
+            throw new Level5.Application.Identity.EmailVerificationDeliveryUnavailableException();
+        }
+
+        Deliveries.Add((destination, rawToken, expiresAt));
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class TrackingUnitOfWork : IUnitOfWork
+{
+    public bool Saved { get; private set; }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        Saved = true;
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class InMemoryEmailVerificationChallengeStore : IEmailVerificationChallengeStore
+{
+    private EmailVerificationChallenge? _challenge;
+
+    public Task<EmailVerificationChallenge?> FindByAccountIdAsync(AccountId accountId, CancellationToken cancellationToken)
+        => Task.FromResult(_challenge?.AccountId == accountId ? Clone(_challenge) : null);
+
+    public Task<EmailVerificationChallenge?> FindByTokenHashAsync(string tokenHash, CancellationToken cancellationToken)
+        => Task.FromResult(_challenge?.TokenHash == tokenHash ? Clone(_challenge) : null);
+
+    public Task AddAsync(EmailVerificationChallenge challenge, CancellationToken cancellationToken)
+    {
+        _challenge = Clone(challenge);
+        return Task.CompletedTask;
+    }
+
+    public Task StageUpdateAsync(EmailVerificationChallenge challenge, CancellationToken cancellationToken)
+    {
+        _challenge = Clone(challenge);
+        return Task.CompletedTask;
+    }
+
+    private static EmailVerificationChallenge Clone(EmailVerificationChallenge source)
+        => EmailVerificationChallenge.Rehydrate(
+            source.Id,
+            source.AccountId,
+            source.TargetEmail,
+            source.TokenHash,
+            source.IssuedAt,
+            source.ExpiresAt,
+            source.ConsumedAt,
+            source.Revision);
+}
+
 /// <summary>Accepts anything non-empty - the real policy is covered by its own Infrastructure tests; use-case tests only need to know the port is invoked in the right place.</summary>
 public sealed class FakePasswordPolicy : IPasswordPolicy
 {
@@ -199,6 +287,12 @@ public sealed class InMemoryAccountStore : IAccountStore
     }
 
     public Task UpdateAsync(Account account, CancellationToken cancellationToken)
+    {
+        _accounts[account.Id.Value] = account;
+        return Task.CompletedTask;
+    }
+
+    public Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken)
     {
         _accounts[account.Id.Value] = account;
         return Task.CompletedTask;

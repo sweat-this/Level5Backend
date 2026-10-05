@@ -13,6 +13,9 @@ public interface IAccountStore
 
     Task AddAsync(Account account, CancellationToken cancellationToken);
 
-    /// <summary>Writes back changes made to a previously-loaded account (e.g. a rehashed password).</summary>
+    /// <summary>Stages only password/status changes made to a previously-loaded account.</summary>
     Task UpdateAsync(Account account, CancellationToken cancellationToken);
+
+    /// <summary>Stages only private email and verification fields for the next unit-of-work commit.</summary>
+    Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken);
 }

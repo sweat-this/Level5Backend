@@ -180,26 +180,27 @@ Until that decision exists, do not add speculative `GameId` columns or parallel 
 
 ## 4. Registration and email
 
-**Current fact.** Registration accepts exactly `username + password + displayName`. It atomically
+**Selected policy (issue #58): optional verified recovery email.** Registration continues to accept
+exactly `username + password + displayName`. It atomically
 creates an active Account, one PlayerProfile/PlayerTag, and one AuthSession. It does not accept or
 populate email.
 
-`Account` and persistence already support an optional private email. The database has nullable
+`Account` and persistence support an optional private email. The database has nullable
 `Email` and `EmailCanonical` columns and a unique index on canonical email; multiple null values are
-allowed. `Email` performs structural validation, trimming, and canonicalization only. There is no
-ownership verification, verification state, challenge/token, delivery provider, or attachment API.
+allowed. `Email` performs structural validation, trimming, and canonicalization. A signed-in active
+account may attach or replace an unverified address only after current-password verification. A
+verified address cannot be changed by this flow; issue #64 owns that lifecycle.
 
-**Decision required.** Product must select exactly one initial policy before email or recovery work:
+`EmailVerifiedAt` is the verification authority. A dedicated, one-per-account challenge stores a
+target-address snapshot and only a SHA-256 hash of a 256-bit opaque credential. Credentials expire
+after the configured lifetime, rotate on resend, and are single-use through optimistic concurrency.
+The configured operational defaults are a 24-hour token lifetime and a five-minute persistent
+per-account resend cooldown, supplemented by independent per-IP endpoint limits.
 
-1. **No email/recovery initially.** Keep registration unchanged and do not imply recoverability.
-2. **Optional verified recovery email.** Registration may remain email-free; a signed-in player can
-   attach an email and complete ownership verification before it becomes a recovery factor.
-3. **Required verified email.** Define whether the account is usable before verification, resend and
-   expiry rules, address-change behavior, uniqueness disclosure, and recovery/support fallback.
-
-An unverified stored email is contact data, not proof of control. It must never authorize a password
-reset. Email enumeration resistance, resend throttling, challenge expiry, single-use semantics, and
-address-change/session consequences must be specified with the selected policy.
+An unverified stored email remains contact data, not proof of control, and must never authorize a
+password reset. Public PlayerProfile projections and JWTs remain email-free. Delivery is behind a
+provider-neutral port; until operations supplies a provider adapter, persistence succeeds first and
+delivery fails explicitly so an explicit resend remains possible.
 
 ## 5. Password lifecycle
 
@@ -327,13 +328,13 @@ diagnostics.
 
 | Capability | Current | Requirement/direction | Decision required before implementation |
 | --- | --- | --- | --- |
-| Registration | Implemented: username + password + displayName; creates Account, PlayerProfile, AuthSession | Preserve current flow until email policy changes | Email policy; verified-email timing if selected |
+| Registration | Implemented: username + password + displayName; creates Account, PlayerProfile, AuthSession | Preserve unchanged under optional-email policy | None for issue #58 |
 | Login | Implemented by username/password with generic failures and Active-status enforcement | Shared Sweat This account login | None for current behavior |
 | Refresh | Implemented as one-time rotation with optimistic concurrency | Preserve current semantics | Only if later lifecycle operations change revocation scope |
 | Logout | Implemented for one presented refresh session | Preserve stateless access-token policy | Whether a future “log out all” capability is required |
 | Display-name update | Implemented for the caller's PlayerProfile | Shared platform profile | None for current behavior |
-| Email attachment | Not implemented; nullable persistence fields exist | Deferred | No email vs optional verified vs required verified; address-change rules |
-| Email verification | Not implemented | Deferred | Selected email policy, provider, token/expiry/resend/enumeration rules |
+| Email attachment | Implemented: authenticated Active account plus current password; unverified targets replaceable | Optional verified recovery email | Verified-address change remains #64 |
+| Email verification | Implemented: expiring, rotating, single-use hashed challenge with cooldown and generic failures | Only verified email may become a recovery factor | Production delivery provider remains operational work |
 | Password change | Not implemented | Deferred | Reauthentication and refresh-session revocation policy |
 | Password recovery | Not implemented; no verified recovery factor | Blocked by recovery-factor decision | Verified factor, reset-token rules, session revocation, support fallback |
 | Account disable | Domain status and login/refresh enforcement exist; no status-changing API | Existing bounded revocation remains authoritative | Actor/authorization, reason/audit, reactivation, notification, token cutoff |
@@ -349,7 +350,7 @@ these into one implementation PR.
 
 | Order | Deferred slice | Dependencies | Schema migration | Public API | Unity client | Frontend BFF/UI | Email provider / infrastructure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Email attachment and verification | Select no/optional/required email policy; verification, address-change, enumeration, resend, and expiry rules | Yes: verification/challenge state is not present | Yes | Only if Unity must manage email; otherwise no initial change | Yes for web management | Yes |
+| 1 | Email attachment and verification | Implemented by issue #58 with optional verified recovery email; verified-address change stays in #64 | Yes: `EmailVerifiedAt` plus dedicated challenge table | Yes | No initial change | Future account-security UI may consume the additive API | Yes |
 | 2 | Authenticated password change | Reauthentication and refresh-session revocation policy | Likely no for password replacement; reassess if password history/audit is required | Yes | Only if exposed in Unity | Yes | No, unless notifications are selected |
 | 3 | Forgotten-password recovery | Requires an approved verified recovery factor; normally slice 1 | Yes for hashed, expiring, single-use reset state unless an approved provider owns it | Yes | Only if recovery is offered in Unity; a web handoff may suffice | Yes | Yes |
 | 4 | Account data export | Approve data scope, shared-record privacy, format/delivery, retention, and requester verification | Not necessarily for a synchronous current-data export; yes if jobs/artifacts/audit state are required | Yes | Not required unless product selects in-client export | Yes | No; separate job/object storage may be needed if async |

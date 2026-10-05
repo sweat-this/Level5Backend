@@ -1,4 +1,5 @@
 using Level5.Infrastructure.Persistence;
+using Level5.Domain.Ids;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -48,7 +49,7 @@ public sealed class MatchResultsMigrationUpgradeTests
             var now = DateTimeOffset.UtcNow;
             await using (var db = new Level5V2DbContext(options))
             {
-                playerId = (await PlayerSeeding.CreatePlayerAsync(db, "PreUpgrade", now)).Value;
+                playerId = (await CreatePlayerAgainstPreEmailSchemaAsync(db, "PreUpgrade", now)).Value;
             }
 
             await using (var db = new Level5V2DbContext(options))
@@ -108,7 +109,7 @@ public sealed class MatchResultsMigrationUpgradeTests
             var now = DateTimeOffset.UtcNow;
             await using (var db = new Level5V2DbContext(options))
             {
-                playerId = (await PlayerSeeding.CreatePlayerAsync(db, "PreConvert", now)).Value;
+                playerId = (await CreatePlayerAgainstPreEmailSchemaAsync(db, "PreConvert", now)).Value;
                 matchResultId = Guid.NewGuid();
 
                 // Written directly via raw SQL against the pre-conversion (varchar ModeId/LevelId)
@@ -175,7 +176,7 @@ public sealed class MatchResultsMigrationUpgradeTests
             var now = DateTimeOffset.UtcNow;
             await using (var db = new Level5V2DbContext(options))
             {
-                var playerId = (await PlayerSeeding.CreatePlayerAsync(db, "PreConvertBadData", now)).Value;
+                var playerId = (await CreatePlayerAgainstPreEmailSchemaAsync(db, "PreConvertBadData", now)).Value;
 
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
@@ -202,5 +203,35 @@ public sealed class MatchResultsMigrationUpgradeTests
         {
             await container.DisposeAsync();
         }
+    }
+
+    private static async Task<PlayerId> CreatePlayerAgainstPreEmailSchemaAsync(
+        Level5V2DbContext db,
+        string label,
+        DateTimeOffset now)
+    {
+        // These tests intentionally stop the database at migrations that predate
+        // EmailVerifiedAt. Using the current EF AccountRow would try to insert that future column,
+        // so seed the historical row shape directly before applying the remaining migrations.
+        var accountId = Guid.CreateVersion7();
+        var playerId = PlayerId.New();
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var username = $"u{suffix}";
+        var tag = $"{label[..Math.Min(label.Length, 8)]}{suffix}#123";
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO accounts
+                 ("Id", "Username", "UsernameCanonical", "Email", "EmailCanonical", "Status", "PasswordHash", "CreatedAt")
+             VALUES
+                 ({accountId}, {username}, {username}, {null}, {null}, {"Active"}, {"hash"}, {now});
+
+             INSERT INTO player_profiles
+                 ("Id", "AccountId", "DisplayName", "Tag", "CreatedAt")
+             VALUES
+                 ({playerId.Value}, {accountId}, {label}, {tag}, {now});
+             """);
+
+        return playerId;
     }
 }

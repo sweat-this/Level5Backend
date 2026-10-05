@@ -8,6 +8,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
 {
     public DbSet<AccountRow> Accounts => Set<AccountRow>();
     public DbSet<AuthSessionRow> AuthSessions => Set<AuthSessionRow>();
+    public DbSet<EmailVerificationChallengeRow> EmailVerificationChallenges => Set<EmailVerificationChallengeRow>();
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
@@ -48,6 +49,22 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             // Restrict, not cascade: this migration defines the relationship, not
             // account-deletion semantics (there is no account-deletion feature yet) - a stray
             // delete must fail loudly rather than silently orphan sessions.
+            entity.HasOne<AccountRow>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<EmailVerificationChallengeRow>(entity =>
+        {
+            entity.ToTable("email_verification_challenges");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TargetEmail).HasMaxLength(320);
+            entity.Property(e => e.TargetEmailCanonical).HasMaxLength(320);
+            entity.Property(e => e.TokenHash).HasMaxLength(64);
+            entity.HasIndex(e => e.AccountId).IsUnique();
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne<AccountRow>()
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
