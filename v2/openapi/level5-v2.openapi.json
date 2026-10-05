@@ -34,6 +34,112 @@
         }
       }
     },
+    "/api/v2/me/email": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEmailStatusResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEmailStatusResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEmailStatusResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/me/email/verification": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailVerificationDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailVerificationDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailVerificationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/me/email/verification/resend": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailVerificationDispatchResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/auth/register": {
       "post": {
         "tags": [
@@ -205,6 +311,37 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v2/email-verification/complete": {
+      "post": {
+        "tags": [
+          "EmailVerification"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailVerificationRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailVerificationRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailVerificationRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
           }
         }
       }
@@ -1452,6 +1589,15 @@
         },
         "additionalProperties": false
       },
+      "CompleteEmailVerificationRequestDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateChallengeDto": {
         "required": [
           "clientRequestId"
@@ -1505,6 +1651,20 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmailVerificationDispatchResponseDto": {
+        "type": "object",
+        "properties": {
+          "alreadyVerified": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1775,6 +1935,24 @@
         },
         "additionalProperties": false
       },
+      "MyEmailStatusResponseDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "isVerified": {
+            "type": "boolean"
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "PlayerProfileResponseDto": {
         "type": "object",
         "properties": {
@@ -1826,6 +2004,18 @@
             "type": "string"
           },
           "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RequestEmailVerificationDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "email": {
             "type": "string"
           }
         },
@@ -2084,6 +2274,9 @@
     },
     {
       "name": "Auth"
+    },
+    {
+      "name": "EmailVerification"
     },
     {
       "name": "Friends"

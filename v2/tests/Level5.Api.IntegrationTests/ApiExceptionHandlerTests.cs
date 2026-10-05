@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Level5.Api.ErrorHandling;
 using Level5.Application.Common;
+using Level5.Application.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -64,6 +65,20 @@ public sealed class ApiExceptionHandlerTests
         Assert.DoesNotContain("10.0.0.5", body.ToString());
         Assert.DoesNotContain("retries", body.ToString());
         Assert.Contains(logger.Errors, e => ReferenceEquals(e, outage));
+    }
+
+    [Fact]
+    public async Task Unconfigured_email_delivery_is_an_explicit_503_without_secret_details()
+    {
+        var unavailable = new EmailVerificationDeliveryUnavailableException();
+
+        var (context, logger) = await HandleAsync(unavailable);
+
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode);
+        var body = await ReadBodyAsync(context);
+        Assert.Equal("email_verification_delivery_unavailable", body.GetProperty("code").GetString());
+        Assert.Equal("The service is temporarily unavailable. Please retry.", body.GetProperty("title").GetString());
+        Assert.Contains(logger.Errors, e => ReferenceEquals(e, unavailable));
     }
 
     private static async Task<(DefaultHttpContext Context, CapturingLogger Logger)> HandleAsync(Exception exception)

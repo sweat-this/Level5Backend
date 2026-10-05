@@ -88,6 +88,10 @@ builder.Services.AddScoped<LoginUseCase>();
 builder.Services.AddScoped<RefreshSessionUseCase>();
 builder.Services.AddScoped<LogoutUseCase>();
 builder.Services.AddScoped<GetCurrentAccountUseCase>();
+builder.Services.AddScoped<GetMyEmailStatusUseCase>();
+builder.Services.AddScoped<RequestEmailVerificationUseCase>();
+builder.Services.AddScoped<ResendEmailVerificationUseCase>();
+builder.Services.AddScoped<CompleteEmailVerificationUseCase>();
 builder.Services.AddScoped<ResolvePlayerByTagUseCase>();
 builder.Services.AddScoped<UpdateMyPlayerProfileUseCase>();
 builder.Services.AddScoped<GetMyPlayerProfileUseCase>();
@@ -153,23 +157,28 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 
 builder.Services.AddAuthorization();
 
-// Each auth operation has its own per-IP budget so traffic to one endpoint cannot starve the
-// others. This intentionally increases the theoretical Production aggregate for one IP from five
-// auth requests/minute total to five requests/minute for each of four operations; there is no
-// second aggregate limiter. Non-Production stays relaxed so local development and integration
-// tests that share TestServer's partition key do not interfere with one another.
-var authRequestLimit = builder.Environment.IsProduction() ? 5 : 1000;
+// Each authentication/email-verification operation has its own per-IP budget so traffic to one
+// endpoint cannot starve the others. There is no second aggregate limiter. Non-Production stays
+// relaxed so local development and integration tests sharing TestServer's partition key do not
+// interfere with one another.
+var securityRequestLimit = builder.Environment.IsProduction() ? 5 : 1000;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy(AuthRateLimitPolicyNames.Register,
-        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
     options.AddPolicy(AuthRateLimitPolicyNames.Login,
-        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
     options.AddPolicy(AuthRateLimitPolicyNames.Refresh,
-        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
     options.AddPolicy(AuthRateLimitPolicyNames.Logout,
-        httpContext => CreateAuthRateLimitPartition(httpContext, authRequestLimit));
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(EmailVerificationRateLimitPolicyNames.Request,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(EmailVerificationRateLimitPolicyNames.Resend,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
+    options.AddPolicy(EmailVerificationRateLimitPolicyNames.Complete,
+        httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
 });
 
 var app = builder.Build();
@@ -209,7 +218,7 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 
 app.Run();
 
-static RateLimitPartition<string> CreateAuthRateLimitPartition(HttpContext httpContext, int permitLimit) =>
+static RateLimitPartition<string> CreateSecurityRateLimitPartition(HttpContext httpContext, int permitLimit) =>
     RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions

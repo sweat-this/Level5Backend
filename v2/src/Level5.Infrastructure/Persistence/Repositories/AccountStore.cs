@@ -32,6 +32,7 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
             UsernameCanonical = account.Username.Canonical,
             Email = account.Email?.Value,
             EmailCanonical = account.Email?.Canonical,
+            EmailVerifiedAt = account.EmailVerifiedAt,
             Status = account.Status.ToString(),
             PasswordHash = account.PasswordHash,
             CreatedAt = account.CreatedAt
@@ -45,6 +46,14 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
         row.Status = account.Status.ToString();
     }
 
+    public async Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken)
+    {
+        var row = await db.Accounts.SingleAsync(a => a.Id == account.Id.Value, cancellationToken);
+        row.Email = account.Email?.Value;
+        row.EmailCanonical = account.Email?.Canonical;
+        row.EmailVerifiedAt = account.EmailVerifiedAt;
+    }
+
     private static Account ToDomain(AccountRow row)
         => Account.Rehydrate(
             new AccountId(row.Id),
@@ -52,5 +61,6 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
             row.Email is null ? null : Email.Create(row.Email),
             Enum.Parse<AccountStatus>(row.Status),
             row.PasswordHash,
-            row.CreatedAt);
+            row.CreatedAt,
+            row.EmailVerifiedAt);
 }

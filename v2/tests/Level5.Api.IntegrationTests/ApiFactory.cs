@@ -1,9 +1,13 @@
+using System.Collections.Concurrent;
+using Level5.Application.Abstractions;
+using Level5.Domain.Identity;
 using Level5.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -54,8 +58,35 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["Jwt:Audience"] = "Level5Client.Tests"
             });
         });
+
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IEmailVerificationDelivery>();
+            services.AddSingleton<CapturingEmailVerificationDelivery>();
+            services.AddSingleton<IEmailVerificationDelivery>(provider =>
+                provider.GetRequiredService<CapturingEmailVerificationDelivery>());
+        });
     }
 }
+
+public sealed class CapturingEmailVerificationDelivery : IEmailVerificationDelivery
+{
+    private readonly ConcurrentQueue<CapturedEmailVerification> _deliveries = new();
+
+    public IReadOnlyCollection<CapturedEmailVerification> Deliveries => _deliveries.ToArray();
+
+    public Task DeliverAsync(
+        Email destination,
+        string rawToken,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        _deliveries.Enqueue(new(destination.Value, rawToken, expiresAt));
+        return Task.CompletedTask;
+    }
+}
+
+public sealed record CapturedEmailVerification(string Destination, string RawToken, DateTimeOffset ExpiresAt);
 
 [CollectionDefinition(Name)]
 public sealed class ApiCollection : ICollectionFixture<ApiFactory>

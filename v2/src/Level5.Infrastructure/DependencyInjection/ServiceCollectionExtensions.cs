@@ -49,6 +49,11 @@ public static class ServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddOptions<EmailVerificationOptions>()
+            .Bind(configuration.GetSection(EmailVerificationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<IPlayerProfileStore, PlayerProfileStore>();
         services.AddScoped<IFriendshipStore, FriendshipStore>();
@@ -56,11 +61,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMatchResultStore, MatchResultStore>();
         services.AddScoped<ILeaderboardQuery, LeaderboardQuery>();
         services.AddScoped<IAuthSessionStore, AuthSessionStore>();
+        services.AddScoped<IEmailVerificationChallengeStore, EmailVerificationChallengeStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();
         services.AddSingleton<IRefreshTokenGenerator, RefreshTokenGenerator>();
+        services.AddSingleton<IEmailVerificationTokenGenerator, EmailVerificationTokenGenerator>();
+        services.AddSingleton<IEmailVerificationPolicy, EmailVerificationPolicy>();
+        services.AddSingleton<IEmailVerificationDelivery, UnavailableEmailVerificationDelivery>();
         services.AddSingleton<IAuthSessionPolicy, AuthSessionPolicy>();
         services.AddSingleton<IChallengeExpiryPolicy, ChallengeExpiryPolicy>();
         services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();

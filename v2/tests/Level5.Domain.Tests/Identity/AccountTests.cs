@@ -32,6 +32,7 @@ public class AccountTests
         var account = Account.Register(Username.Create("patrick"), "hash", Now, email);
 
         Assert.Equal(email, account.Email);
+        Assert.Null(account.EmailVerifiedAt);
     }
 
     [Fact]
@@ -41,5 +42,57 @@ public class AccountTests
             AccountId.New(), Username.Create("patrick"), null, AccountStatus.Disabled, "hash", Now);
 
         Assert.Equal(AccountStatus.Disabled, account.Status);
+    }
+
+    [Fact]
+    public void Rehydrate_rejects_verification_state_without_an_email()
+    {
+        Assert.Throws<ArgumentException>(() => Account.Rehydrate(
+            AccountId.New(), Username.Create("patrick"), null, AccountStatus.Active, "hash", Now, Now));
+    }
+
+    [Fact]
+    public void VerifyEmail_records_timestamp_only_for_current_canonical_address()
+    {
+        var account = Account.Register(
+            Username.Create("patrick"), "hash", Now, Email.Create("Patrick@Example.com"));
+
+        account.VerifyEmail(Email.Create("patrick@example.com"), Now.AddMinutes(1));
+
+        Assert.Equal(Now.AddMinutes(1), account.EmailVerifiedAt);
+    }
+
+    [Fact]
+    public void VerifyEmail_rejects_a_different_address()
+    {
+        var account = Account.Register(
+            Username.Create("patrick"), "hash", Now, Email.Create("one@example.com"));
+
+        Assert.Throws<EmailVerificationTargetMismatchException>(() =>
+            account.VerifyEmail(Email.Create("two@example.com"), Now));
+    }
+
+    [Fact]
+    public void Replacing_an_unverified_address_clears_verification_state()
+    {
+        var account = Account.Register(
+            Username.Create("patrick"), "hash", Now, Email.Create("one@example.com"));
+
+        Assert.True(account.AttachOrReplaceUnverifiedEmail(Email.Create("two@example.com")));
+
+        Assert.Equal("two@example.com", account.Email!.Value);
+        Assert.Null(account.EmailVerifiedAt);
+    }
+
+    [Fact]
+    public void A_verified_address_cannot_be_changed_but_same_canonical_address_is_a_no_op()
+    {
+        var email = Email.Create("Patrick@Example.com");
+        var account = Account.Rehydrate(
+            AccountId.New(), Username.Create("patrick"), email, AccountStatus.Active, "hash", Now, Now);
+
+        Assert.False(account.AttachOrReplaceUnverifiedEmail(Email.Create("patrick@example.com")));
+        Assert.Throws<VerifiedEmailChangeNotAllowedException>(() =>
+            account.AttachOrReplaceUnverifiedEmail(Email.Create("other@example.com")));
     }
 }
