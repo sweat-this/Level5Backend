@@ -1,7 +1,7 @@
 .git
-.vs
+**/.vs
 **/bin
 **/obj
-artifacts
-TestResults
-.env
+**/artifacts
+**/TestResults
+**/.env
