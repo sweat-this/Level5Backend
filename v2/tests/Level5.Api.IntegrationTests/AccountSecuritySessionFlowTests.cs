@@ -193,6 +193,43 @@ public sealed class AccountSecuritySessionFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(replacement.RefreshToken)).StatusCode);
     }
 
+    [Fact]
+    public async Task Specifically_revoked_session_cannot_list_or_revoke_a_newer_active_session()
+    {
+        var owner = await factory.RegisterNewPlayerAsync("GuardRevoked");
+        var revoked = await factory.LoginAsync(owner.Username);
+        var revokedSid = GetSessionId(ReadToken(revoked.AccessToken));
+        var replacement = await factory.LoginAsync(owner.Username);
+        var replacementSid = GetSessionId(ReadToken(replacement.AccessToken));
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.Client.DeleteAsync($"/api/v2/me/sessions/{revokedSid}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await revoked.Client.GetAsync("/api/v2/me/sessions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await revoked.Client.DeleteAsync($"/api/v2/me/sessions/{replacementSid}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(replacement.RefreshToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Password_invalidated_session_cannot_list_or_revoke_a_newer_generation_session()
+    {
+        var old = await factory.RegisterNewPlayerAsync("GuardPassword");
+        var changed = await old.Client.PostAsJsonAsync("/api/v2/me/password", new
+        {
+            currentPassword = "P@ssw0rd123!",
+            newPassword = "N3wP@ssword!"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
+
+        var replacement = await factory.LoginAsync(old.Username, password: "N3wP@ssword!");
+        var replacementSid = GetSessionId(ReadToken(replacement.AccessToken));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await old.Client.GetAsync("/api/v2/me/sessions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await old.Client.DeleteAsync($"/api/v2/me/sessions/{replacementSid}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(replacement.RefreshToken)).StatusCode);
+    }
+
     private async Task<(AuthSession Session, string RawToken)> AddSessionAsync(
         Guid accountId,
         DateTimeOffset createdAt,

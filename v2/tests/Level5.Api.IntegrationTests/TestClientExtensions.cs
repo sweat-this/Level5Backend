@@ -50,12 +50,13 @@ public static class TestClientExtensions
     public static async Task<RegisteredPlayer> LoginAsync(
         this ApiFactory factory,
         string username,
-        string? clientKind = null)
+        string? clientKind = null,
+        string password = "P@ssw0rd123!")
     {
         var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v2/auth/login")
         {
-            Content = JsonContent.Create(new { username, password = "P@ssw0rd123!" })
+            Content = JsonContent.Create(new { username, password })
         };
         if (clientKind is not null)
         {
