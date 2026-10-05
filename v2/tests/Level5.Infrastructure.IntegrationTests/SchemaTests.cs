@@ -23,6 +23,7 @@ public sealed class SchemaTests(PostgresFixture fixture)
         Assert.Contains("accounts", tables);
         Assert.Contains("player_profiles", tables);
         Assert.Contains("auth_sessions", tables);
+        Assert.Contains("product_entitlements", tables);
     }
 
     [Fact]
@@ -202,6 +203,7 @@ public sealed class SchemaTests(PostgresFixture fixture)
     [InlineData("competitive_series", "OpponentId")]
     [InlineData("competitive_series", "WinnerId")]
     [InlineData("match_results", "PlayerId")]
+    [InlineData("product_entitlements", "PlayerId")]
     public async Task Player_reference_column_has_a_restrictive_foreign_key_to_player_profiles(string table, string column)
     {
         await using var db = fixture.CreateDbContext();

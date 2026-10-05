@@ -11,6 +11,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<EmailVerificationChallengeRow> EmailVerificationChallenges => Set<EmailVerificationChallengeRow>();
     public DbSet<PasswordResetChallengeRow> PasswordResetChallenges => Set<PasswordResetChallengeRow>();
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
+    public DbSet<ProductEntitlementRow> ProductEntitlements => Set<ProductEntitlementRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
@@ -107,6 +108,19 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasOne<AccountRow>()
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ProductEntitlementRow>(entity =>
+        {
+            entity.ToTable("product_entitlements");
+            entity.HasKey(e => new { e.PlayerId, e.ProductId });
+            entity.Property(e => e.ProductId).HasMaxLength(Level5.Domain.Platform.ProductId.MaxLength);
+            entity.Property(e => e.Kind).HasMaxLength(16);
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.PlayerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

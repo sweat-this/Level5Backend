@@ -1,6 +1,8 @@
 using Level5.Api;
 using Level5.Application.Competition;
+using Level5.Application.Platform;
 using Level5.Domain.Competition;
+using Level5.Domain.Platform;
 using Level5.Infrastructure.Persistence;
 using NetArchTest.Rules;
 using Xunit;
@@ -96,6 +98,36 @@ public sealed class DependencyRuleTests
     {
         var result = Types.InAssembly(InfrastructureAssembly)
             .Should().NotHaveDependencyOn("Level5.Api")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, Failures(result));
+    }
+
+    [Fact]
+    public void Shared_Platform_domain_does_not_depend_on_game_domains()
+    {
+        _ = typeof(ProductEntitlement);
+        var result = Types.InAssembly(DomainAssembly)
+            .That().ResideInNamespace("Level5.Domain.Platform")
+            .Should().NotHaveDependencyOnAny(
+                "Level5.Domain.Competition",
+                "Level5.Domain.Results",
+                "Level5.Domain.Leaderboards")
+            .GetResult();
+
+        Assert.True(result.IsSuccessful, Failures(result));
+    }
+
+    [Fact]
+    public void Shared_Platform_application_does_not_depend_on_game_application_namespaces()
+    {
+        _ = typeof(CheckMyProductAccessUseCase);
+        var result = Types.InAssembly(ApplicationAssembly)
+            .That().ResideInNamespace("Level5.Application.Platform")
+            .Should().NotHaveDependencyOnAny(
+                "Level5.Application.Competition",
+                "Level5.Application.Results",
+                "Level5.Application.Leaderboards")
             .GetResult();
 
         Assert.True(result.IsSuccessful, Failures(result));
