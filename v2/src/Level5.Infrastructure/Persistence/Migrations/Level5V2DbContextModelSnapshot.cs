@@ -167,6 +167,9 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.HasIndex("AccountId")
                         .IsUnique();
 
+                    b.HasIndex("TargetEmailCanonical")
+                        .IsUnique();
+
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
