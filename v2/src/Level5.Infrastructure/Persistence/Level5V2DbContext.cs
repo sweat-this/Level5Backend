@@ -48,6 +48,8 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.Property(e => e.TokenHash).HasMaxLength(64);
             entity.HasIndex(e => e.AccountId).IsUnique();
             entity.HasIndex(e => e.TokenHash).IsUnique();
+            // One canonical target may be reserved by only one account challenge at a time.
+            entity.HasIndex(e => e.TargetEmailCanonical).IsUnique();
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne<AccountRow>().WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Restrict);
         });
