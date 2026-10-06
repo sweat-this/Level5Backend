@@ -15,6 +15,8 @@ public static class NotificationFieldLimits
 
 public sealed class PlayerNotification
 {
+    private static readonly Uri PlatformOrigin = new("https://platform.invalid/");
+
     public NotificationId Id { get; }
     public PlayerId RecipientPlayerId { get; }
     public string Source { get; }
@@ -129,21 +131,42 @@ public sealed class PlayerNotification
         }
 
         if (actionPath.Length > NotificationFieldLimits.ActionPath ||
-            !(actionPath.Equals("/account", StringComparison.Ordinal) ||
-              actionPath.StartsWith("/account/", StringComparison.Ordinal)) ||
-            actionPath.Contains('\\') ||
+            !actionPath.StartsWith('/') ||
             actionPath.StartsWith("//", StringComparison.Ordinal) ||
-            Uri.TryCreate(actionPath, UriKind.Absolute, out _) ||
-            actionPath.Equals("/account/login", StringComparison.OrdinalIgnoreCase) ||
-            actionPath.StartsWith("/account/login/", StringComparison.OrdinalIgnoreCase) ||
-            actionPath.Equals("/account/register", StringComparison.OrdinalIgnoreCase) ||
-            actionPath.StartsWith("/account/register/", StringComparison.OrdinalIgnoreCase))
+            actionPath.Contains('\\') ||
+            actionPath.Any(char.IsControl) ||
+            !Uri.TryCreate(PlatformOrigin, actionPath, out var resolved) ||
+            resolved.Scheme != PlatformOrigin.Scheme ||
+            resolved.Host != PlatformOrigin.Host ||
+            resolved.Port != PlatformOrigin.Port)
+        {
+            throw new InvalidNotificationException("Notification actionPath must be a safe account path.");
+        }
+
+        string decodedPath;
+        try
+        {
+            decodedPath = Uri.UnescapeDataString(resolved.AbsolutePath);
+        }
+        catch (UriFormatException)
+        {
+            throw new InvalidNotificationException("Notification actionPath must be a safe account path.");
+        }
+
+        if (decodedPath.Contains('\\') ||
+            !IsRouteFamily(decodedPath, "/account") ||
+            IsRouteFamily(decodedPath, "/account/login") ||
+            IsRouteFamily(decodedPath, "/account/register"))
         {
             throw new InvalidNotificationException("Notification actionPath must be a safe account path.");
         }
 
         return actionPath;
     }
+
+    private static bool IsRouteFamily(string path, string family)
+        => path.Equals(family, StringComparison.OrdinalIgnoreCase) ||
+           path.StartsWith(family + "/", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class InvalidNotificationException : DomainException

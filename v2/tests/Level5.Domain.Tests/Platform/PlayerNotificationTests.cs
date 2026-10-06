@@ -43,7 +43,9 @@ public sealed class PlayerNotificationTests
     [InlineData("data:text/html,bad")]
     [InlineData("/accounting")]
     [InlineData("/account/login")]
+    [InlineData("/account/%6Cogin?returnTo=/account/friends")]
     [InlineData("/account/register/start")]
+    [InlineData("/account/%5C%5Cevil.example")]
     public void Create_rejects_unsafe_or_out_of_scope_actions(string actionPath)
     {
         Assert.Throws<InvalidNotificationException>(() => Create(PlayerId.New(), actionPath));
