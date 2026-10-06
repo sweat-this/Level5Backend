@@ -27,6 +27,9 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
         return row is null ? null : ToDomain(row);
     }
 
+    public Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken)
+        => db.Accounts.AnyAsync(a => a.EmailCanonical == email.Canonical, cancellationToken);
+
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => db.Accounts.AnyAsync(a => a.UsernameCanonical == username.Canonical, cancellationToken);
 
