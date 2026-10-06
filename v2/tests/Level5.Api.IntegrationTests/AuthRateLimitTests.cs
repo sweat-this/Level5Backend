@@ -166,6 +166,7 @@ internal sealed class MissingAccountStore : IAccountStore
     public Task<Account?> FindByIdAsync(AccountId id, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
     public Task<Account?> FindByUsernameAsync(Username username, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
     public Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken) => Task.FromResult<Account?>(null);
+    public Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken) => Task.FromResult(false);
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken) => Task.FromResult(false);
     public Task AddAsync(Account account, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task StageCredentialUpdateAsync(Account account, long expectedSessionGeneration, CancellationToken cancellationToken) => Task.CompletedTask;
