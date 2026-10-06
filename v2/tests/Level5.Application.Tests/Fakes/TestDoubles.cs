@@ -76,6 +76,17 @@ public sealed class NoOpUnitOfWork : IUnitOfWork
     public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
+public sealed class CapturingNotificationWriter : INotificationWriter
+{
+    public List<NotificationDraft> Drafts { get; } = [];
+
+    public Task WriteAsync(NotificationDraft draft, CancellationToken cancellationToken)
+    {
+        Drafts.Add(draft);
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>A real SHA-256-based hash (not faked) so replay/lookup tests exercise the same derivation logic production uses; just backed by a predictable RNG source is not needed since raw values are never asserted against a fixed value.</summary>
 public sealed class FakeRefreshTokenGenerator : IRefreshTokenGenerator
 {

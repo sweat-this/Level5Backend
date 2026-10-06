@@ -13,6 +13,7 @@ public class FriendRequestUseCaseTests
     private readonly InMemoryFriendshipStore _friendships = new();
     private readonly InMemoryPlayerProfileStore _profiles = new();
     private readonly FakeClock _clock = new();
+    private readonly CapturingNotificationWriter _notifications = new();
     private readonly SendFriendRequestUseCase _send;
     private readonly AcceptFriendRequestUseCase _accept;
     private readonly DeclineFriendRequestUseCase _decline;
@@ -20,7 +21,7 @@ public class FriendRequestUseCaseTests
 
     public FriendRequestUseCaseTests()
     {
-        _send = new SendFriendRequestUseCase(_friendships, _profiles, new NoOpUnitOfWork(), _clock);
+        _send = new SendFriendRequestUseCase(_friendships, _profiles, _notifications, new NoOpUnitOfWork(), _clock);
         _accept = new AcceptFriendRequestUseCase(_friendships, new NoOpUnitOfWork(), _clock);
         _decline = new DeclineFriendRequestUseCase(_friendships, new NoOpUnitOfWork(), _clock);
         _cancel = new CancelFriendRequestUseCase(_friendships, new NoOpUnitOfWork(), _clock);
@@ -51,6 +52,25 @@ public class FriendRequestUseCaseTests
 
         await Assert.ThrowsAsync<ConflictException>(() =>
             _send.ExecuteAsync(new SendFriendRequestRequest(a, b), CancellationToken.None));
+        Assert.Single(_notifications.Drafts);
+    }
+
+    [Fact]
+    public async Task Sending_a_request_stages_the_recipient_notification_with_the_request_id()
+    {
+        var sender = await SeedPlayerAsync("NotifySender");
+        var recipient = await SeedPlayerAsync("NotifyRecipient");
+
+        var request = await _send.ExecuteAsync(new SendFriendRequestRequest(sender, recipient), CancellationToken.None);
+
+        var notification = Assert.Single(_notifications.Drafts);
+        Assert.Equal(recipient, notification.RecipientPlayerId);
+        Assert.Equal("platform", notification.Source);
+        Assert.Equal("friend-request-received", notification.Kind);
+        Assert.Equal("New friend request", notification.Title);
+        Assert.Equal("You received a new friend request.", notification.Body);
+        Assert.Equal("/account/friends", notification.ActionPath);
+        Assert.Equal(request.Id.Value.ToString("N"), notification.SourceEventKey);
     }
 
     [Fact]

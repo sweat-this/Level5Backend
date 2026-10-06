@@ -12,6 +12,7 @@ public sealed record FriendRequestResult(FriendRequestId Id, PlayerId FromPlayer
 public sealed class SendFriendRequestUseCase(
     IFriendshipStore friendshipStore,
     IPlayerProfileStore playerProfileStore,
+    INotificationWriter notificationWriter,
     IUnitOfWork unitOfWork,
     IClock clock)
 {
@@ -34,6 +35,14 @@ public sealed class SendFriendRequestUseCase(
 
         var friendRequest = FriendRequest.Create(request.FromPlayerId, request.ToPlayerId, clock.UtcNow);
         await friendshipStore.AddRequestAsync(friendRequest, cancellationToken);
+        await notificationWriter.WriteAsync(new NotificationDraft(
+            friendRequest.ToPlayerId,
+            "platform",
+            "friend-request-received",
+            "New friend request",
+            "You received a new friend request.",
+            "/account/friends",
+            friendRequest.Id.Value.ToString("N")), cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new FriendRequestResult(friendRequest.Id, friendRequest.FromPlayerId, friendRequest.ToPlayerId, friendRequest.Status);
