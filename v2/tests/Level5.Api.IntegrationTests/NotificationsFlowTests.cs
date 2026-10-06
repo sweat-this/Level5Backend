@@ -117,6 +117,23 @@ public sealed class NotificationsFlowTests(ApiFactory factory)
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task Read_state_openapi_contract_advertises_runtime_no_content_status()
+    {
+        var response = await factory.CreateClient().GetAsync("/swagger/v1/swagger.json");
+        response.EnsureSuccessStatusCode();
+        var document = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+
+        var responses = document
+            .GetProperty("paths")
+            .GetProperty("/api/v2/platform/me/notifications/{notificationId}")
+            .GetProperty("patch")
+            .GetProperty("responses");
+
+        Assert.True(responses.TryGetProperty("204", out _));
+        Assert.False(responses.TryGetProperty("200", out _));
+    }
+
     private static async Task<JsonElement> GetPageAsync(HttpClient client, string query = "")
     {
         var response = await client.GetAsync($"/api/v2/platform/me/notifications{query}");

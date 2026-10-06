@@ -45,6 +45,7 @@ public sealed class NotificationsController(
     }
 
     [HttpPatch("{notificationId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> SetReadState(
         Guid notificationId,
         SetNotificationReadStateDto request,
