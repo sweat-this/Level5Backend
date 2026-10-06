@@ -74,6 +74,11 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         Level5.Application.Identity.EmailVerificationCooldownException e => (StatusCodes.Status429TooManyRequests, e.Code),
         Level5.Application.Identity.InvalidEmailVerificationException e => (StatusCodes.Status400BadRequest, e.Code),
         Level5.Application.Identity.EmailVerificationDeliveryUnavailableException e => (StatusCodes.Status503ServiceUnavailable, e.Code),
+        Level5.Application.Identity.EmailChangeNotAvailableException e => (StatusCodes.Status409Conflict, e.Code),
+        Level5.Application.Identity.EmailAlreadyCurrentException e => (StatusCodes.Status409Conflict, e.Code),
+        Level5.Application.Identity.EmailChangeCooldownException e => (StatusCodes.Status429TooManyRequests, e.Code),
+        Level5.Application.Identity.InvalidEmailChangeException e => (StatusCodes.Status400BadRequest, e.Code),
+        Level5.Application.Identity.EmailChangeDeliveryUnavailableException e => (StatusCodes.Status503ServiceUnavailable, e.Code),
         Level5.Domain.Identity.VerifiedEmailChangeNotAllowedException =>
             (StatusCodes.Status409Conflict, "verified_email_change_not_allowed"),
         FriendshipRequiredException e => (StatusCodes.Status403Forbidden, e.Code),
