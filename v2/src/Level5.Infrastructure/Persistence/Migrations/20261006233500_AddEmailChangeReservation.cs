@@ -14,7 +14,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
                 name: "IX_email_verification_challenges_TargetEmailCanonical",
                 table: "email_verification_challenges",
                 column: "TargetEmailCanonical",
-                unique: true);
+                unique: true,
+                filter: "\"ConsumedAt\" IS NULL");
         }
 
         /// <inheritdoc />
