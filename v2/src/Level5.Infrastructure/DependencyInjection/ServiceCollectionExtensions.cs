@@ -78,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEmailVerificationTokenGenerator, EmailVerificationTokenGenerator>();
         services.AddSingleton<IEmailVerificationPolicy, EmailVerificationPolicy>();
         services.AddSingleton<IEmailVerificationDelivery, UnavailableEmailVerificationDelivery>();
+        services.AddSingleton<IEmailChangeDelivery, UnavailableEmailChangeDelivery>();
         services.AddSingleton<IPasswordResetTokenGenerator, PasswordResetTokenGenerator>();
         services.AddSingleton<IPasswordRecoveryPolicy, PasswordRecoveryPolicy>();
         services.AddSingleton<IPasswordRecoveryDelivery, UnavailablePasswordRecoveryDelivery>();
