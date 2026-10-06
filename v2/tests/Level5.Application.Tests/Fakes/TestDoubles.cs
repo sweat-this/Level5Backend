@@ -148,6 +148,42 @@ public sealed class FakeEmailVerificationDelivery : IEmailVerificationDelivery
     }
 }
 
+public sealed class FakeEmailChangeDelivery : IEmailChangeDelivery
+{
+    public List<(Email Destination, string RawToken, DateTimeOffset ExpiresAt)> Verifications { get; } = [];
+    public List<Email> PreviousAddressNotifications { get; } = [];
+    public bool ThrowOnVerification { get; set; }
+    public bool ThrowOnPreviousAddressNotification { get; set; }
+
+    public Task DeliverVerificationAsync(
+        Email destination,
+        string rawToken,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        if (ThrowOnVerification)
+        {
+            throw new Level5.Application.Identity.EmailChangeDeliveryUnavailableException();
+        }
+
+        Verifications.Add((destination, rawToken, expiresAt));
+        return Task.CompletedTask;
+    }
+
+    public Task NotifyPreviousAddressAsync(
+        Email previousAddress,
+        CancellationToken cancellationToken)
+    {
+        if (ThrowOnPreviousAddressNotification)
+        {
+            throw new Level5.Application.Identity.EmailChangeDeliveryUnavailableException();
+        }
+
+        PreviousAddressNotifications.Add(previousAddress);
+        return Task.CompletedTask;
+    }
+}
+
 public sealed class FakePasswordRecoveryPolicy : IPasswordRecoveryPolicy
 {
     public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromHours(1);
@@ -423,6 +459,9 @@ public sealed class InMemoryAccountStore : IAccountStore
 
     public Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken)
         => Task.FromResult(_accounts.Values.SingleOrDefault(a => a.EmailVerifiedAt is not null && a.Email?.Canonical == email.Canonical));
+
+    public Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken)
+        => Task.FromResult(_accounts.Values.Any(a => a.Email?.Canonical == email.Canonical));
 
     public Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken)
         => Task.FromResult(_accounts.Values.Any(a => a.Username.Canonical == username.Canonical));
