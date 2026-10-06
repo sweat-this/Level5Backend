@@ -7,9 +7,17 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace Level5.Api.Controllers;
 
 public sealed record CurrentAccountResponseDto(Guid AccountId, string Username, string Status, Guid PlayerId, DateTimeOffset CreatedAt);
-public sealed record MyEmailStatusResponseDto(string? Email, bool IsVerified, DateTimeOffset? VerifiedAt);
+public sealed record MyEmailStatusResponseDto(
+    string? Email,
+    bool IsVerified,
+    DateTimeOffset? VerifiedAt,
+    string? PendingEmail,
+    DateTimeOffset? PendingEmailChangeExpiresAt,
+    bool PendingEmailChangeExpired);
 public sealed record RequestEmailVerificationDto(string CurrentPassword, string Email);
 public sealed record EmailVerificationDispatchResponseDto(bool AlreadyVerified, DateTimeOffset? ExpiresAt);
+public sealed record RequestEmailChangeDto(string CurrentPassword, string NewEmail);
+public sealed record EmailChangeDispatchResponseDto(string PendingEmail, DateTimeOffset ExpiresAt);
 public sealed record ChangePasswordDto(string CurrentPassword, string NewPassword);
 
 /// <summary>
@@ -25,6 +33,9 @@ public sealed class AccountController(
     GetMyEmailStatusUseCase getMyEmailStatus,
     RequestEmailVerificationUseCase requestEmailVerification,
     ResendEmailVerificationUseCase resendEmailVerification,
+    RequestEmailChangeUseCase requestEmailChange,
+    ResendEmailChangeUseCase resendEmailChange,
+    CancelEmailChangeUseCase cancelEmailChange,
     ChangePasswordUseCase changePassword,
     ICurrentAccountAccessor currentAccount) : ControllerBase
 {
@@ -42,7 +53,13 @@ public sealed class AccountController(
     public async Task<ActionResult<MyEmailStatusResponseDto>> GetMyEmail(CancellationToken cancellationToken)
     {
         var view = await getMyEmailStatus.ExecuteAsync(currentAccount.GetCurrentAccountId(), cancellationToken);
-        return Ok(new MyEmailStatusResponseDto(view.Email, view.IsVerified, view.VerifiedAt));
+        return Ok(new MyEmailStatusResponseDto(
+            view.Email,
+            view.IsVerified,
+            view.VerifiedAt,
+            view.PendingEmail,
+            view.PendingEmailChangeExpiresAt,
+            view.PendingEmailChangeExpired));
     }
 
     [HttpPost("me/email/verification")]
@@ -66,6 +83,38 @@ public sealed class AccountController(
         var result = await resendEmailVerification.ExecuteAsync(
             currentAccount.GetCurrentAccountId(), cancellationToken);
         return Accepted(new EmailVerificationDispatchResponseDto(AlreadyVerified: false, result.ExpiresAt));
+    }
+
+    [HttpPost("me/email/change")]
+    [EnableRateLimiting(EmailChangeRateLimitPolicyNames.Request)]
+    [ProducesResponseType(typeof(EmailChangeDispatchResponseDto), StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<EmailChangeDispatchResponseDto>> RequestEmailChange(
+        RequestEmailChangeDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await requestEmailChange.ExecuteAsync(
+            new(currentAccount.GetCurrentAccountId(), request.CurrentPassword, request.NewEmail),
+            cancellationToken);
+        return Accepted(new EmailChangeDispatchResponseDto(result.PendingEmail, result.ExpiresAt));
+    }
+
+    [HttpPost("me/email/change/resend")]
+    [EnableRateLimiting(EmailChangeRateLimitPolicyNames.Resend)]
+    [ProducesResponseType(typeof(EmailChangeDispatchResponseDto), StatusCodes.Status202Accepted)]
+    public async Task<ActionResult<EmailChangeDispatchResponseDto>> ResendEmailChange(
+        CancellationToken cancellationToken)
+    {
+        var result = await resendEmailChange.ExecuteAsync(
+            currentAccount.GetCurrentAccountId(), cancellationToken);
+        return Accepted(new EmailChangeDispatchResponseDto(result.PendingEmail, result.ExpiresAt));
+    }
+
+    [HttpDelete("me/email/change")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> CancelEmailChange(CancellationToken cancellationToken)
+    {
+        await cancelEmailChange.ExecuteAsync(currentAccount.GetCurrentAccountId(), cancellationToken);
+        return NoContent();
     }
 
     [HttpPost("me/password")]
