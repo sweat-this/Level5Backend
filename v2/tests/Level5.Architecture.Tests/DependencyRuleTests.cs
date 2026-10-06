@@ -1,8 +1,6 @@
 using Level5.Api;
 using Level5.Application.Competition;
-using Level5.Application.Platform;
 using Level5.Domain.Competition;
-using Level5.Domain.Platform;
 using Level5.Infrastructure.Persistence;
 using NetArchTest.Rules;
 using Xunit;
@@ -103,12 +101,16 @@ public sealed class DependencyRuleTests
         Assert.True(result.IsSuccessful, Failures(result));
     }
 
-    [Fact]
-    public void Shared_Platform_domain_does_not_depend_on_game_domains()
+    [Theory]
+    [InlineData("Level5.Domain.Identity")]
+    [InlineData("Level5.Domain.Players")]
+    [InlineData("Level5.Domain.Social")]
+    [InlineData("Level5.Domain.Platform")]
+    public void Shared_Platform_domain_namespaces_do_not_depend_on_Level5_game_domains(
+        string sharedNamespace)
     {
-        _ = typeof(ProductEntitlement);
         var result = Types.InAssembly(DomainAssembly)
-            .That().ResideInNamespace("Level5.Domain.Platform")
+            .That().ResideInNamespace(sharedNamespace)
             .Should().NotHaveDependencyOnAny(
                 "Level5.Domain.Competition",
                 "Level5.Domain.Results",
@@ -118,16 +120,23 @@ public sealed class DependencyRuleTests
         Assert.True(result.IsSuccessful, Failures(result));
     }
 
-    [Fact]
-    public void Shared_Platform_application_does_not_depend_on_game_application_namespaces()
+    [Theory]
+    [InlineData("Level5.Application.Identity")]
+    [InlineData("Level5.Application.Players")]
+    [InlineData("Level5.Application.Social")]
+    [InlineData("Level5.Application.Platform")]
+    public void Shared_Platform_application_namespaces_do_not_depend_on_Level5_game_namespaces(
+        string sharedNamespace)
     {
-        _ = typeof(CheckMyProductAccessUseCase);
         var result = Types.InAssembly(ApplicationAssembly)
-            .That().ResideInNamespace("Level5.Application.Platform")
+            .That().ResideInNamespace(sharedNamespace)
             .Should().NotHaveDependencyOnAny(
                 "Level5.Application.Competition",
                 "Level5.Application.Results",
-                "Level5.Application.Leaderboards")
+                "Level5.Application.Leaderboards",
+                "Level5.Domain.Competition",
+                "Level5.Domain.Results",
+                "Level5.Domain.Leaderboards")
             .GetResult();
 
         Assert.True(result.IsSuccessful, Failures(result));

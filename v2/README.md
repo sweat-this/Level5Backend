@@ -5,6 +5,10 @@ the legacy backend in the same repository. V2's first player-facing goal is asyn
 friend-vs-friend ("correspondence") competition. This document is the architecture decision
 record for the foundation slice, plus everything needed to run it locally.
 
+The canonical current-state boundary between shared Platform capabilities and Level5 game
+capabilities, including persistence ownership and future API namespace rules, is defined in
+[Modular game boundaries and namespaced API evolution](docs/modular-game-boundaries.md).
+
 ## Status
 
 Domain: player identity/tags (exact case-insensitive lookup, self-scoped display-name update -
