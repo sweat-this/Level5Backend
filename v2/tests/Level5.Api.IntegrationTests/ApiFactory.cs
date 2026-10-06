@@ -65,6 +65,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.AddSingleton<CapturingEmailVerificationDelivery>();
             services.AddSingleton<IEmailVerificationDelivery>(provider =>
                 provider.GetRequiredService<CapturingEmailVerificationDelivery>());
+            services.RemoveAll<IEmailChangeDelivery>();
+            services.AddSingleton<CapturingEmailChangeDelivery>();
+            services.AddSingleton<IEmailChangeDelivery>(provider =>
+                provider.GetRequiredService<CapturingEmailChangeDelivery>());
             services.RemoveAll<IPasswordRecoveryDelivery>();
             services.AddSingleton<CapturingPasswordRecoveryDelivery>();
             services.AddSingleton<IPasswordRecoveryDelivery>(provider =>
@@ -91,6 +95,44 @@ public sealed class CapturingEmailVerificationDelivery : IEmailVerificationDeliv
 }
 
 public sealed record CapturedEmailVerification(string Destination, string RawToken, DateTimeOffset ExpiresAt);
+
+public sealed class CapturingEmailChangeDelivery : IEmailChangeDelivery
+{
+    private readonly ConcurrentQueue<CapturedEmailChangeVerification> _verifications = new();
+    private readonly ConcurrentQueue<string> _previousAddressNotifications = new();
+
+    public IReadOnlyCollection<CapturedEmailChangeVerification> Verifications => _verifications.ToArray();
+    public IReadOnlyCollection<string> PreviousAddressNotifications => _previousAddressNotifications.ToArray();
+    public bool ThrowOnPreviousAddressNotification { get; set; }
+
+    public Task DeliverVerificationAsync(
+        Email destination,
+        string rawToken,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        _verifications.Enqueue(new(destination.Value, rawToken, expiresAt));
+        return Task.CompletedTask;
+    }
+
+    public Task NotifyPreviousAddressAsync(
+        Email previousAddress,
+        CancellationToken cancellationToken)
+    {
+        if (ThrowOnPreviousAddressNotification)
+        {
+            throw new InvalidOperationException("Simulated previous-address delivery failure.");
+        }
+
+        _previousAddressNotifications.Enqueue(previousAddress.Value);
+        return Task.CompletedTask;
+    }
+}
+
+public sealed record CapturedEmailChangeVerification(
+    string Destination,
+    string RawToken,
+    DateTimeOffset ExpiresAt);
 
 public sealed class CapturingPasswordRecoveryDelivery : IPasswordRecoveryDelivery
 {
