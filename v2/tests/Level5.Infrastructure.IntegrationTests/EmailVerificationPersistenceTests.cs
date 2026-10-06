@@ -114,7 +114,10 @@ public sealed class EmailVerificationPersistenceTests(PostgresFixture fixture)
             CancellationToken.None);
         await db.SaveChangesAsync();
 
-        Assert.Equal(2, await db.EmailVerificationChallenges.CountAsync());
+        Assert.Equal(
+            2,
+            await db.EmailVerificationChallenges.CountAsync(
+                challenge => challenge.TargetEmailCanonical == target.Canonical));
     }
 
     [Fact]
