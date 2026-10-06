@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<IPlayerProfileStore, PlayerProfileStore>();
         services.AddScoped<IProductEntitlementStore, ProductEntitlementStore>();
+        services.AddScoped<INotificationStore, NotificationStore>();
         services.AddScoped<IFriendshipStore, FriendshipStore>();
         services.AddScoped<IVersusSeriesStore, VersusSeriesStore>();
         services.AddScoped<IMatchResultStore, MatchResultStore>();

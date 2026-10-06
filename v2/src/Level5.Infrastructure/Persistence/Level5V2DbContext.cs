@@ -1,4 +1,5 @@
 using Level5.Domain.Results;
+using Level5.Domain.Platform;
 using Level5.Infrastructure.Persistence.Rows;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,6 +13,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<PasswordResetChallengeRow> PasswordResetChallenges => Set<PasswordResetChallengeRow>();
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
     public DbSet<ProductEntitlementRow> ProductEntitlements => Set<ProductEntitlementRow>();
+    public DbSet<PlayerNotificationRow> PlayerNotifications => Set<PlayerNotificationRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
@@ -121,6 +123,24 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
             entity.HasOne<PlayerProfileRow>()
                 .WithMany()
                 .HasForeignKey(e => e.PlayerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlayerNotificationRow>(entity =>
+        {
+            entity.ToTable("player_notifications");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Source).HasMaxLength(NotificationFieldLimits.Source);
+            entity.Property(e => e.Kind).HasMaxLength(NotificationFieldLimits.Kind);
+            entity.Property(e => e.Title).HasMaxLength(NotificationFieldLimits.Title);
+            entity.Property(e => e.Body).HasMaxLength(NotificationFieldLimits.Body);
+            entity.Property(e => e.ActionPath).HasMaxLength(NotificationFieldLimits.ActionPath);
+            entity.Property(e => e.SourceEventKey).HasMaxLength(NotificationFieldLimits.SourceEventKey);
+            entity.HasIndex(e => new { e.RecipientPlayerId, e.Source, e.SourceEventKey }).IsUnique();
+            entity.HasIndex(e => new { e.RecipientPlayerId, e.CreatedAt, e.Id }).IsDescending(false, true, true);
+            entity.HasOne<PlayerProfileRow>()
+                .WithMany()
+                .HasForeignKey(e => e.RecipientPlayerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

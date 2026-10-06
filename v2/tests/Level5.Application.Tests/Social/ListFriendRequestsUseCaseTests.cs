@@ -19,7 +19,8 @@ public class ListFriendRequestsUseCaseTests
 
     public ListFriendRequestsUseCaseTests()
     {
-        _send = new SendFriendRequestUseCase(_friendships, _profiles, new NoOpUnitOfWork(), _clock);
+        _send = new SendFriendRequestUseCase(
+            _friendships, _profiles, new CapturingNotificationWriter(), new NoOpUnitOfWork(), _clock);
         _listIncoming = new ListIncomingFriendRequestsUseCase(_friendships, _profiles);
         _listOutgoing = new ListOutgoingFriendRequestsUseCase(_friendships, _profiles);
     }

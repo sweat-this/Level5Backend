@@ -24,6 +24,7 @@ public sealed class SchemaTests(PostgresFixture fixture)
         Assert.Contains("player_profiles", tables);
         Assert.Contains("auth_sessions", tables);
         Assert.Contains("product_entitlements", tables);
+        Assert.Contains("player_notifications", tables);
     }
 
     [Fact]
@@ -204,6 +205,7 @@ public sealed class SchemaTests(PostgresFixture fixture)
     [InlineData("competitive_series", "WinnerId")]
     [InlineData("match_results", "PlayerId")]
     [InlineData("product_entitlements", "PlayerId")]
+    [InlineData("player_notifications", "RecipientPlayerId")]
     public async Task Player_reference_column_has_a_restrictive_foreign_key_to_player_profiles(string table, string column)
     {
         await using var db = fixture.CreateDbContext();
@@ -224,6 +226,27 @@ public sealed class SchemaTests(PostgresFixture fixture)
 
         var deleteRule = Assert.Single(deleteRules);
         Assert.Equal("RESTRICT", deleteRule);
+    }
+
+    [Fact]
+    public async Task Player_notifications_has_deduplication_and_newest_first_indexes()
+    {
+        await using var db = fixture.CreateDbContext();
+
+        var indexDefs = await db.Database.SqlQuery<string>(
+                $"""
+                 SELECT indexdef FROM pg_indexes
+                 WHERE tablename = 'player_notifications'
+                   AND indexname IN (
+                     'IX_player_notifications_RecipientPlayerId_Source_SourceEventKey',
+                     'IX_player_notifications_RecipientPlayerId_CreatedAt_Id')
+                 ORDER BY indexname
+                 """)
+            .ToListAsync();
+
+        Assert.Equal(2, indexDefs.Count);
+        Assert.Contains(indexDefs, definition => definition.Contains("UNIQUE") && definition.Contains("SourceEventKey"));
+        Assert.Contains(indexDefs, definition => definition.Contains("CreatedAt") && definition.Contains("DESC") && definition.Contains("Id"));
     }
 
     [Fact]
