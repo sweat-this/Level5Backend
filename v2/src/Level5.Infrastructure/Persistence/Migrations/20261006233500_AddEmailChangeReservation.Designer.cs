@@ -171,7 +171,8 @@ namespace Level5.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("TargetEmailCanonical")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"ConsumedAt\" IS NULL");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
