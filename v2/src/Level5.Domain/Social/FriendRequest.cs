@@ -7,8 +7,7 @@ namespace Level5.Domain.Social;
 /// A pending (or resolved) invitation from one player to another to become friends.
 /// Only the recipient may accept/decline; only the sender may cancel while it is pending.
 /// <see cref="Revision"/> is the optimistic-concurrency token persistence conditions its writes
-/// on, exactly like <see cref="Level5.Domain.Competition.VersusSeries.Revision"/> - it only
-/// advances on a successful transition, never on a rejected one.
+/// on. It advances only on a successful transition, never on a rejected one.
 /// </summary>
 public sealed class FriendRequest
 {
