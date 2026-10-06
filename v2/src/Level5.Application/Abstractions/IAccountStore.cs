@@ -12,6 +12,9 @@ public interface IAccountStore
     /// <summary>Private recovery lookup; returns only an account whose canonical email is verified.</summary>
     Task<Account?> FindByVerifiedEmailAsync(Email email, CancellationToken cancellationToken);
 
+    /// <summary>Private uniqueness check covering verified and unverified canonical account email.</summary>
+    Task<bool> EmailExistsAsync(Email email, CancellationToken cancellationToken);
+
     Task<bool> UsernameExistsAsync(Username username, CancellationToken cancellationToken);
 
     Task AddAsync(Account account, CancellationToken cancellationToken);
