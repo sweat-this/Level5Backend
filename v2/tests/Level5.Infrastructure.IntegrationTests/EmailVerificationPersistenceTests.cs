@@ -55,6 +55,37 @@ public sealed class EmailVerificationPersistenceTests(PostgresFixture fixture)
     }
 
     [Fact]
+    public async Task Database_reserves_target_email_canonical_across_accounts()
+    {
+        await using var db = fixture.CreateDbContext();
+        var first = Account.Register(Username.Create($"u{Guid.NewGuid():N}"[..15]), "hash", Now);
+        var second = Account.Register(Username.Create($"u{Guid.NewGuid():N}"[..15]), "hash", Now);
+        var accounts = new AccountStore(db);
+        await accounts.AddAsync(first, CancellationToken.None);
+        await accounts.AddAsync(second, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var target = Email.Create($"reserved{Guid.NewGuid():N}@example.com");
+        var store = new EmailVerificationChallengeStore(db);
+        await store.AddAsync(
+            EmailVerificationChallenge.Create(
+                first.Id, target, $"hash-{Guid.NewGuid():N}", Now, TimeSpan.FromHours(24)),
+            CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        await store.AddAsync(
+            EmailVerificationChallenge.Create(
+                second.Id,
+                Email.Create(target.Value.ToUpperInvariant()),
+                $"hash-{Guid.NewGuid():N}",
+                Now,
+                TimeSpan.FromHours(24)),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+    }
+
+    [Fact]
     public async Task Concurrent_rotations_have_exactly_one_revision_winner()
     {
         var account = await SeedAsync("rotate");
