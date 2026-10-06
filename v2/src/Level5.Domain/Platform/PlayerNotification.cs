@@ -154,6 +154,7 @@ public sealed class PlayerNotification
         }
 
         if (decodedPath.Contains('\\') ||
+            decodedPath.Any(char.IsControl) ||
             !IsRouteFamily(decodedPath, "/account") ||
             IsRouteFamily(decodedPath, "/account/login") ||
             IsRouteFamily(decodedPath, "/account/register"))
