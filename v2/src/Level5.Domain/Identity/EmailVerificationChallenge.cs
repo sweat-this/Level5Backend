@@ -85,6 +85,21 @@ public sealed class EmailVerificationChallenge
         Revision++;
     }
 
+    /// <summary>
+    /// Invalidates an outstanding challenge without requiring it to still be unexpired.
+    /// Idempotent so cancellation can safely be retried.
+    /// </summary>
+    public void Cancel(DateTimeOffset now)
+    {
+        if (ConsumedAt is not null)
+        {
+            return;
+        }
+
+        ConsumedAt = now;
+        Revision++;
+    }
+
     private static void ValidateCredential(string tokenHash, TimeSpan lifetime)
     {
         if (string.IsNullOrWhiteSpace(tokenHash))

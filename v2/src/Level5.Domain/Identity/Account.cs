@@ -75,7 +75,7 @@ public sealed class Account
 
     /// <summary>
     /// Installs an unverified recovery-email candidate. A verified address is immutable here:
-    /// changing it is a separate account-recovery operation owned by issue #64.
+    /// changing it uses the separate verified-email replacement flow.
     /// </summary>
     /// <returns><see langword="false"/> when the same already-verified address was requested.</returns>
     public bool AttachOrReplaceUnverifiedEmail(Email email)
@@ -105,6 +105,21 @@ public sealed class Account
 
         EmailVerifiedAt ??= verifiedAt;
     }
+
+    /// <summary>
+    /// Promotes a separately verified replacement address. The existing verified address remains
+    /// canonical until this operation runs.
+    /// </summary>
+    public void PromoteVerifiedEmail(Email replacement, DateTimeOffset verifiedAt)
+    {
+        if (Email is null || EmailVerifiedAt is null || Email.Equals(replacement))
+        {
+            throw new EmailChangePromotionInvalidException();
+        }
+
+        Email = replacement;
+        EmailVerifiedAt = verifiedAt;
+    }
 }
 
 public sealed class VerifiedEmailChangeNotAllowedException : DomainException
@@ -119,6 +134,14 @@ public sealed class EmailVerificationTargetMismatchException : DomainException
 {
     public EmailVerificationTargetMismatchException()
         : base("The verification target does not match the account's current email.")
+    {
+    }
+}
+
+public sealed class EmailChangePromotionInvalidException : DomainException
+{
+    public EmailChangePromotionInvalidException()
+        : base("The verified email replacement cannot be promoted from the account's current state.")
     {
     }
 }

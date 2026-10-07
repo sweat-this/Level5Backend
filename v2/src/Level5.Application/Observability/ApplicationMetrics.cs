@@ -55,6 +55,14 @@ public static class ApplicationMetrics
         Meter.CreateCounter<long>("auth.password_recovery.delivery", description: "Password-recovery delivery outcomes without identity labels.");
 
     /// <summary>
+    /// Best-effort notification to the previous verified mailbox after an email replacement is
+    /// committed. Tag <c>outcome</c>: <c>delivered</c> or <c>failed</c>. No identity/provider
+    /// details are attached.
+    /// </summary>
+    public static readonly Counter<long> EmailChangePreviousAddressNotificationOutcomes =
+        Meter.CreateCounter<long>("auth.email_change.previous_address_notification", description: "Previous-address email-change notification outcomes.");
+
+    /// <summary>
     /// A series mutation exhausted its bounded reload-and-reevaluate retries
     /// (<see cref="Level5.Application.Competition.StartAttemptUseCase"/>/
     /// <see cref="Level5.Application.Competition.CompleteAttemptUseCase"/>, or the single
