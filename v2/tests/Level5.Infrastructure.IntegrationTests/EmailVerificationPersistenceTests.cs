@@ -212,6 +212,71 @@ public sealed class EmailVerificationPersistenceTests(PostgresFixture fixture)
         Assert.Equal(0, persistedChallenge.Revision);
     }
 
+    [Fact]
+    public async Task Email_replacement_promotion_and_challenge_consumption_commit_atomically()
+    {
+        var currentEmail = Email.Create($"current{Guid.NewGuid():N}@example.com");
+        var replacement = Email.Create($"replacement{Guid.NewGuid():N}@example.com");
+        Account account;
+        await using (var seedDb = fixture.CreateDbContext())
+        {
+            account = Account.Register(
+                Username.Create($"u{Guid.NewGuid():N}"[..15]),
+                "hash",
+                Now,
+                currentEmail);
+            account.VerifyEmail(currentEmail, Now);
+            await new AccountStore(seedDb).AddAsync(account, CancellationToken.None);
+            await new EmailVerificationChallengeStore(seedDb).AddAsync(
+                EmailVerificationChallenge.Create(
+                    account.Id,
+                    replacement,
+                    $"hash-{Guid.NewGuid():N}",
+                    Now,
+                    TimeSpan.FromHours(24)),
+                CancellationToken.None);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using (var failingDb = fixture.CreateDbContext())
+        {
+            var accountStore = new AccountStore(failingDb);
+            var challengeStore = new EmailVerificationChallengeStore(failingDb);
+            var loadedAccount = await accountStore.FindByIdAsync(account.Id, CancellationToken.None);
+            var challenge = await challengeStore.FindByAccountIdAsync(account.Id, CancellationToken.None);
+            loadedAccount!.PromoteVerifiedEmail(replacement, Now.AddMinutes(1));
+            challenge!.Consume(Now.AddMinutes(1));
+            await accountStore.StageEmailUpdateAsync(loadedAccount, CancellationToken.None);
+            await challengeStore.StageUpdateAsync(challenge, CancellationToken.None);
+
+            // The duplicate AccountId makes the unit-of-work fail after both legitimate updates
+            // are staged. PostgreSQL must roll promotion and consumption back together.
+            failingDb.EmailVerificationChallenges.Add(new EmailVerificationChallengeRow
+            {
+                Id = Guid.CreateVersion7(),
+                AccountId = account.Id.Value,
+                TargetEmail = replacement.Value,
+                TargetEmailCanonical = replacement.Canonical,
+                TokenHash = $"other-{Guid.NewGuid():N}",
+                IssuedAt = Now,
+                ExpiresAt = Now.AddHours(1),
+                Revision = 0
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => failingDb.SaveChangesAsync());
+        }
+
+        await using var readDb = fixture.CreateDbContext();
+        var persistedAccount = await new AccountStore(readDb)
+            .FindByIdAsync(account.Id, CancellationToken.None);
+        var persistedChallenge = await new EmailVerificationChallengeStore(readDb)
+            .FindByAccountIdAsync(account.Id, CancellationToken.None);
+        Assert.Equal(currentEmail, persistedAccount!.Email);
+        Assert.NotNull(persistedAccount.EmailVerifiedAt);
+        Assert.Equal(Now, persistedAccount.EmailVerifiedAt.Value, TimeSpan.FromMilliseconds(1));
+        Assert.Null(persistedChallenge!.ConsumedAt);
+        Assert.Equal(0, persistedChallenge.Revision);
+    }
+
     private async Task<Account> SeedAsync(string prefix)
     {
         await using var db = fixture.CreateDbContext();

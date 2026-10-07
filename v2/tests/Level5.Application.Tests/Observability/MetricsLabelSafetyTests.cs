@@ -36,6 +36,8 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         "success", "unknown", "expired", "revoked", "account_inactive", "generation_mismatch", "replay_conflict",
         // auth.password_recovery.delivery / outcome
         "delivered", "unavailable", "faulted",
+        // auth.email_change.previous_address_notification / outcome
+        "failed",
         // series.concurrency.conflict / operation
         "start_attempt", "complete_attempt", "accept_challenge", "decline_challenge", "cancel_challenge",
         // challenge.create.replay_or_conflict / outcome
@@ -200,6 +202,15 @@ public sealed class MetricsLabelSafetyTests : IDisposable
         await DrivePasswordRecoveryDeliveryAsync(
             "metricsrecoveryfault", "metrics-recovery-fault@example.com", new ThrowingPasswordRecoveryDelivery());
 
+        // auth.email_change.previous_address_notification: delivered, failed. Completion remains
+        // successful in both cases because notification happens after the promotion commit.
+        await DriveEmailChangeNotificationAsync(
+            "metricsemailchangeok", "metrics-email-old-ok@example.com",
+            "metrics-email-new-ok@example.com", throwOnNotification: false);
+        await DriveEmailChangeNotificationAsync(
+            "metricsemailchangefail", "metrics-email-old-fail@example.com",
+            "metrics-email-new-fail@example.com", throwOnNotification: true);
+
         // challenge.create.replay_or_conflict: created, idempotent_replay, conflict.
         var seriesStore = new InMemoryVersusSeriesStore();
         var friendships = new InMemoryFriendshipStore();
@@ -284,6 +295,51 @@ public sealed class MetricsLabelSafetyTests : IDisposable
                     new NoOpUnitOfWork(),
                     clock)
                 .ExecuteAsync(new RequestPasswordResetRequest(email), CancellationToken.None);
+        }
+
+        async Task DriveEmailChangeNotificationAsync(
+            string username,
+            string currentEmail,
+            string replacementEmail,
+            bool throwOnNotification)
+        {
+            var account = Account.Register(
+                Username.Create(username),
+                hasher.Hash("P@ssw0rd!"),
+                clock.UtcNow,
+                Email.Create(currentEmail));
+            account.VerifyEmail(account.Email!, clock.UtcNow);
+            await accounts.AddAsync(account, CancellationToken.None);
+
+            var tokenGenerator = new FakeEmailVerificationTokenGenerator();
+            var token = tokenGenerator.Generate();
+            var challenges = new InMemoryEmailVerificationChallengeStore();
+            await challenges.AddAsync(
+                EmailVerificationChallenge.Create(
+                    account.Id,
+                    Email.Create(replacementEmail),
+                    token.Hash,
+                    clock.UtcNow,
+                    TimeSpan.FromHours(1)),
+                CancellationToken.None);
+            var delivery = new FakeEmailChangeDelivery
+            {
+                ThrowOnPreviousAddressNotification = throwOnNotification
+            };
+
+            await new CompleteEmailChangeUseCase(
+                    challenges,
+                    tokenGenerator,
+                    accounts,
+                    delivery,
+                    new NoOpUnitOfWork(),
+                    clock)
+                .ExecuteAsync(token.RawValue, CancellationToken.None);
+
+            sensitiveValues.Add(account.Id.Value.ToString());
+            sensitiveValues.Add(currentEmail);
+            sensitiveValues.Add(replacementEmail);
+            sensitiveValues.Add(token.RawValue);
         }
     }
 

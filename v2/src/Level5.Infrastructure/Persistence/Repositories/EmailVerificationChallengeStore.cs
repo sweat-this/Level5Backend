@@ -8,6 +8,27 @@ namespace Level5.Infrastructure.Persistence.Repositories;
 
 public sealed class EmailVerificationChallengeStore(Level5V2DbContext db) : IEmailVerificationChallengeStore
 {
+    public async Task ReleaseExpiredReplacementReservationAsync(
+        Email targetEmail,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await db.EmailVerificationChallenges
+            .Where(challenge =>
+                challenge.TargetEmailCanonical == targetEmail.Canonical &&
+                challenge.ConsumedAt == null &&
+                challenge.ExpiresAt <= now &&
+                db.Accounts.Any(account =>
+                    account.Id == challenge.AccountId &&
+                    account.EmailVerifiedAt != null &&
+                    account.EmailCanonical != null &&
+                    account.EmailCanonical != challenge.TargetEmailCanonical))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(challenge => challenge.ConsumedAt, now)
+                .SetProperty(challenge => challenge.Revision, challenge => challenge.Revision + 1),
+                cancellationToken);
+    }
+
     public async Task<EmailVerificationChallenge?> FindByAccountIdAsync(
         AccountId accountId,
         CancellationToken cancellationToken)
