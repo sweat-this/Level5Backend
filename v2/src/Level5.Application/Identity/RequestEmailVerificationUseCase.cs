@@ -44,6 +44,8 @@ public sealed class RequestEmailVerificationUseCase(
         }
 
         var now = clock.UtcNow;
+        await challengeStore.ReleaseExpiredReplacementReservationAsync(targetEmail, now, cancellationToken);
+
         var challenge = await challengeStore.FindByAccountIdAsync(account.Id, cancellationToken);
         if (challenge is not null && now < challenge.IssuedAt + policy.ResendCooldown)
         {

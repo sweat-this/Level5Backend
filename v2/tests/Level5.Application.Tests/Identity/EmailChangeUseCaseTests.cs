@@ -1,6 +1,7 @@
 using Level5.Application.Identity;
 using Level5.Application.Tests.Fakes;
 using Level5.Domain.Identity;
+using Level5.Domain.Ids;
 using Xunit;
 
 namespace Level5.Application.Tests.Identity;
@@ -41,6 +42,60 @@ public sealed class EmailChangeUseCaseTests
             Request().ExecuteAsync(new(account.Id, "wrong", "new2@example.com"), CancellationToken.None));
 
         Assert.Empty(_delivery.Verifications);
+    }
+
+    [Fact]
+    public async Task Request_requires_an_active_account_with_a_verified_email()
+    {
+        var unverified = Account.Register(
+            Username.Create($"u{Guid.NewGuid():N}"[..15]),
+            _passwords.Hash("current-password"),
+            _clock.UtcNow,
+            Email.Create("unverified@example.com"));
+        await _accounts.AddAsync(unverified, CancellationToken.None);
+        var disabled = Account.Rehydrate(
+            AccountId.New(),
+            Username.Create($"u{Guid.NewGuid():N}"[..15]),
+            Email.Create("disabled@example.com"),
+            AccountStatus.Disabled,
+            _passwords.Hash("current-password"),
+            _clock.UtcNow,
+            _clock.UtcNow);
+        await _accounts.AddAsync(disabled, CancellationToken.None);
+
+        await Assert.ThrowsAsync<EmailChangeNotAvailableException>(() => Request().ExecuteAsync(
+            new(unverified.Id, "current-password", "new-unverified@example.com"), CancellationToken.None));
+        await Assert.ThrowsAsync<EmailChangeNotAvailableException>(() => Request().ExecuteAsync(
+            new(disabled.Id, "current-password", "new-disabled@example.com"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Request_rejects_current_or_another_accounts_canonical_email()
+    {
+        var account = await AddVerifiedAsync("current@example.com");
+        await AddVerifiedAsync("owned@example.com");
+
+        await Assert.ThrowsAsync<EmailAlreadyCurrentException>(() => Request().ExecuteAsync(
+            new(account.Id, "current-password", "CURRENT@example.com"), CancellationToken.None));
+        await Assert.ThrowsAsync<EmailUnavailableException>(() => Request().ExecuteAsync(
+            new(account.Id, "current-password", "OWNED@example.com"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Verification_delivery_failure_leaves_the_committed_pending_change_recoverable()
+    {
+        var account = await AddVerifiedAsync("delivery-old@example.com");
+        _delivery.ThrowOnVerification = true;
+
+        await Assert.ThrowsAsync<EmailChangeDeliveryUnavailableException>(() => Request().ExecuteAsync(
+            new(account.Id, "current-password", "delivery-new@example.com"), CancellationToken.None));
+
+        Assert.True(_uow.Saved);
+        var challenge = await _challenges.FindByAccountIdAsync(account.Id, CancellationToken.None);
+        Assert.NotNull(challenge);
+        Assert.Null(challenge!.ConsumedAt);
+        Assert.Equal("delivery-new@example.com", challenge.TargetEmail.Value);
+        Assert.Equal("delivery-old@example.com", account.Email!.Value);
     }
 
     [Fact]
@@ -87,6 +142,7 @@ public sealed class EmailChangeUseCaseTests
 
         Assert.Equal("new5@example.com", account.Email!.Value);
         Assert.Equal(_clock.UtcNow, account.EmailVerifiedAt);
+        Assert.Equal(0, account.SessionGeneration);
         Assert.Equal("old5@example.com", Assert.Single(_delivery.PreviousAddressNotifications).Value);
 
         await Assert.ThrowsAsync<InvalidEmailChangeException>(() =>
