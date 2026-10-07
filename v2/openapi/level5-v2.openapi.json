@@ -140,6 +140,93 @@
         }
       }
     },
+    "/api/v2/me/email/change": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailChangeDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailChangeDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestEmailChangeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v2/me/email/change/resend": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeDispatchResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/me/password": {
       "post": {
         "tags": [
@@ -482,6 +569,37 @@
             "application/*\u002Bjson": {
               "schema": {
                 "$ref": "#/components/schemas/PasswordResetCompleteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v2/email-change/complete": {
+      "post": {
+        "tags": [
+          "EmailChange"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailChangeRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailChangeRequestDto"
+              }
+            },
+            "application/*\u002Bjson": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteEmailChangeRequestDto"
               }
             }
           }
@@ -1989,6 +2107,15 @@
         },
         "additionalProperties": false
       },
+      "CompleteEmailChangeRequestDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CompleteEmailVerificationRequestDto": {
         "type": "object",
         "properties": {
@@ -2049,6 +2176,19 @@
             "format": "uuid"
           },
           "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmailChangeDispatchResponseDto": {
+        "type": "object",
+        "properties": {
+          "pendingEmail": {
+            "type": "string"
+          },
+          "expiresAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -2349,6 +2489,18 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "pendingEmail": {
+            "type": "string",
+            "nullable": true
+          },
+          "pendingEmailChangeExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "pendingEmailChangeExpired": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -2498,6 +2650,18 @@
             "type": "string"
           },
           "displayName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RequestEmailChangeDto": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newEmail": {
             "type": "string"
           }
         },
@@ -2783,6 +2947,9 @@
     },
     {
       "name": "Auth"
+    },
+    {
+      "name": "EmailChange"
     },
     {
       "name": "EmailVerification"

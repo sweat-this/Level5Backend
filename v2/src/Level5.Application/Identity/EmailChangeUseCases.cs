@@ -45,8 +45,12 @@ public sealed class RequestEmailChangeUseCase(
         }
 
         var now = clock.UtcNow;
+        await challengeStore.ReleaseExpiredReplacementReservationAsync(target, now, cancellationToken);
+
         var challenge = await challengeStore.FindByAccountIdAsync(account.Id, cancellationToken);
-        if (challenge is { ConsumedAt: null } && now < challenge.IssuedAt + policy.ResendCooldown)
+        if (challenge is not null &&
+            (challenge.ConsumedAt is null || !challenge.TargetEmail.Equals(account.Email)) &&
+            now < challenge.IssuedAt + policy.ResendCooldown)
         {
             throw new EmailChangeCooldownException();
         }

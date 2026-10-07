@@ -39,7 +39,11 @@ public sealed class EmailChangeMigrationUpgradeTests
 
             var now = DateTimeOffset.UtcNow;
             var target = Email.Create($"reserved{Guid.NewGuid():N}@example.com");
-            var first = Account.Register(Username.Create($"a{Guid.NewGuid():N}"[..15]), "hash", now);
+            var first = Account.Register(
+                Username.Create($"a{Guid.NewGuid():N}"[..15]),
+                "hash",
+                now,
+                target);
             await using (var db = new Level5V2DbContext(options))
             {
                 await new AccountStore(db).AddAsync(first, CancellationToken.None);

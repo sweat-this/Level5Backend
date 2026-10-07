@@ -247,6 +247,14 @@ public sealed class InMemoryEmailVerificationChallengeStore : IEmailVerification
 {
     private EmailVerificationChallenge? _challenge;
 
+    public Task ReleaseExpiredReplacementReservationAsync(
+        Email targetEmail,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+        // This lightweight fake has no account relation with which to distinguish replacement
+        // from initial verification. The relational policy is covered against real PostgreSQL.
+        => Task.CompletedTask;
+
     public Task<EmailVerificationChallenge?> FindByAccountIdAsync(AccountId accountId, CancellationToken cancellationToken)
         => Task.FromResult(_challenge?.AccountId == accountId ? Clone(_challenge) : null);
 
