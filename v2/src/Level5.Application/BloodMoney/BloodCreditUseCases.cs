@@ -43,6 +43,9 @@ internal static class BloodCreditMutation
     internal static async Task<BloodCreditMutationResult> ExecuteAsync(IBloodCreditLedgerStore store, IUnitOfWork unitOfWork,
         BloodCreditTransaction transaction, CancellationToken cancellationToken)
     {
+        // Read the projection first: if it includes a concurrent commit, the subsequent
+        // transaction lookup can resolve that commit before validating the balance again.
+        var account = await store.FindAccountAsync(transaction.SubjectPlayerId, cancellationToken);
         var existing = await store.FindTransactionAsync(transaction.TransactionId, cancellationToken);
         if (existing is not null)
         {
@@ -51,7 +54,6 @@ internal static class BloodCreditMutation
             return new(transaction.TransactionId, true);
         }
 
-        var account = await store.FindAccountAsync(transaction.SubjectPlayerId, cancellationToken);
         if (account is null)
         {
             if (transaction.Kind != BloodCreditTransactionKind.Issuance)

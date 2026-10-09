@@ -141,6 +141,64 @@ public sealed class BloodCreditLedgerTests(PostgresFixture fixture)
     }
 
     [Theory]
+    [InlineData(BloodCreditTransactionKind.Spend, 100, 80, true)]
+    [InlineData(BloodCreditTransactionKind.Spend, 100, 80, false)]
+    [InlineData(BloodCreditTransactionKind.Issuance, long.MaxValue - 1, 1, true)]
+    [InlineData(BloodCreditTransactionKind.Issuance, long.MaxValue - 1, 1, false)]
+    [InlineData(BloodCreditTransactionKind.Correction, 100, -80, true)]
+    [InlineData(BloodCreditTransactionKind.Correction, 100, -80, false)]
+    [InlineData(BloodCreditTransactionKind.Correction, long.MaxValue - 1, 1, true)]
+    [InlineData(BloodCreditTransactionKind.Correction, long.MaxValue - 1, 1, false)]
+    public async Task Commit_between_reads_resolves_persisted_intent_before_balance_validation(
+        BloodCreditTransactionKind kind, long initialBalance, long amountOrDelta, bool sameIntent)
+    {
+        var player = await CreatePlayer();
+        await Fund(player, initialBalance);
+        var id = BloodCreditTransactionId.New();
+        await using var delayedDb = fixture.CreateDbContext();
+        var delayedStore = new PauseAfterFirstReadStore(new BloodCreditLedgerStore(delayedDb));
+        var delayedCall = Execute(delayedStore, new EfUnitOfWork(delayedDb), sameIntent ? "race" : "different-intent");
+        try
+        {
+            await delayedStore.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await using var winnerDb = fixture.CreateDbContext();
+            Assert.False((await Execute(new BloodCreditLedgerStore(winnerDb), new EfUnitOfWork(winnerDb), "race")).IsReplay);
+        }
+        finally
+        {
+            delayedStore.Resume.TrySetResult();
+        }
+
+        if (sameIntent)
+            Assert.True((await delayedCall).IsReplay);
+        else
+            await Assert.ThrowsAsync<ConflictException>(() => delayedCall);
+        Assert.Empty(delayedDb.ChangeTracker.Entries());
+
+        await using var check = fixture.CreateDbContext();
+        var account = (await new BloodCreditLedgerStore(check).FindAccountAsync(player, Ct))!;
+        var delta = kind == BloodCreditTransactionKind.Spend ? checked(-amountOrDelta) : amountOrDelta;
+        Assert.Equal(checked(initialBalance + delta), account.AvailableBalance);
+        Assert.Equal(2, account.Revision);
+        Assert.Equal(1, await check.Set<BloodCreditTransactionRow>().CountAsync(row => row.Id == id.Value));
+        var postings = await check.Set<BloodCreditPostingRow>().Where(row => row.TransactionId == id.Value).ToListAsync();
+        Assert.Equal(2, postings.Count);
+        Assert.Equal(0, postings.Sum(row => row.Amount));
+        Assert.Equal(account.AvailableBalance, await check.Set<BloodCreditPostingRow>().Where(row => row.PlayerId == player.Value).SumAsync(row => row.Amount));
+
+        Task<BloodCreditMutationResult> Execute(IBloodCreditLedgerStore store, IUnitOfWork unitOfWork, string reference)
+            => kind switch
+            {
+                BloodCreditTransactionKind.Issuance => new IssueBloodCreditsUseCase(store, unitOfWork, TestClock)
+                    .ExecuteAsync(new(id, player, amountOrDelta, reference), Ct),
+                BloodCreditTransactionKind.Spend => new SpendBloodCreditsUseCase(store, unitOfWork, TestClock)
+                    .ExecuteAsync(new(id, player, amountOrDelta, reference), Ct),
+                _ => new CorrectBloodCreditsUseCase(store, unitOfWork, TestClock)
+                    .ExecuteAsync(new(id, player, amountOrDelta, reference), Ct)
+            };
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Failure_after_a_posting_command_rolls_back_projection_transaction_and_both_postings(bool existingAccount)
@@ -323,6 +381,40 @@ public sealed class BloodCreditLedgerTests(PostgresFixture fixture)
         => Assert.Equal(expected, Assert.IsType<PostgresException>(error.InnerException).SqlState);
 
     private sealed class Clock : IClock { public DateTimeOffset UtcNow => DateTimeOffset.UtcNow; }
+
+    // Pause after whichever read runs first, without prescribing the use case's query order.
+    // A separate context commits the same ID before this operation performs its second read.
+    private sealed class PauseAfterFirstReadStore(IBloodCreditLedgerStore inner) : IBloodCreditLedgerStore
+    {
+        private int _reads;
+        public TaskCompletionSource FirstRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<BloodCreditAccount?> FindAccountAsync(PlayerId playerId, CancellationToken cancellationToken)
+        {
+            var account = await inner.FindAccountAsync(playerId, cancellationToken);
+            await PauseFirstRead(cancellationToken);
+            return account;
+        }
+
+        public async Task<BloodCreditTransaction?> FindTransactionAsync(BloodCreditTransactionId id, CancellationToken cancellationToken)
+        {
+            var transaction = await inner.FindTransactionAsync(id, cancellationToken);
+            await PauseFirstRead(cancellationToken);
+            return transaction;
+        }
+
+        public void AddAccount(BloodCreditAccount account) => inner.AddAccount(account);
+        public void StageAccountUpdate(BloodCreditAccount account, long revision) => inner.StageAccountUpdate(account, revision);
+        public void AddTransaction(BloodCreditTransaction transaction) => inner.AddTransaction(transaction);
+
+        private async Task PauseFirstRead(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _reads) != 1) return;
+            FirstRead.TrySetResult();
+            await Resume.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        }
+    }
 
     private sealed class SaveBarrier
     {

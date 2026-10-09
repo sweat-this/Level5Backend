@@ -68,6 +68,12 @@ of the intent; a replay retains the original committed time and postings. The GU
 generated or replaced by EF. Concurrent same-ID races are protected by the transaction PK, even
 when the two calls initially read no transaction.
 
+Mutation reads obtain the account projection before checking the transaction ID. Because account
+and ledger publish atomically, a projection that includes a competing commit is followed by a
+lookup that can resolve its replay/conflict before balance validation. A commit after both reads
+is still protected by the expected revision and transaction PK. This avoids falsely rejecting a
+committed duplicate as insufficient credits or overflow.
+
 The store only stages changes. One final `IUnitOfWork.SaveChangesAsync` commits the tracked account
 update (conditioned on expected revision), transaction, and two postings in EF's database transaction.
 There is no independent immediate balance update. Failed commands, uniqueness conflicts, and stale
