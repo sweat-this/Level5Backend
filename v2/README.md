@@ -9,6 +9,10 @@ The canonical current-state boundary between shared Platform capabilities and Le
 capabilities, including persistence ownership and future API namespace rules, is defined in
 [Modular game boundaries and namespaced API evolution](docs/modular-game-boundaries.md).
 
+[Blood Money audit and module-entry gate](docs/blood-money-module-entry.md) records #79's
+source-backed authority and compatibility decisions; code-level #63/module certification remains
+deferred to #80's first real account and balanced-ledger slice.
+
 ## Status
 
 Domain: player identity/tags (exact case-insensitive lookup, self-scoped display-name update -
