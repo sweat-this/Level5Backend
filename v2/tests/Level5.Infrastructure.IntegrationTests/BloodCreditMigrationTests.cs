@@ -17,7 +17,7 @@ public sealed class BloodCreditMigrationTests
     private const string PreviousMigration = "20261006233500_AddEmailChangeReservation";
 
     [Fact]
-    public async Task Upgrade_preserves_Platform_and_Level5_data_adds_only_three_empty_credit_tables_and_constraints()
+    public async Task Upgrade_preserves_Platform_and_Level5_data_adds_empty_credit_tables_and_constraints()
     {
         await using var container = Container();
         await container.StartAsync();
@@ -48,7 +48,7 @@ public sealed class BloodCreditMigrationTests
         Assert.Equal(2, result.LevelId);
         Assert.Equal("{\"TotalPoints\": 90}", result.MetricsJson);
         Assert.Equal("upgrade-test", result.ClientVersion);
-        Assert.Equal(new[] { "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_transactions" },
+        Assert.Equal(new[] { "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_reservations", "blood_money_credit_transactions" },
             (await Tables(db)).Except(beforeTables).Order().ToArray());
         Assert.Empty(await db.Set<BloodCreditAccountRow>().ToListAsync());
         Assert.Empty(await db.Set<BloodCreditTransactionRow>().ToListAsync());
@@ -88,12 +88,12 @@ public sealed class BloodCreditMigrationTests
         Assert.DoesNotContain("blood_money_credit_transactions", tables);
         Assert.Contains("blood_money_credit_postings", tables);
         Assert.Equal(previousHistory, await db.Database.GetAppliedMigrationsAsync());
-        Assert.Single(await db.Database.GetPendingMigrationsAsync());
+        Assert.Equal(2, (await db.Database.GetPendingMigrationsAsync()).Count());
         // Drop only the sentinel created by this fixture inside its dedicated container.
         await db.Database.ExecuteSqlRawAsync("DROP TABLE blood_money_credit_postings");
         await db.Database.MigrateAsync();
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
-        Assert.Equal(3, (await Tables(db)).Count(name => name.StartsWith("blood_money_credit_", StringComparison.Ordinal)));
+        Assert.Equal(4, (await Tables(db)).Count(name => name.StartsWith("blood_money_credit_", StringComparison.Ordinal)));
     }
 
     private static PostgreSqlContainer Container() => new PostgreSqlBuilder("postgres:18-alpine")

@@ -8,7 +8,7 @@ public readonly record struct BloodCreditTransactionId(Guid Value)
     public static BloodCreditTransactionId New() => new(Guid.CreateVersion7());
 }
 
-public enum BloodCreditTransactionKind { Issuance, Spend, Correction }
+public enum BloodCreditTransactionKind { Issuance, Spend, Correction, Reserve, Release }
 public enum BloodCreditPostingOwner { Player, Treasury }
 
 public sealed record BloodCreditPosting(int LineNumber, BloodCreditPostingOwner PostingOwner, PlayerId? PlayerId, long Amount);
@@ -40,8 +40,8 @@ public sealed class BloodCreditTransaction
     {
         if (id.Value == Guid.Empty || playerId.Value == Guid.Empty || !Enum.IsDefined(kind) ||
             delta is 0 or long.MinValue ||
-            (kind == BloodCreditTransactionKind.Issuance && delta < 0) ||
-            (kind == BloodCreditTransactionKind.Spend && delta > 0) ||
+            (kind is BloodCreditTransactionKind.Issuance or BloodCreditTransactionKind.Release && delta < 0) ||
+            (kind is BloodCreditTransactionKind.Spend or BloodCreditTransactionKind.Reserve && delta > 0) ||
             string.IsNullOrWhiteSpace(reference) || reference.Length > ReferenceMaxLength)
             throw new InvalidBloodCreditsException("Invalid transaction identity, kind, delta, or audit reference.");
 
@@ -75,6 +75,18 @@ public sealed class BloodCreditTransaction
 
     public static BloodCreditTransaction Correct(BloodCreditTransactionId id, PlayerId player, long delta, string reference, DateTimeOffset now)
         => Create(id, BloodCreditTransactionKind.Correction, player, delta, reference, now);
+
+    public static BloodCreditTransaction Reserve(BloodCreditTransactionId id, PlayerId player, long amount, string reference, DateTimeOffset now)
+    {
+        RequirePositive(amount);
+        return Create(id, BloodCreditTransactionKind.Reserve, player, checked(-amount), reference, now);
+    }
+
+    public static BloodCreditTransaction Release(BloodCreditTransactionId id, PlayerId player, long amount, string reference, DateTimeOffset now)
+    {
+        RequirePositive(amount);
+        return Create(id, BloodCreditTransactionKind.Release, player, amount, reference, now);
+    }
 
     public static BloodCreditTransaction Rehydrate(BloodCreditTransactionId id, BloodCreditTransactionKind kind,
         PlayerId player, long delta, string reference, DateTimeOffset createdAt, IEnumerable<BloodCreditPosting> postings)
