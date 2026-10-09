@@ -15,8 +15,7 @@ public sealed class EmailVerificationMigrationUpgradeTests
     [Fact]
     public async Task Existing_email_remains_unverified_when_schema_is_upgraded()
     {
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_email_upgrade_test")
             .WithUsername("level5")
             .WithPassword("test-password")

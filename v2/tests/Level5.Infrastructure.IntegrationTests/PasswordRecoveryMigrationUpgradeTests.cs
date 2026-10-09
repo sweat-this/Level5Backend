@@ -16,7 +16,7 @@ public sealed class PasswordRecoveryMigrationUpgradeTests
     [Fact]
     public async Task Existing_account_and_session_migrate_to_matching_zero_generation_and_remain_refreshable()
     {
-        var container = new PostgreSqlBuilder().WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_password_upgrade_test").WithUsername("level5").WithPassword("test-password").Build();
         await container.StartAsync();
         try

@@ -20,8 +20,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        _container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_test")
             .WithUsername("level5")
             .WithPassword("test-password")

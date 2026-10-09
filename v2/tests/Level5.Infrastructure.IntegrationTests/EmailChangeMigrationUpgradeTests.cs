@@ -17,8 +17,7 @@ public sealed class EmailChangeMigrationUpgradeTests
     [Fact]
     public async Task Upgrade_preserves_existing_challenge_and_adds_unique_target_reservation()
     {
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_email_change_upgrade_test")
             .WithUsername("level5")
             .WithPassword("test-password")

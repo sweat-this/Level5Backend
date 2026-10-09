@@ -15,7 +15,7 @@ public sealed class AccountSecuritySessionsMigrationUpgradeTests
     [Fact]
     public async Task Existing_sessions_receive_safe_metadata_without_changing_their_generation()
     {
-        var container = new PostgreSqlBuilder().WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_session_upgrade_test")
             .WithUsername("level5")
             .WithPassword("test-password")

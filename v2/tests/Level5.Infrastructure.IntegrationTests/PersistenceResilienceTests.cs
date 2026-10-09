@@ -193,8 +193,7 @@ public sealed class ReadinessAfterServerLossTests
     [Fact]
     public async Task Readiness_turns_unhealthy_when_the_server_stops_after_a_connection_was_pooled()
     {
-        var container = new Testcontainers.PostgreSql.PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new Testcontainers.PostgreSql.PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_readiness_test")
             .WithUsername("level5")
             .WithPassword("test-password")
