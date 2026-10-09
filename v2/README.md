@@ -1565,7 +1565,7 @@ missing runtime-only secrets like `Jwt:Key`.)
   the suggested tree - the brief's own "Architecture tests" section requires them, and they don't
   fit cleanly inside any of the other four without giving a test project a compile-time reference
   to all four source projects for reflection purposes alone.
-- `Testcontainers.PostgreSql` (a test-only dependency) transitively pulls in `SSH.NET`, which NuGet
-  flags with a high-severity advisory (`GHSA-q939-rpr3-3284`) for its SSH-tunnel-to-Docker feature.
-  It is not used - these tests connect to a local Docker daemon directly - and it is not a
-  production dependency. Left as-is pending an upstream Testcontainers update; worth revisiting.
+- Both integration-test projects use `Testcontainers.PostgreSql` 4.14.0, which transitively
+  requires `SSH.NET` 2026.0.0 and resolves the high-severity SCP recursive-download advisory
+  (`GHSA-q939-rpr3-3284`). These dependencies are test-only; the tests connect directly to a
+  local Docker daemon.

@@ -27,8 +27,7 @@ public sealed class MatchResultsMigrationUpgradeTests
     [Fact]
     public async Task Upgrading_from_the_initial_schema_to_the_current_schema_preserves_existing_data_and_adds_match_results()
     {
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_upgrade_test")
             .WithUsername("level5")
             .WithPassword("test-password")
@@ -86,8 +85,7 @@ public sealed class MatchResultsMigrationUpgradeTests
     [Fact]
     public async Task Upgrading_from_the_varchar_ModeId_LevelId_schema_converts_existing_numeric_string_values_to_integers()
     {
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_modeid_upgrade_test")
             .WithUsername("level5")
             .WithPassword("test-password")
@@ -155,8 +153,7 @@ public sealed class MatchResultsMigrationUpgradeTests
     [Fact]
     public async Task Upgrading_from_the_varchar_ModeId_LevelId_schema_fails_loudly_on_a_non_numeric_value()
     {
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")
+        var container = new PostgreSqlBuilder("postgres:18-alpine")
             .WithDatabase("level5_v2_modeid_upgrade_bad_data_test")
             .WithUsername("level5")
             .WithPassword("test-password")

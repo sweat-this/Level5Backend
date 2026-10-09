@@ -20,8 +20,7 @@ namespace Level5.Api.IntegrationTests;
 /// </summary>
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:18-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine")
         .WithDatabase("level5_v2_api_test")
         .WithUsername("level5")
         .WithPassword("test-password")
