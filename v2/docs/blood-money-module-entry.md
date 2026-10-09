@@ -1,6 +1,6 @@
 # Blood Money audit and module-entry gate
 
-- Status: #79 audit/ownership/compatibility decision complete; code-level module entry **deferred**.
+- Status: #79 audit/ownership/compatibility decision complete; #80 implements real account/ledger module entry and #63 sibling isolation.
 - Audited: 2026-10-09.
 - Owner: [Backend #79](https://github.com/sweat-this/Level5Backend/issues/79), under
   [#78](https://github.com/sweat-this/Level5Backend/issues/78).
@@ -8,6 +8,26 @@
   with [#80](https://github.com/sweat-this/Level5Backend/issues/80).
 
 ## Evidence baseline and landed dependencies
+
+### #80 implementation update
+
+The #80 implementation re-fetched all three `dev` branches and inspected relevant issues and all
+open PRs before source edits. Backend advanced to `e464ffa246426d013838eea9be85a2c192392948`;
+Blood Money and Platform remained at the client SHAs below. All three open-PR lists were empty.
+The intervening Backend change resolved a transitive dependency vulnerability; the ownership
+decision and separate local/online authority remain current.
+
+Concrete `Level5.Domain.BloodMoney` and `Level5.Application.BloodMoney` capabilities now exist,
+using the existing Infrastructure, API, DbContext and migration stream. The approved API addition
+is only `GET /api/v2/games/blood-money/me/credits`. Existing and new players read zero until trusted
+issuance; no backfill, local import, synchronization or automatic 1,000-credit grant occurs.
+See the [ledger contract](blood-credit-ledger-contract.md) and
+[exact implementation/validation evidence](blood-credit-ledger-evidence.md) for #80 and code-level
+#63/#79 certification. Backend/repository naming was reassessed: retain current names because
+renaming provides no required capability and adds compatibility churn to this additive slice.
+
+The remaining sections preserve the original #79 audit snapshot and its ownership decisions;
+statements of code absence/deferred implementation describe that baseline, before #80.
 
 All three `origin/dev` branches were fetched and all open PRs inspected before the audit.
 There were no open PRs in these repositories at this baseline.
