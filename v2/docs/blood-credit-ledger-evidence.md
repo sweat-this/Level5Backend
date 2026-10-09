@@ -1,7 +1,8 @@
 # Blood Credit implementation and certification evidence
 
 - Validated: 2026-10-09 (America/Chicago).
-- Implementation commit: `64de7e83d469680edb4d70d6bd74fa4df432e7ac`.
+- Initial implementation commit: `64de7e83d469680edb4d70d6bd74fa4df432e7ac`.
+- Final code commit, including replay remediation: `1c57bbee23991187c2821d228bc8b667fdeba507`.
 - Implementation branch: `feat/blood-money-credit-ledger-80`, based on `dev`.
 - Scope: Backend #80 and the concrete sibling-module certification required by #63/#79.
 - Contract: [Blood Credit ledger](blood-credit-ledger-contract.md).
@@ -30,13 +31,15 @@ PostgreSQL proof remained blocked and no in-memory provider substituted for V2 i
 | --- | ---: | ---: | ---: |
 | V2 Domain | 322 | 0 | 0 |
 | V2 Application | 220 | 0 | 0 |
-| V2 Infrastructure integration | 254 | 0 | 0 |
+| V2 Infrastructure integration | 262 | 0 | 0 |
 | V2 API integration | 227 | 0 | 0 |
 | V2 Architecture | 29 | 0 | 0 |
-| **Full V2** | **1,052** | **0** | **0** |
+| **Full V2** | **1,060** | **0** | **0** |
 | Legacy Backend | 32 | 0 | 0 |
 
-Focused Blood Credit runs passed: 17 Domain, 6 Application, 28 Infrastructure and 12 API cases.
+The full V2 suite and build were rerun on the final code commit after remediation. Legacy checks
+passed in the initial implementation run; the remediation changes no legacy source.
+Focused Blood Credit runs passed: 17 Domain, 6 Application, 36 Infrastructure and 12 API cases.
 The architecture suite gained 10 cases while retaining all previous guards. The full run includes
 these focused cases plus all existing Level5/shared Platform regressions.
 
@@ -57,7 +60,7 @@ All passed. A second OpenAPI export compared byte-for-byte equal to the canonica
 matching the repository's strict drift-check semantics. The OpenAPI diff adds exactly
 one path/GET operation, its balance DTO and controller tag; existing operations remain intact.
 The deployment image ID was
-`sha256:34122bd40bade8a6dc355276d038a570fb517d7f9e61d8110b1a405a3fd09fa9`.
+`sha256:dd3b98b08e9b372d000bef68c29685bf3727333037e71b2e452514fd673535c3`.
 The Linux self-contained migration bundle compiled at `v2/artifacts/efbundle`; it was not executed
 against a deployed database. These are local equivalents of `build`/`build-v2` job checks, not a
 claim that hosted GitHub checks ran. Existing nullable/forwarded-header/xUnit blocking-test warnings
@@ -65,6 +68,7 @@ remain outside this slice; the new code adds no build warnings.
 
 TRX reports and the verification OpenAPI export are retained locally under
 `v2/artifacts/blood-credit-tests/` (ignored build evidence, not committed generated output).
+The final V2 reports and before/after replay regressions are in its `replay-fix/` subdirectory.
 
 ## Financial and architecture proof
 
@@ -98,3 +102,20 @@ repository rename. #63's naming reassessment is therefore to retain current name
 2. Reviewed cross-game genericization, #81 reservation leakage, challenge/settlement/refund/forfeit
    scope, Level5 reuse, duplicate infrastructure, admin/UI and real-money/blockchain scope.
    No material findings. No downstream #81 work or client integration was introduced.
+
+## Subsequent review finding and remediation
+
+A dedicated review confirmed a race when transaction lookup missed, another request committed
+the same ID, and the first call then read the already-mutated projection. A duplicate spend could
+report insufficient credits; duplicate issuance near `long.MaxValue` could report overflow.
+This did not corrupt ledger state, but violated replay/conflict semantics.
+
+The final code reads the account before transaction lookup, so a commit included in the account
+projection is resolved by the subsequent ID lookup before validating the balance. A commit after
+both reads remains protected by revision concurrency and transaction uniqueness.
+Eight real-PostgreSQL regressions force the competing commit between reads across spend, issuance,
+and positive/negative corrections, checking both matching and conflicting intent. All eight failed
+before the fix and passed after it. They also verify no staging on replay/conflict, unchanged final
+revision/balance, one committed transaction ID, two balanced postings and player reconciliation.
+The complete 36-case Blood Credit Infrastructure suite and 6-case Application suite passed, followed
+by the final 1,060-case V2 regression. No review findings remain unresolved.
