@@ -10,8 +10,9 @@ capabilities, including persistence ownership and future API namespace rules, is
 [Modular game boundaries and namespaced API evolution](docs/modular-game-boundaries.md).
 
 [Blood Money audit and module-entry gate](docs/blood-money-module-entry.md) records #79's
-source-backed authority and compatibility decisions; code-level #63/module certification remains
-deferred to #80's first real account and balanced-ledger slice.
+source-backed authority and compatibility decisions. The [Blood Credit ledger contract](docs/blood-credit-ledger-contract.md)
+defines #80's real account/balanced-ledger capability and #63 sibling-module certification,
+with [implementation and validation evidence](docs/blood-credit-ledger-evidence.md).
 
 ## Status
 

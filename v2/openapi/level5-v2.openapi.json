@@ -580,6 +580,35 @@
         }
       }
     },
+    "/api/v2/games/blood-money/me/credits": {
+      "get": {
+        "tags": [
+          "BloodCredits"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodCreditBalanceResponseDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodCreditBalanceResponseDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodCreditBalanceResponseDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/email-change/complete": {
       "post": {
         "tags": [
@@ -2058,6 +2087,16 @@
         },
         "additionalProperties": false
       },
+      "BloodCreditBalanceResponseDto": {
+        "type": "object",
+        "properties": {
+          "availableCredits": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
       "ChangePasswordDto": {
         "type": "object",
         "properties": {
@@ -2947,6 +2986,9 @@
     },
     {
       "name": "Auth"
+    },
+    {
+      "name": "BloodCredits"
     },
     {
       "name": "EmailChange"

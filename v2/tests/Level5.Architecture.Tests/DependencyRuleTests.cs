@@ -160,6 +160,57 @@ public sealed class DependencyRuleTests
         yield return [ApiAssembly];
     }
 
+    [Fact]
+    public void BloodMoney_has_concrete_domain_and_application_capabilities()
+    {
+        Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditAccount" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditTransaction" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.IssueBloodCreditsUseCase" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.GetMyBloodCreditBalanceUseCase" && type.IsClass && !type.IsAbstract);
+    }
+
+    [Fact]
+    public void BloodMoney_domain_does_not_depend_on_Level5_game_domains_or_ids()
+        => AssertBoundary(DomainAssembly, "Level5.Domain.BloodMoney", [
+            "Level5.Domain.Competition", "Level5.Domain.Results", "Level5.Domain.Leaderboards",
+            "Level5.Domain.Ids.VersusSeriesId", "Level5.Domain.Ids.AttemptId", "Level5.Domain.Ids.MatchResultId",
+            "Level5.Domain.Ids.AccountId"]);
+
+    [Fact]
+    public void BloodMoney_application_does_not_depend_on_Level5_game_contracts_or_private_identity()
+        => AssertBoundary(ApplicationAssembly, "Level5.Application.BloodMoney", [
+            "Level5.Domain.Competition", "Level5.Domain.Results", "Level5.Domain.Leaderboards",
+            "Level5.Application.Competition", "Level5.Application.Results", "Level5.Application.Leaderboards",
+            "Level5.Application.Abstractions.IVersusSeriesStore", "Level5.Application.Abstractions.IRulesetCatalog",
+            "Level5.Application.Abstractions.IChallengeExpiryPolicy", "Level5.Application.Abstractions.IMatchResultStore",
+            "Level5.Application.Abstractions.ILeaderboardQuery", "Level5.Application.Abstractions.ILeaderboardPolicyCatalog",
+            "Level5.Domain.Ids.VersusSeriesId", "Level5.Domain.Ids.AttemptId", "Level5.Domain.Ids.MatchResultId",
+            "Level5.Domain.Ids.AccountId"]);
+
+    [Theory]
+    [InlineData("Competition")]
+    [InlineData("Results")]
+    [InlineData("Leaderboards")]
+    [InlineData("Identity")]
+    [InlineData("Players")]
+    [InlineData("Social")]
+    [InlineData("Platform")]
+    public void Level5_and_shared_modules_do_not_depend_on_BloodMoney(string module)
+    {
+        AssertBoundary(DomainAssembly, $"Level5.Domain.{module}", ["Level5.Domain.BloodMoney"]);
+        AssertBoundary(ApplicationAssembly, $"Level5.Application.{module}", ["Level5.Application.BloodMoney", "Level5.Domain.BloodMoney"]);
+    }
+
+    private static void AssertBoundary(System.Reflection.Assembly assembly, string sourceNamespace, string[] forbidden)
+    {
+        Assert.Contains(assembly.GetTypes(), type => type.Namespace == sourceNamespace ||
+            type.Namespace?.StartsWith(sourceNamespace + ".", StringComparison.Ordinal) == true);
+        var result = Types.InAssembly(assembly).That()
+            .ResideInNamespaceMatching("^" + System.Text.RegularExpressions.Regex.Escape(sourceNamespace) + @"(\.|$)")
+            .Should().NotHaveDependencyOnAny(forbidden).GetResult();
+        Assert.True(result.IsSuccessful, Failures(result));
+    }
+
     private static string Failures(TestResult result)
         => result.FailingTypes is null ? string.Empty : string.Join(", ", result.FailingTypes.Select(t => t.FullName));
 }
