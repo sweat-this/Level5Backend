@@ -94,7 +94,8 @@ production retrying PostgreSQL configuration (Docker Engine 28.3.2):
 | Check | Result |
 | --- | --- |
 | Focused Domain / Application / PostgreSQL / API regressions | 94 / 59 / 107 / 44 passed |
-| Full Backend V2 suite | 1,402 passed: Domain 384, Application 247, Infrastructure 465, API 276, Architecture 30; no failures or skips |
+| Full Backend V2 suite after review repair | 1,406 passed: Domain 384, Application 247, Infrastructure 469, API 276, Architecture 30; no failures or skips |
+| Targeted account, email, password, session, chat and inbox regressions after repair | 151 passed; no failures or skips |
 | Legacy repository suite | 32 passed |
 | V2 and legacy builds | Passed |
 | Fresh OpenAPI export vs committed contract | Equal; no API changes |
@@ -102,7 +103,23 @@ production retrying PostgreSQL configuration (Docker Engine 28.3.2):
 | Repository whitespace / tracked build artifacts | Clean / none |
 
 Reproduce with `dotnet test v2/Level5BackendV2.sln --no-restore -m:1
---logger "trx;LogFileName=msg004-full.trx"`. Per-project evidence is in
-`TestResults/msg004-full.trx`; focused runs use `msg004-domain.trx`, `msg004-application.trx`,
-`msg004-infrastructure.trx` and `msg004-api.trx`. These local files are ignored by Git.
+--logger "trx;LogFileName=msg004-publish.trx"`. Per-project evidence is in
+`TestResults/msg004-publish.trx`; focused runs use `msg004-domain.trx`, `msg004-application.trx`,
+`msg004-infrastructure.trx` and `msg004-api.trx`. The post-review targeted run uses
+`msg004-review-fixed.trx`; legacy evidence uses `msg004-publish-legacy.trx`.
+These local files are ignored by Git.
 Hosted CI and actual post-Active closure races are separate evidence, not claimed here.
+
+## Shared account concurrency regression
+
+Fresh account eligibility reads do not track a mutation snapshot. `StageEmailUpdateAsync`
+therefore pins email-only writes to the validated account's `SessionGeneration` explicitly,
+without writing that generation. A password rotation before staging or before commit rejects
+the stale email write and rolls back its verification challenge. Fresh snapshots also work
+when an older unchanged account row is already tracked, without reverting credentials.
+Credential changes already staged in the same unit of work retain their original guard.
+
+Four PostgreSQL regressions cover these cases. Before the repair, two failed: a stale email
+write committed after password rotation, and a fresh snapshot with an older tracked row was
+rejected. Evidence is in `TestResults/msg004-email-before-fix.trx` and the repaired targeted run
+in `TestResults/msg004-review-fixed.trx`.

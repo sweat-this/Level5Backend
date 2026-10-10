@@ -22,7 +22,8 @@ public interface IAccountStore
     /// <summary>Stages only password hash and session generation, conditionally on the loaded generation.</summary>
     Task StageCredentialUpdateAsync(Account account, long expectedSessionGeneration, CancellationToken cancellationToken);
 
-    /// <summary>Stages only private email and verification fields for the next unit-of-work commit.</summary>
+    /// <summary>Stages only private email and verification fields for the next unit-of-work commit.
+    /// Email-only writes retain the validated account's session generation as a concurrency guard.</summary>
     Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken);
 
     /// <summary>
