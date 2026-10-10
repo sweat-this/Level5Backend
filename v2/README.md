@@ -14,6 +14,11 @@ source-backed authority and compatibility decisions. The [Blood Credit ledger co
 defines #80's real account/balanced-ledger capability and #63 sibling-module certification,
 with [implementation and validation evidence](docs/blood-credit-ledger-evidence.md).
 
+The [Blood Money challenge chat contract v1](docs/blood-money-chat-contract.md) specifies
+MSG-001 authorization, lifecycle, abuse, concurrency and downstream API semantics.
+Persistent free text remains gated on approved retention/account-erasure policy and operational
+report handling; this contract adds no messaging implementation.
+
 ## Status
 
 Domain: player identity/tags (exact case-insensitive lookup, self-scoped display-name update -
