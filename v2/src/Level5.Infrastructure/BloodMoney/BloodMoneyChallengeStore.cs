@@ -52,7 +52,7 @@ public sealed class BloodMoneyChallengeStore(Level5V2DbContext db) : IBloodMoney
         // DetectChanges retains entry.OriginalValues, including the loaded concurrency token.
     }
 
-    private static BloodMoneyChallenge? FromRow(BloodMoneyChallengeRow? row)
+    internal static BloodMoneyChallenge? FromRow(BloodMoneyChallengeRow? row)
         => row is null ? null : BloodMoneyChallenge.Rehydrate(new(row.Id), new(row.CreatorPlayerId), row.ClientRequestId,
             Enum.Parse<BloodMoneyChallengeStatus>(row.Status), row.StakePerParticipant, row.RulesetId, row.RulesetVersion,
             row.CreatedAt, row.AcceptanceDeadlineAt, row.ActivatedAt, row.GameplayDeadlineAt, row.TerminalAt,

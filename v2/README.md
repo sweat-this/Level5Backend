@@ -18,6 +18,8 @@ The [Blood Money challenge chat contract v1](docs/blood-money-chat-contract.md) 
 MSG-001 authorization, lifecycle, abuse, concurrency and downstream API semantics.
 Persistent free text remains gated on approved retention/account-erasure policy and operational
 report handling; this contract adds no messaging implementation.
+The [MSG-002 persistence slice](docs/blood-money-chat-persistence.md) implements ordered,
+idempotent sends and private participant state, with PostgreSQL validation evidence.
 
 ## Status
 
