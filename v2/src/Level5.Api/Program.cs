@@ -13,6 +13,10 @@ using Level5.Application.Results;
 using Level5.Application.Social;
 using Level5.Infrastructure.DependencyInjection;
 using Level5.Infrastructure.Identity;
+using Level5.Infrastructure.BloodMoney;
+using Level5.Application.BloodMoney;
+using Level5.Api.Controllers;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
@@ -25,7 +29,28 @@ var builder = WebApplication.CreateBuilder(args);
 // Jwt configuration (presence, key length) is validated at startup by JwtOptions' data
 // annotations - see AddLevel5Infrastructure's ValidateDataAnnotations().ValidateOnStart().
 
-builder.Services.AddControllers();
+builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
+{
+    var fallback = options.InvalidModelStateResponseFactory;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        if (context.ActionDescriptor.RouteValues["controller"] != "BloodMoneyChat") return fallback(context);
+        var action = context.ActionDescriptor.RouteValues["action"];
+        var code = action switch
+        {
+            "AdvanceRead" => "invalid_chat_read_position",
+            "SetMuted" => "validation_failed",
+            "Report" => "invalid_chat_report",
+            "List" => "invalid_chat_limit",
+            _ => "invalid_chat_message"
+        };
+        // Avoid reflecting raw input or serializer messages into chat errors.
+        var problem = new ProblemDetails { Status = 400, Title = "Chat request is invalid.", Type = $"https://level5.game/errors/{code}" };
+        problem.Extensions["code"] = code;
+        problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+        return new BadRequestObjectResult(problem);
+    };
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -35,6 +60,8 @@ builder.Services.AddSwaggerGen(options =>
     // field. This makes the generated contract (issue #4) match what the DTOs actually
     // guarantee, with no change to runtime (de)serialization behavior.
     options.SupportNonNullableReferenceTypes();
+    options.SchemaFilter<BloodMoneyChatSchemaFilter>();
+    options.OperationFilter<BloodMoneyChatOperationFilter>();
 });
 builder.Services.AddHttpContextAccessor();
 
@@ -80,6 +107,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 builder.Services.AddLevel5Infrastructure(builder.Configuration);
+builder.Services.AddBloodMoneyChat(new BloodMoneyChatRatePolicy(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1)));
+builder.Services.AddScoped<BloodMoneyChatEligibilityFilter>();
 builder.Services.AddLevel5Telemetry(builder.Configuration);
 
 // Use cases - thin, stateless, one per operation. Registered here (the composition root)

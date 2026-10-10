@@ -19,6 +19,7 @@ namespace Level5.Infrastructure.IntegrationTests;
 [Collection(PostgresCollection.Name)]
 public sealed class BloodMoneyChatTests(PostgresFixture fixture)
 {
+    internal static readonly IBloodMoneyChatCursorCodec Cursors = new HmacBloodMoneyChatCursorCodec("test-only-stable-cursor-secret-32-bytes-minimum");
     private static readonly CancellationToken Ct = CancellationToken.None;
     internal static readonly DateTimeOffset Start = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
     internal static readonly BloodMoneyChatRatePolicy Rate = new(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1));
@@ -62,7 +63,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
         }
         var before = await AuthoritySnapshot();
         await Assert.ThrowsAsync<NotFoundException>(() => Send(id, players[0]));
-        await using var check = fixture.CreateDbContext(); var store = new BloodMoneyChatStore(check, new Clock(Start));
+        await using var check = fixture.CreateDbContext(); var store = new BloodMoneyChatStore(check, new Clock(Start), Cursors);
         await Assert.ThrowsAsync<NotFoundException>(() => store.GetParticipantStateAsync(id, players[0], Ct));
         await Assert.ThrowsAsync<NotFoundException>(() => store.AdvanceReadAsync(id, players[0], 0, Ct));
         await Assert.ThrowsAsync<NotFoundException>(() => store.SetNotificationsMutedAsync(id, players[0], true, Ct));
@@ -80,7 +81,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
         {
             var error = await Assert.ThrowsAsync<NotFoundException>(() => Send(pair.Item1, pair.Item2, key));
             Assert.Equal("Challenge chat not found.", error.Message);
-            await using var db = fixture.CreateDbContext(); var store = new BloodMoneyChatStore(db, new Clock(Start));
+            await using var db = fixture.CreateDbContext(); var store = new BloodMoneyChatStore(db, new Clock(Start), Cursors);
             await Assert.ThrowsAsync<NotFoundException>(() => store.GetParticipantStateAsync(pair.Item1, pair.Item2, Ct));
             await Assert.ThrowsAsync<NotFoundException>(() => store.SetNotificationsMutedAsync(pair.Item1, pair.Item2, true, Ct));
             await Assert.ThrowsAsync<NotFoundException>(() => store.AdvanceReadAsync(pair.Item1, pair.Item2, 0, Ct));
@@ -255,7 +256,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
                 npgsql => npgsql.ExecutionStrategy(dependencies => new CancelledRetryBackoff(dependencies, cancellation)))
             .AddInterceptors(failure).Options;
         await using var db = new Level5V2DbContext(options);
-        var send = new SendBloodMoneyChallengeMessageUseCase(new BloodMoneyChatStore(db, new Clock(Start)), Rate)
+        var send = new SendBloodMoneyChallengeMessageUseCase(new BloodMoneyChatStore(db, new Clock(Start), Cursors), Rate)
             .ExecuteAsync(new(id, players[0], Guid.NewGuid(), "cancelled"), cancellation.Token);
         try
         {
@@ -278,7 +279,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
         for (var i = 0; i < 5; i++) await Send(id, players[0]);
         await using (var db = fixture.CreateDbContext())
         {
-            var store = new BloodMoneyChatStore(db, new Clock(Start));
+            var store = new BloodMoneyChatStore(db, new Clock(Start), Cursors);
             Assert.Equal(new(0, false), await store.GetParticipantStateAsync(id, players[0], Ct));
             Assert.Equal(new(0, true), await store.SetNotificationsMutedAsync(id, players[0], true, Ct));
             Assert.Equal(new(3, true), await store.AdvanceReadAsync(id, players[0], 3, Ct));
@@ -286,19 +287,19 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
             Assert.Equal(new(3, false), await store.SetNotificationsMutedAsync(id, players[0], false, Ct));
             Assert.Equal(new(0, false), await store.GetParticipantStateAsync(id, players[1], Ct));
             foreach (var invalid in new[] { -1L, 6L })
-                Assert.Equal("invalid_chat_read_sequence", (await Assert.ThrowsAsync<BloodMoneyChatException>(() => store.AdvanceReadAsync(id, players[0], invalid, Ct))).Code);
+                Assert.Equal("invalid_chat_read_position", (await Assert.ThrowsAsync<BloodMoneyChatException>(() => store.AdvanceReadAsync(id, players[0], invalid, Ct))).Code);
         }
         await Task.WhenAll(new[] { 5L, 1L, 4L, 2L }.Select(async sequence =>
         {
             await using var db = fixture.CreateDbContext();
-            await new BloodMoneyChatStore(db, new Clock(Start)).AdvanceReadAsync(id, players[0], sequence, Ct);
+            await new BloodMoneyChatStore(db, new Clock(Start), Cursors).AdvanceReadAsync(id, players[0], sequence, Ct);
         }).Append(Task.Run(async () =>
         {
             await using var db = fixture.CreateDbContext();
-            await new BloodMoneyChatStore(db, new Clock(Start)).SetNotificationsMutedAsync(id, players[0], true, Ct);
+            await new BloodMoneyChatStore(db, new Clock(Start), Cursors).SetNotificationsMutedAsync(id, players[0], true, Ct);
         })));
         await using var fresh = fixture.CreateDbContext();
-        var persisted = await new BloodMoneyChatStore(fresh, new Clock(Start)).GetParticipantStateAsync(id, players[0], Ct);
+        var persisted = await new BloodMoneyChatStore(fresh, new Clock(Start), Cursors).GetParticipantStateAsync(id, players[0], Ct);
         Assert.Equal(new(5, true), persisted);
         Assert.Equal(before, await AuthoritySnapshot());
     }
@@ -308,17 +309,17 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
     {
         var (id, players) = await Seed(); await Send(id, players[0]);
         await using (var db = fixture.CreateDbContext())
-            await new BloodMoneyChatStore(db, new Clock(Start)).AdvanceReadAsync(id, players[0], 1, Ct);
+            await new BloodMoneyChatStore(db, new Clock(Start), Cursors).AdvanceReadAsync(id, players[0], 1, Ct);
         var gate = new CommitGate();
         await using var first = fixture.CreateDbContext(gate);
-        var mute = new BloodMoneyChatStore(first, new Clock(Start)).SetNotificationsMutedAsync(id, players[0], true, Ct);
+        var mute = new BloodMoneyChatStore(first, new Clock(Start), Cursors).SetNotificationsMutedAsync(id, players[0], true, Ct);
         await gate.BeforeCommit.Task.WaitAsync(TimeSpan.FromSeconds(15));
         await using var second = fixture.CreateDbContext();
-        var unmute = new BloodMoneyChatStore(second, new Clock(Start)).SetNotificationsMutedAsync(id, players[0], false, Ct);
+        var unmute = new BloodMoneyChatStore(second, new Clock(Start), Cursors).SetNotificationsMutedAsync(id, players[0], false, Ct);
         Assert.False(unmute.IsCompleted); gate.Release.TrySetResult();
         Assert.Equal(new(1, true), await mute); Assert.Equal(new(1, false), await unmute);
         await using var fresh = fixture.CreateDbContext();
-        Assert.Equal(new(1, false), await new BloodMoneyChatStore(fresh, new Clock(Start)).GetParticipantStateAsync(id, players[0], Ct));
+        Assert.Equal(new(1, false), await new BloodMoneyChatStore(fresh, new Clock(Start), Cursors).GetParticipantStateAsync(id, players[0], Ct));
     }
 
     [Fact]
@@ -383,7 +384,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
     {
         var (id, players) = await Seed(); var before = await AuthoritySnapshot(); var key = Guid.NewGuid();
         await using (var stateDb = fixture.CreateDbContext())
-            await new BloodMoneyChatStore(stateDb, new Clock(Start)).SetNotificationsMutedAsync(id, players[0], true, Ct);
+            await new BloodMoneyChatStore(stateDb, new Clock(Start), Cursors).SetNotificationsMutedAsync(id, players[0], true, Ct);
         var failure = new FailCommit();
         await using (var db = fixture.CreateDbContext(failure))
         {
@@ -391,7 +392,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
             Assert.False(db.ChangeTracker.HasChanges());
             await using var check = fixture.CreateDbContext();
             Assert.Empty(await check.Set<BloodMoneyChatMessageRow>().Where(r => r.ChallengeId == id.Value).ToListAsync());
-            Assert.Equal(new(0, true), await new BloodMoneyChatStore(check, new Clock(Start)).GetParticipantStateAsync(id, players[0], Ct));
+            Assert.Equal(new(0, true), await new BloodMoneyChatStore(check, new Clock(Start), Cursors).GetParticipantStateAsync(id, players[0], Ct));
             // The interceptor fails only once. A retry must insert, not recover an uncommitted tracked row.
             Assert.True((await SendUsing(db, id, players[0], key, "hello", Start)).Created);
         }
@@ -407,12 +408,12 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
         foreach (var read in new[] { true, false })
         {
             await using var db = fixture.CreateDbContext(new FailCommit());
-            var store = new BloodMoneyChatStore(db, new Clock(Start));
+            var store = new BloodMoneyChatStore(db, new Clock(Start), Cursors);
             await Assert.ThrowsAsync<ForcedRollbackException>(() => read
                 ? store.AdvanceReadAsync(id, players[0], 1, Ct) : store.SetNotificationsMutedAsync(id, players[0], true, Ct));
         }
         await using var fresh = fixture.CreateDbContext();
-        Assert.Equal(new(0, false), await new BloodMoneyChatStore(fresh, new Clock(Start)).GetParticipantStateAsync(id, players[0], Ct));
+        Assert.Equal(new(0, false), await new BloodMoneyChatStore(fresh, new Clock(Start), Cursors).GetParticipantStateAsync(id, players[0], Ct));
         var challenge = await fresh.Set<BloodMoneyChallengeRow>().SingleAsync(r => r.Id == id.Value);
         challenge.Revision++;
         await Assert.ThrowsAsync<InvalidOperationException>(() => SendUsing(fresh, id, players[0], Guid.NewGuid(), "must not flush", Start));
@@ -423,7 +424,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
     {
         var (id, players) = await Seed(); var services = new ServiceCollection();
         services.AddScoped(_ => fixture.CreateDbContext()); services.AddSingleton<IClock>(new Clock(Start));
-        services.AddBloodMoneyChat(Rate);
+        services.AddSingleton(Cursors); services.AddBloodMoneyChat(Rate);
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         await using var scope = provider.CreateAsyncScope();
         Assert.True((await scope.ServiceProvider.GetRequiredService<SendBloodMoneyChallengeMessageUseCase>()
@@ -455,7 +456,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
         return (challenge.ChallengeId, players.ToArray());
     }
 
-    private static Task<BloodMoneyChallengeView> Transition(Level5V2DbContext db, BloodMoneyChallengeId id, PlayerId actor, string action, DateTimeOffset now)
+    internal static Task<BloodMoneyChallengeView> Transition(Level5V2DbContext db, BloodMoneyChallengeId id, PlayerId actor, string action, DateTimeOffset now)
     {
         var financial = new BloodCreditReservationMutator(new BloodCreditLedgerStore(db), new BloodCreditReservationStore(db), new Clock(now));
         var lifecycle = new BloodMoneyChallengeLifecycle(new BloodMoneyChallengeStore(db), new BloodCreditReservationStore(db), financial, new EfUnitOfWork(db), new Clock(now), Timing);
@@ -472,7 +473,7 @@ public sealed class BloodMoneyChatTests(PostgresFixture fixture)
     private async Task<SendBloodMoneyChallengeMessageResult> Send(BloodMoneyChallengeId id, PlayerId actor, Guid? key = null, string body = "hello", DateTimeOffset? now = null, BloodMoneyChatRatePolicy? rate = null)
     { await using var db = fixture.CreateDbContext(); return await SendUsing(db, id, actor, key ?? Guid.NewGuid(), body, now ?? Start, rate); }
     private static Task<SendBloodMoneyChallengeMessageResult> SendUsing(Level5V2DbContext db, BloodMoneyChallengeId id, PlayerId actor, Guid key, string body, DateTimeOffset now, BloodMoneyChatRatePolicy? rate = null)
-        => new SendBloodMoneyChallengeMessageUseCase(new BloodMoneyChatStore(db, new Clock(now)), rate ?? Rate).ExecuteAsync(new(id, actor, key, body), Ct);
+        => new SendBloodMoneyChallengeMessageUseCase(new BloodMoneyChatStore(db, new Clock(now), Cursors), rate ?? Rate).ExecuteAsync(new(id, actor, key, body), Ct);
 
     private static async Task<(SendBloodMoneyChallengeMessageResult? Result, Exception? Error)> Observe(Func<Task<SendBloodMoneyChallengeMessageResult>> action)
     { try { return (await action(), null); } catch (Exception error) { return (null, error); } }

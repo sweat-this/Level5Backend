@@ -39,10 +39,12 @@ public sealed record SendBloodMoneyChallengeMessageRequest(BloodMoneyChallengeId
 public sealed record SendBloodMoneyChallengeMessageResult(BloodMoneyChatMessageView Message, bool Created);
 public sealed record BloodMoneyChatParticipantState(long LastReadSequence, bool NotificationsMuted);
 
-/// <summary>Owns one serialized commit per operation. Actor IDs are trusted application inputs.
+/// <summary>Owns atomic writes and consistent committed pages. Actor IDs are trusted application inputs.
 /// Every operation reauthorizes against the canonical roster and activation evidence.</summary>
 public interface IBloodMoneyChatStore
 {
+    Task<BloodMoneyChatPage> ListAsync(ListBloodMoneyChallengeMessagesRequest request, CancellationToken cancellationToken);
+    Task<BloodMoneyChatReportAcceptance> ReportAsync(ReportBloodMoneyChatMessageRequest request, CancellationToken cancellationToken);
     Task<SendBloodMoneyChallengeMessageResult> SendAsync(SendBloodMoneyChallengeMessageRequest normalizedRequest,
         BloodMoneyChatRatePolicy ratePolicy, CancellationToken cancellationToken);
     Task<BloodMoneyChatParticipantState> GetParticipantStateAsync(BloodMoneyChallengeId challengeId, PlayerId actor, CancellationToken cancellationToken);

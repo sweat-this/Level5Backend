@@ -16,6 +16,8 @@ internal static class BloodMoneyChatModel
                 table.HasCheckConstraint("CK_blood_chat_visibility", "\"Visibility\" IN ('Visible', 'Suppressed')");
             });
             entity.HasKey(row => row.Id);
+            // Reports retain the exact message within its canonical challenge.
+            entity.HasAlternateKey(row => new { row.ChallengeId, row.Id });
             entity.Property(row => row.Id).ValueGeneratedNever();
             entity.Property(row => row.Body).IsRequired();
             entity.Property(row => row.Visibility).HasMaxLength(16).IsRequired();
@@ -24,6 +26,23 @@ internal static class BloodMoneyChatModel
             entity.HasIndex(row => new { row.ChallengeId, row.SenderPlayerId, row.CreatedAt, row.Sequence });
             entity.HasOne<BloodMoneyChallengeParticipantRow>().WithMany()
                 .HasForeignKey(row => new { row.ChallengeId, row.SenderPlayerId }).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<BloodMoneyChatReportRow>(entity =>
+        {
+            entity.ToTable("blood_money_chat_reports", table =>
+            {
+                table.HasCheckConstraint("CK_blood_chat_report_identity", "\"ReportId\" <> '00000000-0000-0000-0000-000000000000'::uuid");
+                table.HasCheckConstraint("CK_blood_chat_report_reason", "\"Reason\" IN ('Harassment', 'Hate', 'Threat', 'SexualContent', 'Spam', 'Other')");
+            });
+            entity.HasKey(row => row.ReportId);
+            entity.Property(row => row.ReportId).ValueGeneratedNever();
+            entity.Property(row => row.Reason).HasMaxLength(16).IsRequired();
+            entity.HasIndex(row => new { row.ChallengeId, row.MessageId, row.ReporterPlayerId }).IsUnique();
+            entity.HasOne<BloodMoneyChatMessageRow>().WithMany()
+                .HasForeignKey(row => new { row.ChallengeId, row.MessageId })
+                .HasPrincipalKey(row => new { row.ChallengeId, row.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BloodMoneyChallengeParticipantRow>().WithMany()
+                .HasForeignKey(row => new { row.ChallengeId, row.ReporterPlayerId }).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<BloodMoneyChatParticipantStateRow>(entity =>
         {
@@ -38,6 +57,18 @@ internal static class BloodMoneyChatModel
                 .HasForeignKey(row => new { row.ChallengeId, row.PlayerId }).OnDelete(DeleteBehavior.Restrict);
         });
     }
+}
+
+/// <summary>Immutable intake only. The restrictive message reference retains original evidence;
+/// MSG-005 owns protected operator handling, sanctions and retention.</summary>
+public sealed class BloodMoneyChatReportRow
+{
+    public Guid ReportId { get; set; }
+    public Guid ChallengeId { get; set; }
+    public Guid MessageId { get; set; }
+    public Guid ReporterPlayerId { get; set; }
+    public string Reason { get; set; } = null!;
+    public DateTimeOffset ReportedAt { get; set; }
 }
 
 public sealed class BloodMoneyChatMessageRow

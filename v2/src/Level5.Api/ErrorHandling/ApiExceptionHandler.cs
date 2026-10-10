@@ -6,6 +6,8 @@ using Level5.Domain.Social;
 using Level5.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Level5.Application.BloodMoney;
+using System.Globalization;
 
 namespace Level5.Api.ErrorHandling;
 
@@ -48,6 +50,8 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         problemDetails.Extensions["traceId"] = httpContext.TraceIdentifier;
 
         httpContext.Response.StatusCode = status;
+        if (exception is BloodMoneyChatException { Code: "chat_rate_limited", RetryAfter: { } retryAfter })
+            httpContext.Response.Headers.RetryAfter = Math.Max(1, Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
         await httpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
         return true;
     }
@@ -63,6 +67,13 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
     // logged rather than being mislabelled as a client conflict or a transient outage.
     private static (int Status, string Code) Classify(Exception exception) => exception switch
     {
+        BloodMoneyChatException e when e.Code is "invalid_chat_message" or "invalid_chat_cursor" or "invalid_chat_limit"
+            or "invalid_chat_read_position" or "invalid_chat_report" => (StatusCodes.Status400BadRequest, e.Code),
+        BloodMoneyChatException { Code: "chat_communication_restricted" } e => (StatusCodes.Status403Forbidden, e.Code),
+        BloodMoneyChatException e when e.Code is "chat_read_only" or "chat_message_conflict" or "chat_report_already_exists"
+            => (StatusCodes.Status409Conflict, e.Code),
+        BloodMoneyChatException { Code: "chat_rate_limited" } e => (StatusCodes.Status429TooManyRequests, e.Code),
+        BloodMoneyChatException => (StatusCodes.Status500InternalServerError, "internal_error"),
         NotFoundException e => (StatusCodes.Status404NotFound, e.Code),
         Level5.Application.Identity.InvalidCredentialsException e => (StatusCodes.Status401Unauthorized, e.Code),
         Level5.Application.Identity.InvalidRefreshTokenException e => (StatusCodes.Status401Unauthorized, e.Code),

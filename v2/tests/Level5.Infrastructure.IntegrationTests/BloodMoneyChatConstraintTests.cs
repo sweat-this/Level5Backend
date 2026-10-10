@@ -25,7 +25,7 @@ public sealed class BloodMoneyChatConstraintTests(PostgresFixture fixture)
         var indexes = await db.Database.SqlQueryRaw<string>("""
             SELECT indexdef AS "Value" FROM pg_indexes WHERE tablename = 'blood_money_chat_messages'
             """).ToListAsync();
-        Assert.Equal(4, indexes.Count);
+        Assert.Equal(5, indexes.Count); // Includes the challenge/message candidate key retained by report FKs.
         Assert.Contains(indexes, i => i.Contains("UNIQUE") && i.Contains("\"ChallengeId\", \"Sequence\""));
         Assert.Contains(indexes, i => i.Contains("UNIQUE") && i.Contains("\"ChallengeId\", \"SenderPlayerId\", \"ClientMessageId\""));
         Assert.Contains(indexes, i => i.Contains("\"ChallengeId\", \"SenderPlayerId\", \"CreatedAt\", \"Sequence\""));
