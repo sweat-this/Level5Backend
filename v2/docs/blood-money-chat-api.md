@@ -1,5 +1,8 @@
 # Blood Money authenticated challenge chat API (MSG-003 / #88)
 
+Follow-on [MSG-004 / #89](blood-money-chat-notifications.md) adds atomic coalesced Platform
+inbox production through the existing API. The MSG-003 evidence and exclusions below describe that original slice.
+
 ## Baseline and ownership
 
 All three `origin/dev` refs were re-fetched on 2026-10-10 (America/Chicago) immediately

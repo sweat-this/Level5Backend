@@ -198,7 +198,7 @@ public sealed class BloodMoneyChatQueryTests(PostgresFixture fixture)
     }
 
     private BloodMoneyChatStore Store(Level5.Infrastructure.Persistence.Level5V2DbContext db)
-        => new(db, new BloodMoneyChatTests.Clock(BloodMoneyChatTests.Start), Cursors);
+        => BloodMoneyChatTests.Store(db);
     private async Task<BloodMoneyChatPage> List(BloodMoneyChallengeId id, PlayerId actor, string? limit = null, string? cursor = null)
     { await using var db = fixture.CreateDbContext(); return await Store(db).ListAsync(new(id, actor, limit, cursor), Ct); }
     private async Task<BloodMoneyChatReportAcceptance> Report(BloodMoneyChallengeId id, PlayerId actor, Guid messageId,

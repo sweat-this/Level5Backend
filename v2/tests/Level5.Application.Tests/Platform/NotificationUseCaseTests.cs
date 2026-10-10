@@ -13,6 +13,20 @@ public sealed class NotificationUseCaseTests
     private readonly FakeClock _clock = new();
 
     [Fact]
+    public async Task Writer_existence_is_scoped_to_recipient_source_and_event_even_after_reading()
+    {
+        var recipient = PlayerId.New();
+        var writer = new NotificationWriter(_store, _clock);
+        Assert.False(await writer.ExistsAsync(recipient, "platform", "bucket", default));
+        await writer.WriteAsync(Draft(recipient, "bucket"), default);
+        Assert.Single(_store.Notifications).SetRead(true, _clock.UtcNow);
+        Assert.True(await writer.ExistsAsync(recipient, "platform", "bucket", default));
+        Assert.False(await writer.ExistsAsync(PlayerId.New(), "platform", "bucket", default));
+        Assert.False(await writer.ExistsAsync(recipient, "blood-money", "bucket", default));
+        Assert.False(await writer.ExistsAsync(recipient, "platform", "other", default));
+    }
+
+    [Fact]
     public async Task Writer_creates_an_unread_notification_without_committing_the_unit_of_work()
     {
         var recipient = PlayerId.New();

@@ -51,6 +51,9 @@ public sealed class NotificationAtomicityTests(PostgresFixture fixture)
 
     private sealed class InvalidRecipientNotificationWriter(INotificationStore store) : INotificationWriter
     {
+        public Task<bool> ExistsAsync(PlayerId recipient, string source, string sourceEventKey, CancellationToken cancellationToken)
+            => store.ExistsAsync(recipient, source, sourceEventKey, cancellationToken);
+
         public Task WriteAsync(NotificationDraft draft, CancellationToken cancellationToken)
             => store.AddAsync(PlayerNotification.Create(
                 PlayerId.New(),

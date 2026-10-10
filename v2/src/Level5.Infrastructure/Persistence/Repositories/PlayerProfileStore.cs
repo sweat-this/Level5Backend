@@ -10,7 +10,7 @@ public sealed class PlayerProfileStore(Level5V2DbContext db) : IPlayerProfileSto
 {
     public async Task<PlayerProfile?> FindByIdAsync(PlayerId id, CancellationToken cancellationToken)
     {
-        var row = await db.PlayerProfiles.SingleOrDefaultAsync(p => p.Id == id.Value, cancellationToken);
+        var row = await db.PlayerProfiles.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id.Value, cancellationToken);
         return row is null ? null : ToDomain(row);
     }
 

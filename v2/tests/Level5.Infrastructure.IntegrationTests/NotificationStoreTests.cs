@@ -13,6 +13,23 @@ public sealed class NotificationStoreTests(PostgresFixture fixture)
     private static readonly DateTimeOffset Now = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public async Task Existence_uses_the_entire_durable_unique_tuple_and_ignores_read_state()
+    {
+        await using var db = fixture.CreateDbContext();
+        var recipient = await PlayerSeeding.CreatePlayerAsync(db, "exists", Now);
+        var item = Create(recipient, "bucket", Now);
+        item.SetRead(true, Now);
+        var store = new NotificationStore(db);
+        await store.AddAsync(item, default);
+        Assert.False(await store.ExistsAsync(recipient, item.Source, "bucket", default));
+        await db.SaveChangesAsync();
+        Assert.True(await store.ExistsAsync(recipient, item.Source, "bucket", default));
+        Assert.False(await store.ExistsAsync(PlayerId.New(), item.Source, "bucket", default));
+        Assert.False(await store.ExistsAsync(recipient, "other", "bucket", default));
+        Assert.False(await store.ExistsAsync(recipient, item.Source, "other", default));
+    }
+
+    [Fact]
     public async Task Unique_source_event_and_player_foreign_key_are_enforced_by_Postgres()
     {
         await using var db = fixture.CreateDbContext();

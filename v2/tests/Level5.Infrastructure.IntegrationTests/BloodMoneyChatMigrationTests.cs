@@ -31,7 +31,7 @@ public sealed class BloodMoneyChatMigrationTests
         await new AcceptBloodMoneyChallengeUseCase(new(new BloodMoneyChallengeStore(db), reservations,
             new(ledger, reservations, clock), uow, clock, new(TimeSpan.FromHours(1), TimeSpan.FromHours(2))))
             .ExecuteAsync(id, friend, ct);
-        var store = new BloodMoneyChatStore(db, clock, BloodMoneyChatTests.Cursors);
+        var store = BloodMoneyChatTests.Store(db, clock);
         var message = await store.SendAsync(new(id, creator, Guid.NewGuid(), "retained evidence"), BloodMoneyChatTests.Rate, ct);
         await store.AdvanceReadAsync(id, friend, 1, ct); await store.SetNotificationsMutedAsync(id, friend, true, ct);
         var authority = await Snapshot(db);

@@ -107,7 +107,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 builder.Services.AddLevel5Infrastructure(builder.Configuration);
-builder.Services.AddBloodMoneyChat(new BloodMoneyChatRatePolicy(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1)));
+builder.Services.AddBloodMoneyChat(new BloodMoneyChatRatePolicy(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1)),
+    new BloodMoneyChatNotificationPolicy("v1", TimeSpan.FromMinutes(5)));
 builder.Services.AddScoped<BloodMoneyChatEligibilityFilter>();
 builder.Services.AddLevel5Telemetry(builder.Configuration);
 

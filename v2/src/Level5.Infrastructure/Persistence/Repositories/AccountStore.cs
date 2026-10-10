@@ -10,7 +10,7 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
 {
     public async Task<Account?> FindByIdAsync(AccountId id, CancellationToken cancellationToken)
     {
-        var row = await db.Accounts.SingleOrDefaultAsync(a => a.Id == id.Value, cancellationToken);
+        var row = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id.Value, cancellationToken);
         return row is null ? null : ToDomain(row);
     }
 

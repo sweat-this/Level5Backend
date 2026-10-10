@@ -8,6 +8,10 @@ namespace Level5.Infrastructure.Persistence.Repositories;
 
 public sealed class NotificationStore(Level5V2DbContext db) : INotificationStore
 {
+    public Task<bool> ExistsAsync(PlayerId recipient, string source, string sourceEventKey, CancellationToken cancellationToken)
+        => db.PlayerNotifications.AnyAsync(row => row.RecipientPlayerId == recipient.Value &&
+            row.Source == source && row.SourceEventKey == sourceEventKey, cancellationToken);
+
     public Task AddAsync(PlayerNotification notification, CancellationToken cancellationToken)
         => db.PlayerNotifications.AddAsync(ToRow(notification), cancellationToken).AsTask();
 

@@ -1,5 +1,8 @@
 # Blood Money challenge chat persistence (MSG-002 / #87)
 
+Follow-on [MSG-004 / #89](blood-money-chat-notifications.md) adds atomic coalesced Platform
+inbox production. The MSG-002 implementation evidence and exclusions below describe that original slice.
+
 Implementation baseline: fetched `origin/dev` at
 `d25876a46e32d559ac321d060cec1a6d96c020a5` on 2026-10-10 (America/Chicago).
 The live issue and all open PRs were re-read immediately before coding; no PRs were open.
@@ -51,7 +54,8 @@ interrupts retry backoff as well as in-flight database work.
 ## Rate and private state
 
 Opt-in composition follows the existing challenge convention: after
-`AddLevel5Infrastructure`, call `AddBloodMoneyChat(hostRatePolicy)`. The host supplies
+`AddLevel5Infrastructure`, call `AddBloodMoneyChat(hostRatePolicy, hostNotificationPolicy)` and
+register the scoped shared `INotificationWriter`. The host supplies
 `BloodMoneyChatRatePolicy(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1))` for the
 approved initial policy, or its versioned configuration. Domain embeds no rate constants.
 `IClock` is resolved through the existing composition. No HTTP route enables this slice.

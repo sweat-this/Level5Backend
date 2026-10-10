@@ -10,6 +10,10 @@ public sealed class InMemoryNotificationStore : INotificationStore
 
     public IReadOnlyList<PlayerNotification> Notifications => _notifications;
 
+    public Task<bool> ExistsAsync(PlayerId recipient, string source, string sourceEventKey, CancellationToken cancellationToken)
+        => Task.FromResult(_notifications.Any(item => item.RecipientPlayerId == recipient &&
+            item.Source == source && item.SourceEventKey == sourceEventKey));
+
     public Task AddAsync(PlayerNotification notification, CancellationToken cancellationToken)
     {
         if (_notifications.Any(existing =>

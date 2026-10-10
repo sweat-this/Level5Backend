@@ -8,10 +8,13 @@ namespace Level5.Infrastructure.BloodMoney;
 
 public static class BloodMoneyChatServiceCollectionExtensions
 {
-    /// <summary>Opt-in after AddLevel5Infrastructure. The host supplies the versioned rate policy.</summary>
-    public static IServiceCollection AddBloodMoneyChat(this IServiceCollection services, BloodMoneyChatRatePolicy ratePolicy)
+    /// <summary>Opt-in after AddLevel5Infrastructure. The host supplies rate/coalescing policies
+    /// and the scoped shared notification writer.</summary>
+    public static IServiceCollection AddBloodMoneyChat(this IServiceCollection services, BloodMoneyChatRatePolicy ratePolicy,
+        BloodMoneyChatNotificationPolicy notificationPolicy)
     {
         services.AddSingleton(ratePolicy);
+        services.AddSingleton(notificationPolicy);
         // Reuse deployment's stable, shared server secret with a separate cryptographic purpose.
         // No process-local key or committed fallback; existing JwtOptions startup validation applies.
         services.TryAddSingleton<IBloodMoneyChatCursorCodec>(provider =>
