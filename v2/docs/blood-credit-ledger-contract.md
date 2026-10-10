@@ -121,6 +121,10 @@ in [the implementation evidence](blood-credit-ledger-evidence.md).
 
 ## #81 handoff
 
+#81 implementation update: [the reservation contract](blood-credit-reservations-contract.md) now
+extends the existing ledger with distinct Reserve/Release kinds and a durable reservation row.
+The paragraph below preserves the original #80 handoff scope.
+
 Reservations remain entirely owned by #81. This slice has no reserved balance, escrow, challenge,
 roster, wager, settlement, refund, forfeit, purchased-credit, cash-out, blockchain, messaging or
 Unity/Platform client integration. Future reservation work must extend the Blood Money contracts

@@ -26,7 +26,7 @@ internal static class BloodCreditModel
             entity.ToTable("blood_money_credit_transactions", table =>
             {
                 table.HasCheckConstraint("CK_blood_credit_delta", "\"PlayerDelta\" <> 0 AND \"PlayerDelta\" <> '-9223372036854775808'::bigint");
-                table.HasCheckConstraint("CK_blood_credit_kind", "(\"Kind\" = 'Issuance' AND \"PlayerDelta\" > 0) OR (\"Kind\" = 'Spend' AND \"PlayerDelta\" < 0) OR \"Kind\" = 'Correction'");
+                table.HasCheckConstraint("CK_blood_credit_kind", "(\"Kind\" IN ('Issuance', 'Release') AND \"PlayerDelta\" > 0) OR (\"Kind\" IN ('Spend', 'Reserve') AND \"PlayerDelta\" < 0) OR \"Kind\" = 'Correction'");
                 table.HasCheckConstraint("CK_blood_credit_reference", "length(btrim(\"ReferenceCode\")) > 0");
                 table.HasCheckConstraint("CK_blood_credit_id", "\"Id\" <> '00000000-0000-0000-0000-000000000000'::uuid");
             });
@@ -50,6 +50,33 @@ internal static class BloodCreditModel
             entity.Property(row => row.PostingOwner).HasMaxLength(16);
             entity.HasIndex(row => row.PlayerId);
             entity.HasOne<PlayerProfileRow>().WithMany().HasForeignKey(row => row.PlayerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        model.Entity<BloodCreditReservationRow>(entity =>
+        {
+            entity.ToTable("blood_money_credit_reservations", table =>
+            {
+                table.HasCheckConstraint("CK_blood_reservation_identity", "\"ChallengeId\" <> '00000000-0000-0000-0000-000000000000'::uuid AND \"PlayerId\" <> '00000000-0000-0000-0000-000000000000'::uuid");
+                table.HasCheckConstraint("CK_blood_reservation_amount", "\"Amount\" > 0");
+                table.HasCheckConstraint("CK_blood_reservation_revision", "\"Revision\" > 0");
+                table.HasCheckConstraint("CK_blood_reservation_state", """
+                    ("Status" = 'Reserved' AND "ReleaseTransactionId" IS NULL AND "ReleasedAt" IS NULL AND "ReleaseReason" IS NULL)
+                    OR ("Status" = 'Released' AND "ReleaseTransactionId" IS NOT NULL AND "ReleasedAt" IS NOT NULL
+                        AND "ReleasedAt" >= "ReservedAt" AND "ReleaseReason" IS NOT NULL
+                        AND "ReleaseReason" IN ('Declined', 'Cancelled', 'PendingExpired') AND "ReleaseTransactionId" <> "ReserveTransactionId")
+                    """);
+            });
+            entity.HasKey(row => new { row.ChallengeId, row.PlayerId });
+            entity.Property(row => row.ChallengeId).ValueGeneratedNever();
+            entity.Property(row => row.PlayerId).ValueGeneratedNever();
+            entity.Property(row => row.Status).HasMaxLength(16);
+            entity.Property(row => row.ReleaseReason).HasMaxLength(16);
+            entity.Property(row => row.Revision).IsConcurrencyToken();
+            entity.HasIndex(row => row.ReserveTransactionId).IsUnique();
+            entity.HasIndex(row => row.ReleaseTransactionId).IsUnique().HasFilter("\"ReleaseTransactionId\" IS NOT NULL");
+            entity.HasOne<PlayerProfileRow>().WithMany().HasForeignKey(row => row.PlayerId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BloodCreditTransactionRow>().WithMany().HasForeignKey(row => row.ReserveTransactionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<BloodCreditTransactionRow>().WithMany().HasForeignKey(row => row.ReleaseTransactionId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

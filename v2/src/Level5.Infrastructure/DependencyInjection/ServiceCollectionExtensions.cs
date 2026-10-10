@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPasswordResetChallengeStore, PasswordResetChallengeStore>();
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
         services.AddScoped<Level5.Application.BloodMoney.IBloodCreditLedgerStore, Level5.Infrastructure.BloodMoney.BloodCreditLedgerStore>();
+        services.AddScoped<Level5.Application.BloodMoney.IBloodCreditReservationStore, Level5.Infrastructure.BloodMoney.BloodCreditReservationStore>();
 
         services.AddSingleton<IPasswordHasher, AspNetPasswordHasher>();
         services.AddSingleton<IPasswordPolicy, PasswordPolicy>();

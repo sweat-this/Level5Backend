@@ -165,6 +165,11 @@ public sealed class DependencyRuleTests
     {
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditAccount" && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditTransaction" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditReservation" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodMoneyChallengeId" && type.IsValueType);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.BloodCreditReservationMutator" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.ReserveBloodCreditsUseCase" && type.IsClass && !type.IsAbstract);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.ReleaseBloodCreditsUseCase" && type.IsClass && !type.IsAbstract);
         Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.IssueBloodCreditsUseCase" && type.IsClass && !type.IsAbstract);
         Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.GetMyBloodCreditBalanceUseCase" && type.IsClass && !type.IsAbstract);
     }

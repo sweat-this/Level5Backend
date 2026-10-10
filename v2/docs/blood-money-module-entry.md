@@ -9,6 +9,12 @@
 
 ## Evidence baseline and landed dependencies
 
+### #81 implementation update
+
+[Atomic reservations and releases](blood-credit-reservations-contract.md) extend the landed #80
+ledger without a second balance authority or public mutation API. #82 retains ownership of the
+challenge lifecycle and cancellation/acceptance legality; #83 retains settlement ownership.
+
 ### #80 implementation update
 
 The #80 implementation re-fetched all three `dev` branches and inspected relevant issues and all

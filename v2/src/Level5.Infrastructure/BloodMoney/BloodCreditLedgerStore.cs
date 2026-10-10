@@ -10,14 +10,18 @@ public sealed class BloodCreditLedgerStore(Level5V2DbContext db) : IBloodCreditL
 {
     public async Task<BloodCreditAccount?> FindAccountAsync(PlayerId playerId, CancellationToken cancellationToken)
     {
-        var row = await db.Set<BloodCreditAccountRow>().AsNoTracking()
+        var row = db.Set<BloodCreditAccountRow>().Local.SingleOrDefault(row => row.PlayerId == playerId.Value &&
+            db.Entry(row).State is EntityState.Added or EntityState.Modified)
+            ?? await db.Set<BloodCreditAccountRow>().AsNoTracking()
             .SingleOrDefaultAsync(row => row.PlayerId == playerId.Value, cancellationToken);
         return row is null ? null : BloodCreditAccount.Rehydrate(playerId, row.AvailableBalance, row.Revision);
     }
 
     public async Task<BloodCreditTransaction?> FindTransactionAsync(BloodCreditTransactionId transactionId, CancellationToken cancellationToken)
     {
-        var row = await db.Set<BloodCreditTransactionRow>().AsNoTracking().Include(row => row.Postings)
+        var row = db.Set<BloodCreditTransactionRow>().Local.SingleOrDefault(row => row.Id == transactionId.Value &&
+            db.Entry(row).State == EntityState.Added)
+            ?? await db.Set<BloodCreditTransactionRow>().AsNoTracking().Include(row => row.Postings)
             .SingleOrDefaultAsync(row => row.Id == transactionId.Value, cancellationToken);
         return row is null ? null : BloodCreditTransaction.Rehydrate(new(row.Id),
             Enum.Parse<BloodCreditTransactionKind>(row.Kind), new(row.SubjectPlayerId), row.PlayerDelta, row.ReferenceCode, row.CreatedAt,
@@ -40,11 +44,15 @@ public sealed class BloodCreditLedgerStore(Level5V2DbContext db) : IBloodCreditL
             db.Attach(row);
         }
         var entry = db.Entry(row);
+        var wasUnchanged = entry.State == EntityState.Unchanged;
         row.AvailableBalance = account.AvailableBalance;
         row.Revision = account.Revision;
-        entry.Property(value => value.AvailableBalance).IsModified = true;
-        entry.Property(value => value.Revision).IsModified = true;
-        entry.Property(value => value.Revision).OriginalValue = expectedRevision;
+        if (wasUnchanged)
+        {
+            entry.Property(value => value.AvailableBalance).IsModified = true;
+            entry.Property(value => value.Revision).IsModified = true;
+            entry.Property(value => value.Revision).OriginalValue = expectedRevision;
+        }
     }
 
     public void AddTransaction(BloodCreditTransaction transaction)

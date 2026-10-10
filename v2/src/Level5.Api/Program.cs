@@ -113,6 +113,9 @@ builder.Services.AddScoped<Level5.Application.BloodMoney.GetMyBloodCreditBalance
 builder.Services.AddScoped<Level5.Application.BloodMoney.IssueBloodCreditsUseCase>();
 builder.Services.AddScoped<Level5.Application.BloodMoney.SpendBloodCreditsUseCase>();
 builder.Services.AddScoped<Level5.Application.BloodMoney.CorrectBloodCreditsUseCase>();
+builder.Services.AddScoped<Level5.Application.BloodMoney.BloodCreditReservationMutator>();
+builder.Services.AddScoped<Level5.Application.BloodMoney.ReserveBloodCreditsUseCase>();
+builder.Services.AddScoped<Level5.Application.BloodMoney.ReleaseBloodCreditsUseCase>();
 builder.Services.AddScoped<CheckMyProductAccessUseCase>();
 builder.Services.AddScoped<ListMyEntitlementsUseCase>();
 builder.Services.AddScoped<GrantProductEntitlementUseCase>();
