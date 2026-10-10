@@ -7,6 +7,7 @@ public sealed record NotificationCursorPosition(DateTimeOffset CreatedAt, Notifi
 
 public interface INotificationStore
 {
+    Task<bool> ExistsAsync(PlayerId recipient, string source, string sourceEventKey, CancellationToken cancellationToken);
     Task AddAsync(PlayerNotification notification, CancellationToken cancellationToken);
     Task<IReadOnlyList<PlayerNotification>> ListAsync(
         PlayerId recipientPlayerId,

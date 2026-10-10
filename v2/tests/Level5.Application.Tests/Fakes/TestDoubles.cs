@@ -80,6 +80,10 @@ public sealed class CapturingNotificationWriter : INotificationWriter
 {
     public List<NotificationDraft> Drafts { get; } = [];
 
+    public Task<bool> ExistsAsync(PlayerId recipient, string source, string sourceEventKey, CancellationToken cancellationToken)
+        => Task.FromResult(Drafts.Any(item => item.RecipientPlayerId == recipient &&
+            item.Source == source && item.SourceEventKey == sourceEventKey));
+
     public Task WriteAsync(NotificationDraft draft, CancellationToken cancellationToken)
     {
         Drafts.Add(draft);

@@ -4,6 +4,7 @@ using Level5.Application.BloodMoney;
 using Level5.Application.Common;
 using Level5.Domain.BloodMoney;
 using Level5.Domain.Ids;
+using Level5.Domain.Identity;
 using Level5.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,9 @@ namespace Level5.Infrastructure.BloodMoney;
 
 /// <summary>Chat writes lock the canonical challenge before inspecting lifecycle or chat rows.
 /// Closure writers must use this same challenge-first order. Listing uses a read-only snapshot.</summary>
-public sealed partial class BloodMoneyChatStore(Level5V2DbContext db, IClock clock, IBloodMoneyChatCursorCodec cursors) : IBloodMoneyChatStore
+public sealed partial class BloodMoneyChatStore(Level5V2DbContext db, IClock clock, IBloodMoneyChatCursorCodec cursors,
+    INotificationWriter notifications, IPlayerProfileStore profiles, IAccountStore accounts,
+    BloodMoneyChatNotificationPolicy notificationPolicy) : IBloodMoneyChatStore
 {
     public Task<SendBloodMoneyChallengeMessageResult> SendAsync(SendBloodMoneyChallengeMessageRequest request,
         BloodMoneyChatRatePolicy ratePolicy, CancellationToken cancellationToken)
@@ -55,17 +58,29 @@ public sealed partial class BloodMoneyChatStore(Level5V2DbContext db, IClock clo
                 Body = message.Body, CreatedAt = message.CreatedAt, Visibility = message.Visibility.ToString()
             };
             db.Add(row);
-            try
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                return new(BloodMoneyChatMessageView.From(message), true);
-            }
-            finally
-            {
-                // A retrying execution strategy must reload durable state, never reuse a failed candidate.
-                db.Entry(row).State = EntityState.Detached;
-            }
+            await StageNotifications(challenge, message, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return new(BloodMoneyChatMessageView.From(message), true);
         }, cancellationToken);
+
+    private async Task StageNotifications(BloodMoneyChallenge challenge, BloodMoneyChatMessage message, CancellationToken token)
+    {
+        const string source = "blood-money";
+        var key = notificationPolicy.SourceEventKey(challenge.Id, message.CreatedAt);
+        foreach (var participant in challenge.Participants)
+        {
+            var recipient = participant.PlayerId;
+            if (recipient == message.SenderPlayerId) continue;
+            var profile = await profiles.FindByIdAsync(recipient, token);
+            if (profile is null || (await accounts.FindByIdAsync(profile.AccountId, token))?.Status != AccountStatus.Active)
+                continue;
+            if ((await State(challenge.Id, recipient, token)).NotificationsMuted) continue;
+            // Every send/mute on this challenge holds the same row lock. ReadAt never resets this identity.
+            if (await notifications.ExistsAsync(recipient, source, key, token)) continue;
+            await notifications.WriteAsync(new(recipient, source, "challenge-chat", "New challenge chat activity",
+                null, "/account/games/blood-money", key), token);
+        }
+    }
 
     public Task<BloodMoneyChatParticipantState> GetParticipantStateAsync(BloodMoneyChallengeId challengeId, PlayerId actor, CancellationToken cancellationToken)
         => Serialized(challengeId, actor, _ => State(challengeId, actor, cancellationToken), cancellationToken);
@@ -103,16 +118,27 @@ public sealed partial class BloodMoneyChatStore(Level5V2DbContext db, IClock clo
         RequireCleanScope();
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async token =>
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
-            var locked = await db.Database.SqlQuery<Guid>($"""
-                SELECT "Id" AS "Value" FROM blood_money_challenges WHERE "Id" = {id.Value} FOR UPDATE
-                """).ToListAsync(token);
-            if (locked.Count == 0) throw Missing();
-            // AsNoTracking is essential: a caller's earlier tracked lifecycle read must not win here.
-            var challenge = await Authorize(id, actor, token);
-            var result = await operation(challenge);
-            await transaction.CommitAsync(token);
-            return result;
+            var previous = db.ChangeTracker.Entries().Select(entry => entry.Entity).ToHashSet(ReferenceEqualityComparer.Instance);
+            try
+            {
+                await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
+                var locked = await db.Database.SqlQuery<Guid>($"""
+                    SELECT "Id" AS "Value" FROM blood_money_challenges WHERE "Id" = {id.Value} FOR UPDATE
+                    """).ToListAsync(token);
+                if (locked.Count == 0) throw Missing();
+                // AsNoTracking is essential: a caller's earlier tracked lifecycle read must not win here.
+                var challenge = await Authorize(id, actor, token);
+                var result = await operation(challenge);
+                await transaction.CommitAsync(token);
+                return result;
+            }
+            finally
+            {
+                // Includes partially staged notifications and successful saves followed by failed/ambiguous commits.
+                // Retrying delegates must recover from durable state, never reuse candidates from an earlier attempt.
+                foreach (var entry in db.ChangeTracker.Entries().Where(entry => !previous.Contains(entry.Entity)).ToArray())
+                    entry.State = EntityState.Detached;
+            }
         }, cancellationToken);
     }
 

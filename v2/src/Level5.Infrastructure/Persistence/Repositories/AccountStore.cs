@@ -10,7 +10,7 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
 {
     public async Task<Account?> FindByIdAsync(AccountId id, CancellationToken cancellationToken)
     {
-        var row = await db.Accounts.SingleOrDefaultAsync(a => a.Id == id.Value, cancellationToken);
+        var row = await db.Accounts.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id.Value, cancellationToken);
         return row is null ? null : ToDomain(row);
     }
 
@@ -61,6 +61,15 @@ public sealed class AccountStore(Level5V2DbContext db) : IAccountStore
     public async Task StageEmailUpdateAsync(Account account, CancellationToken cancellationToken)
     {
         var row = await db.Accounts.SingleAsync(a => a.Id == account.Id.Value, cancellationToken);
+        var generation = db.Entry(row).Property(r => r.SessionGeneration);
+        if (!generation.IsModified)
+        {
+            // Email-only writes must compare against the validated snapshot, not a later staging read.
+            // Preserve any credential change already staged in this unit of work.
+            generation.CurrentValue = account.SessionGeneration;
+            generation.OriginalValue = account.SessionGeneration;
+            generation.IsModified = false;
+        }
         row.Email = account.Email?.Value;
         row.EmailCanonical = account.Email?.Canonical;
         row.EmailVerifiedAt = account.EmailVerifiedAt;

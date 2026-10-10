@@ -23,6 +23,62 @@ public sealed class BloodMoneyChatFlowTests(ApiFactory factory)
     private static readonly BloodMoneyChallengeTimingPolicy Timing = new(TimeSpan.FromHours(1), TimeSpan.FromHours(2));
     private static string Path(Guid id) => $"/api/v2/games/blood-money/challenges/{id}";
 
+    [Theory]
+    [InlineData(2)][InlineData(3)][InlineData(4)]
+    public async Task Chat_notifications_use_the_existing_private_inbox_and_replay_and_read_pointers_remain_independent(int count)
+    {
+        const string inbox = "/api/v2/platform/me/notifications";
+        var (id, players) = await Seed(count);
+        var key = Guid.NewGuid();
+        var request = new { clientMessageId = key, body = "private body with stake 10 and balance 100" };
+        Assert.Equal(HttpStatusCode.Created, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request)).StatusCode);
+        Assert.Empty((await Json(await players[0].Client.GetAsync(inbox))).GetProperty("items").EnumerateArray());
+        foreach (var recipient in players.Skip(1))
+        {
+            var item = Assert.Single((await Json(await recipient.Client.GetAsync(inbox))).GetProperty("items").EnumerateArray());
+            Assert.Equal(new[] { "actionPath", "body", "createdAt", "id", "kind", "readAt", "source", "title" },
+                item.EnumerateObject().Select(property => property.Name).Order());
+            Assert.Equal("blood-money", item.GetProperty("source").GetString());
+            Assert.Equal("challenge-chat", item.GetProperty("kind").GetString());
+            Assert.Equal("New challenge chat activity", item.GetProperty("title").GetString());
+            Assert.Equal(JsonValueKind.Null, item.GetProperty("body").ValueKind);
+            Assert.Equal("/account/games/blood-money", item.GetProperty("actionPath").GetString());
+            Assert.Equal(JsonValueKind.Null, item.GetProperty("readAt").ValueKind);
+            var notificationPath = inbox + "/" + item.GetProperty("id").GetGuid();
+            Assert.Equal(HttpStatusCode.NotFound, (await players[0].Client.PatchAsJsonAsync(notificationPath, new { isRead = true })).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await recipient.Client.PatchAsJsonAsync(notificationPath, new { isRead = true })).StatusCode);
+            Assert.Equal(0, (await Page(recipient.Client, id)).GetProperty("lastReadSequence").GetInt64());
+            Assert.Equal(HttpStatusCode.OK, (await recipient.Client.PutAsJsonAsync(Path(id) + "/read-position", new { lastReadSequence = 1 })).StatusCode);
+            Assert.NotEqual(JsonValueKind.Null, Assert.Single((await Json(await recipient.Client.GetAsync(inbox)))
+                .GetProperty("items").EnumerateArray()).GetProperty("readAt").ValueKind);
+        }
+    }
+
+    [Fact]
+    public async Task Muted_and_inactive_recipients_are_skipped_without_affecting_chat_or_financial_authority()
+    {
+        var (id, players) = await Seed(4);
+        var before = await Snapshot(id);
+        Assert.Equal(HttpStatusCode.OK, (await players[1].Client.PutAsJsonAsync(Path(id) + "/notifications-muted", new { notificationsMuted = true })).StatusCode);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Level5V2DbContext>();
+            var accountId = await db.PlayerProfiles.Where(row => row.Id == players[2].PlayerId).Select(row => row.AccountId).SingleAsync();
+            await db.Accounts.Where(row => row.Id == accountId).ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Status, "Disabled"));
+        }
+        Assert.Equal(HttpStatusCode.Created, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages",
+            new { clientMessageId = Guid.NewGuid(), body = "hello" })).StatusCode);
+        Assert.Equal(1, (await Page(players[1].Client, id)).GetProperty("items").GetArrayLength());
+        await using var checkScope = factory.Services.CreateAsyncScope();
+        var check = checkScope.ServiceProvider.GetRequiredService<Level5V2DbContext>();
+        var playerIds = players.Select(player => player.PlayerId).ToArray();
+        var recipients = await check.PlayerNotifications.Where(row => row.Source == "blood-money" &&
+            playerIds.Contains(row.RecipientPlayerId)).Select(row => row.RecipientPlayerId).ToListAsync();
+        Assert.Equal(players[3].PlayerId, Assert.Single(recipients));
+        Assert.Equal(before, await Snapshot(id));
+    }
+
     [Fact]
     public async Task Eligibility_persistence_outage_fails_closed_with_safe_503_on_every_operation()
     {
@@ -304,7 +360,7 @@ public sealed class BloodMoneyChatFlowTests(ApiFactory factory)
         await using var scope = factory.Services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<Level5V2DbContext>();
         var results = new List<string>();
         foreach (var table in new[] { "blood_money_challenges", "blood_money_challenge_participants", "blood_money_credit_accounts",
-            "blood_money_credit_transactions", "blood_money_credit_postings", "blood_money_credit_reservations", "player_notifications" })
+            "blood_money_credit_transactions", "blood_money_credit_postings", "blood_money_credit_reservations" })
         {
             // Table names come exclusively from the fixed fixture roster above.
             var sql = $"SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb)::text AS \"Value\" FROM {table} t";
