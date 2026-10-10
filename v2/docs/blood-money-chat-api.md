@@ -2,6 +2,9 @@
 
 Follow-on [MSG-004 / #89](blood-money-chat-notifications.md) adds atomic coalesced Platform
 inbox production through the existing API. The MSG-003 evidence and exclusions below describe that original slice.
+The follow-on [friend-challenge details API](blood-money-challenge-api.md) exposes the canonical
+participant-authorized status/roster and corrects the visibility OpenAPI schema to match the
+existing `Visible`/`Suppressed` runtime strings.
 
 ## Baseline and ownership
 

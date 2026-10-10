@@ -300,7 +300,9 @@ public sealed class BloodMoneyChatFlowTests(ApiFactory factory)
     {
         var document = await Json(await factory.CreateClient().GetAsync("/swagger/v1/swagger.json"));
         var paths = document.GetProperty("paths").EnumerateObject().Where(p => p.Name.StartsWith("/api/v2/games/blood-money/challenges/", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(5, paths.Sum(p => p.Value.EnumerateObject().Count()));
+        Assert.Equal(5, paths.Where(p => p.Name.EndsWith("/messages", StringComparison.Ordinal) ||
+            p.Name.EndsWith("/read-position", StringComparison.Ordinal) || p.Name.EndsWith("/notifications-muted", StringComparison.Ordinal) ||
+            p.Name.EndsWith("/message-reports", StringComparison.Ordinal)).Sum(p => p.Value.EnumerateObject().Count()));
         const string root = "/api/v2/games/blood-money/challenges/{challengeId}";
         foreach (var (route, method, status, schema) in new[]
         {
@@ -327,6 +329,10 @@ public sealed class BloodMoneyChatFlowTests(ApiFactory factory)
         Assert.Equal(8, message.EnumerateObject().Count());
         Assert.True(message.GetProperty("body").GetProperty("nullable").GetBoolean());
         Assert.Equal("int64", message.GetProperty("sequence").GetProperty("format").GetString());
+        Assert.Equal("#/components/schemas/BloodMoneyChatVisibility", message.GetProperty("visibility").GetProperty("$ref").GetString());
+        var visibility = schemas.GetProperty("BloodMoneyChatVisibility");
+        Assert.Equal("string", visibility.GetProperty("type").GetString());
+        Assert.Equal(new[] { "Visible", "Suppressed" }, visibility.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
         Assert.Equal("int64", schemas.GetProperty("BloodMoneyChatReadPositionDto").GetProperty("properties").GetProperty("lastReadSequence").GetProperty("format").GetString());
         Assert.Equal(6, schemas.GetProperty("BloodMoneyChatReportReason").GetProperty("enum").GetArrayLength());
         var send = schemas.GetProperty("SendBloodMoneyChatMessageDto").GetProperty("properties");

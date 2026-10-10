@@ -1,4 +1,5 @@
 using Level5.Application.BloodMoney;
+using Level5.Domain.BloodMoney;
 using Microsoft.OpenApi;
 using System.Text.Json.Nodes;
 using Swashbuckle.AspNetCore.SwaggerGen;
@@ -9,10 +10,11 @@ public sealed class BloodMoneyChatSchemaFilter : ISchemaFilter
 {
     public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
     {
-        if (context.Type != typeof(BloodMoneyChatReportReason) || schema is not OpenApiSchema concrete) return;
+        if ((context.Type != typeof(BloodMoneyChatReportReason) && context.Type != typeof(BloodMoneyChatVisibility)) ||
+            schema is not OpenApiSchema concrete) return;
         concrete.Type = JsonSchemaType.String;
         concrete.Format = null;
-        concrete.Enum = Enum.GetNames<BloodMoneyChatReportReason>().Select(name => (JsonNode)JsonValue.Create(name)!).ToList();
+        concrete.Enum = Enum.GetNames(context.Type).Select(name => (JsonNode)JsonValue.Create(name)!).ToList();
     }
 }
 

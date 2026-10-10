@@ -609,6 +609,109 @@
         }
       }
     },
+    "/api/v2/games/blood-money/challenges/{challengeId}": {
+      "get": {
+        "tags": [
+          "BloodMoneyChallenges"
+        ],
+        "parameters": [
+          {
+            "name": "challengeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodMoneyChallengeDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodMoneyChallengeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BloodMoneyChallengeDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v2/games/blood-money/challenges/{challengeId}/messages": {
       "get": {
         "tags": [
@@ -3070,6 +3173,99 @@
         },
         "additionalProperties": false
       },
+      "BloodMoneyChallengeDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "creatorPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BloodMoneyChallengeStatus"
+          },
+          "stakePerParticipant": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rulesetId": {
+            "type": "string"
+          },
+          "rulesetVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "acceptanceDeadlineAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "activatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "gameplayDeadlineAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "terminalAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BloodMoneyChallengeParticipantDto"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "BloodMoneyChallengeParticipantDto": {
+        "type": "object",
+        "properties": {
+          "playerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seatIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BloodMoneyParticipantStatus"
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "BloodMoneyChallengeStatus": {
+        "enum": [
+          "PendingAcceptance",
+          "Active",
+          "Declined",
+          "Cancelled",
+          "Expired"
+        ],
+        "type": "string"
+      },
       "BloodMoneyChatMessageDto": {
         "type": "object",
         "properties": {
@@ -3188,11 +3384,18 @@
       },
       "BloodMoneyChatVisibility": {
         "enum": [
-          0,
-          1
+          "Visible",
+          "Suppressed"
         ],
-        "type": "integer",
-        "format": "int32"
+        "type": "string"
+      },
+      "BloodMoneyParticipantStatus": {
+        "enum": [
+          "Invited",
+          "Accepted",
+          "Declined"
+        ],
+        "type": "string"
       },
       "ChangePasswordDto": {
         "type": "object",
@@ -4147,6 +4350,9 @@
     },
     {
       "name": "BloodCredits"
+    },
+    {
+      "name": "BloodMoneyChallenges"
     },
     {
       "name": "BloodMoneyChat"
