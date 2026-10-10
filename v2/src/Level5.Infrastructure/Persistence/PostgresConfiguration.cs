@@ -38,8 +38,8 @@ public static class PostgresConfiguration
     /// <see cref="NoTimeoutRetryingExecutionStrategy"/>). Unique violations, FK/check violations
     /// and the zero-rows-affected result of a revision-conditioned update are not transient, so
     /// they surface on the first attempt exactly as before - business and concurrency outcomes are
-    /// never silently re-executed. No code path opens an explicit transaction, which a retrying
-    /// strategy would otherwise reject.
+    /// never silently re-executed. Explicit transactions (Blood Money chat) execute their entire
+    /// serialized operation inside CreateExecutionStrategy, reloading durable state on each attempt.
     /// </summary>
     public static TBuilder UseLevel5Postgres<TBuilder>(this TBuilder options, string connectionString)
         where TBuilder : DbContextOptionsBuilder

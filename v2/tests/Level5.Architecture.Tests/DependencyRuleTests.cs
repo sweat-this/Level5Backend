@@ -163,11 +163,12 @@ public sealed class DependencyRuleTests
     [Fact]
     public void BloodMoney_has_concrete_domain_and_application_capabilities()
     {
-        foreach (var name in new[] { "BloodMoneyChallenge", "BloodMoneyChallengeParticipant" })
+        foreach (var name in new[] { "BloodMoneyChallenge", "BloodMoneyChallengeParticipant", "BloodMoneyChatMessage" })
             Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney." + name && type.IsClass && !type.IsAbstract);
         Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.IBloodMoneyChallengeStore" && type.IsInterface);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.IBloodMoneyChatStore" && type.IsInterface);
         foreach (var name in new[] { "CreateBloodMoneyChallengeUseCase", "AcceptBloodMoneyChallengeUseCase", "DeclineBloodMoneyChallengeUseCase",
-                     "CancelBloodMoneyChallengeUseCase", "ExpirePendingBloodMoneyChallengeUseCase", "GetBloodMoneyChallengeUseCase" })
+                     "CancelBloodMoneyChallengeUseCase", "ExpirePendingBloodMoneyChallengeUseCase", "GetBloodMoneyChallengeUseCase", "SendBloodMoneyChallengeMessageUseCase" })
             Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney." + name && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditAccount" && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditTransaction" && type.IsClass && !type.IsAbstract);

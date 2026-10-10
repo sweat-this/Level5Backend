@@ -33,7 +33,7 @@ public sealed class BloodMoneyChallengeMigrationTests
         var before = await Snapshot(db); var tables = await Tables(db);
         db.ChangeTracker.Clear(); await db.Database.MigrateAsync();
         Assert.Equal(before, await Snapshot(db));
-        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges" }, (await Tables(db)).Except(tables).Order().ToArray());
+        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_chat_messages", "blood_money_chat_participant_state" }, (await Tables(db)).Except(tables).Order().ToArray());
         Assert.Empty(await db.Set<BloodMoneyChallengeRow>().ToListAsync());
         Assert.Empty(await db.Set<BloodMoneyChallengeParticipantRow>().ToListAsync());
         Assert.Empty(await db.Database.GetPendingMigrationsAsync()); Assert.False(db.Database.HasPendingModelChanges());
@@ -68,7 +68,8 @@ public sealed class BloodMoneyChallengeMigrationTests
         {
             Assert.Equal(history, await fresh.Database.GetAppliedMigrationsAsync());
             Assert.DoesNotContain("blood_money_challenges", await Tables(fresh));
-            Assert.Equal(before, await Snapshot(fresh)); Assert.Single(await fresh.Database.GetPendingMigrationsAsync());
+            Assert.Equal(before, await Snapshot(fresh));
+            Assert.Equal(fresh.Database.GetMigrations().SkipWhile(id => id != PreviousMigration).Skip(1), await fresh.Database.GetPendingMigrationsAsync());
         }
         // Remove only this test's sentinel from its dedicated ephemeral database.
         await db.Database.ExecuteSqlRawAsync("DROP TABLE blood_money_challenge_participants");
