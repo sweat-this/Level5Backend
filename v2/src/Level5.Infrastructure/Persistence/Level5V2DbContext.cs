@@ -22,6 +22,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         Level5.Infrastructure.BloodMoney.BloodCreditModel.Configure(modelBuilder);
+        Level5.Infrastructure.BloodMoney.BloodMoneyChallengeModel.Configure(modelBuilder);
         modelBuilder.Entity<AccountRow>(entity =>
         {
             entity.ToTable("accounts");
