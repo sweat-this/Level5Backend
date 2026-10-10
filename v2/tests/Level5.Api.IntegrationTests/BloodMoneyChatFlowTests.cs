@@ -31,8 +31,8 @@ public sealed class BloodMoneyChatFlowTests(ApiFactory factory)
         var (id, players) = await Seed(count);
         var key = Guid.NewGuid();
         var request = new { clientMessageId = key, body = "private body with stake 10 and balance 100" };
-        Assert.Equal(HttpStatusCode.Created, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request, Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await players[0].Client.PostAsJsonAsync(Path(id) + "/messages", request, Ct)).StatusCode);
         Assert.Empty((await Json(await players[0].Client.GetAsync(inbox))).GetProperty("items").EnumerateArray());
         foreach (var recipient in players.Skip(1))
         {

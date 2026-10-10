@@ -21,7 +21,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
-using System.Net;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -83,28 +82,8 @@ builder.Services.AddProblemDetails(options =>
     };
 });
 
-// X-Forwarded-For/-Proto are only honoured from addresses listed in KnownProxies/KnownNetworks,
-// which are bound from configuration so putting this service behind a reverse proxy is a
-// deployment setting rather than a code change. Configure nothing (the default) and the
-// framework's loopback-only defaults apply, so forwarded headers from arbitrary clients are
-// ignored and the auth rate limiter below keeps partitioning on the real connection address.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
-{
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-
-    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
-    {
-        options.KnownProxies.Add(IPAddress.Parse(proxy));
-    }
-
-    foreach (var network in builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>() ?? [])
-    {
-        // Parsed with the BCL CIDR parser (so a malformed value fails loudly at startup), then
-        // converted to the type ForwardedHeadersOptions expects.
-        var cidr = System.Net.IPNetwork.Parse(network);
-        options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(cidr.BaseAddress, cidr.PrefixLength));
-    }
-});
+    ForwardedHeadersConfiguration.Configure(options, builder.Configuration));
 
 builder.Services.AddLevel5Infrastructure(builder.Configuration);
 builder.Services.AddBloodMoneyChat(new BloodMoneyChatRatePolicy(5, TimeSpan.FromSeconds(10), 30, TimeSpan.FromMinutes(1)),
@@ -288,7 +267,7 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
     Predicate = check => check.Tags.Contains("ready")
 });
 
-app.Run();
+await app.RunAsync();
 
 static RateLimitPartition<string> CreateSecurityRateLimitPartition(HttpContext httpContext, int permitLimit) =>
     RateLimitPartition.GetFixedWindowLimiter(
@@ -301,4 +280,7 @@ static RateLimitPartition<string> CreateSecurityRateLimitPartition(HttpContext h
         });
 
 // Exposed for WebApplicationFactory-based integration tests.
-public partial class Program;
+public partial class Program
+{
+    protected Program() { }
+}
