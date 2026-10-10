@@ -60,6 +60,7 @@ builder.Services.AddSwaggerGen(options =>
     // guarantee, with no change to runtime (de)serialization behavior.
     options.SupportNonNullableReferenceTypes();
     options.SchemaFilter<BloodMoneyChatSchemaFilter>();
+    options.SchemaFilter<BloodMoneyChallengeSchemaFilter>();
     options.OperationFilter<BloodMoneyChatOperationFilter>();
 });
 builder.Services.AddHttpContextAccessor();
@@ -125,6 +126,7 @@ builder.Services.AddScoped<Level5.Application.BloodMoney.CorrectBloodCreditsUseC
 builder.Services.AddScoped<Level5.Application.BloodMoney.BloodCreditReservationMutator>();
 builder.Services.AddScoped<Level5.Application.BloodMoney.ReserveBloodCreditsUseCase>();
 builder.Services.AddScoped<Level5.Application.BloodMoney.ReleaseBloodCreditsUseCase>();
+builder.Services.AddScoped<GetBloodMoneyChallengeUseCase>();
 builder.Services.AddScoped<CheckMyProductAccessUseCase>();
 builder.Services.AddScoped<ListMyEntitlementsUseCase>();
 builder.Services.AddScoped<GrantProductEntitlementUseCase>();

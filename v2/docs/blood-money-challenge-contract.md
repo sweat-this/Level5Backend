@@ -93,9 +93,11 @@ tests round-trip five participant rows today without exposing five-player creati
 
 The host can call `AddLevel5Infrastructure(configuration)` followed by
 `AddBloodMoneyChallenges(approvedTimingPolicy)` to register the scoped lifecycle/use cases
-and existing financial mutator. No challenge HTTP route is added or enabled in #82, so the
-canonical OpenAPI document remains byte-equivalent. A future HTTP adapter must derive
-PlayerId from `ICurrentPlayerProvider`, never an ordinary request-body caller ID.
+and existing financial mutator. The original #82 slice added no HTTP route. The follow-on
+[details API](blood-money-challenge-api.md) now exposes only the participant-authorized read
+projection and publishes its OpenAPI contract. It derives PlayerId from
+`ICurrentPlayerProvider`, never an ordinary request-body caller ID, and requires no timing
+policy. Challenge lifecycle HTTP commands remain outside that adapter.
 
 #83 owns wager-eligible server rules/result contracts, adjudication and settlement. The
 minimal rules identity here does not authorize any result producer or payout. #84 can reuse
