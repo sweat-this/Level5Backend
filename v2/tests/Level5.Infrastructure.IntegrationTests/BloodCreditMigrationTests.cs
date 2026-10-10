@@ -48,7 +48,7 @@ public sealed class BloodCreditMigrationTests
         Assert.Equal(2, result.LevelId);
         Assert.Equal("{\"TotalPoints\": 90}", result.MetricsJson);
         Assert.Equal("upgrade-test", result.ClientVersion);
-        Assert.Equal(new[] { "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_reservations", "blood_money_credit_transactions" },
+        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_reservations", "blood_money_credit_transactions" },
             (await Tables(db)).Except(beforeTables).Order().ToArray());
         Assert.Empty(await db.Set<BloodCreditAccountRow>().ToListAsync());
         Assert.Empty(await db.Set<BloodCreditTransactionRow>().ToListAsync());
@@ -88,7 +88,7 @@ public sealed class BloodCreditMigrationTests
         Assert.DoesNotContain("blood_money_credit_transactions", tables);
         Assert.Contains("blood_money_credit_postings", tables);
         Assert.Equal(previousHistory, await db.Database.GetAppliedMigrationsAsync());
-        Assert.Equal(2, (await db.Database.GetPendingMigrationsAsync()).Count());
+        Assert.Equal(3, (await db.Database.GetPendingMigrationsAsync()).Count());
         // Drop only the sentinel created by this fixture inside its dedicated container.
         await db.Database.ExecuteSqlRawAsync("DROP TABLE blood_money_credit_postings");
         await db.Database.MigrateAsync();

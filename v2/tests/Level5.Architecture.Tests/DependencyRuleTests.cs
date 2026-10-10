@@ -163,6 +163,12 @@ public sealed class DependencyRuleTests
     [Fact]
     public void BloodMoney_has_concrete_domain_and_application_capabilities()
     {
+        foreach (var name in new[] { "BloodMoneyChallenge", "BloodMoneyChallengeParticipant" })
+            Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney." + name && type.IsClass && !type.IsAbstract);
+        Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney.IBloodMoneyChallengeStore" && type.IsInterface);
+        foreach (var name in new[] { "CreateBloodMoneyChallengeUseCase", "AcceptBloodMoneyChallengeUseCase", "DeclineBloodMoneyChallengeUseCase",
+                     "CancelBloodMoneyChallengeUseCase", "ExpirePendingBloodMoneyChallengeUseCase", "GetBloodMoneyChallengeUseCase" })
+            Assert.Contains(ApplicationAssembly.GetTypes(), type => type.FullName == "Level5.Application.BloodMoney." + name && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditAccount" && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditTransaction" && type.IsClass && !type.IsAbstract);
         Assert.Contains(DomainAssembly.GetTypes(), type => type.FullName == "Level5.Domain.BloodMoney.BloodCreditReservation" && type.IsClass && !type.IsAbstract);
@@ -205,6 +211,19 @@ public sealed class DependencyRuleTests
         AssertBoundary(DomainAssembly, $"Level5.Domain.{module}", ["Level5.Domain.BloodMoney"]);
         AssertBoundary(ApplicationAssembly, $"Level5.Application.{module}", ["Level5.Application.BloodMoney", "Level5.Domain.BloodMoney"]);
     }
+
+    [Fact]
+    public void BloodMoney_infrastructure_does_not_reuse_Level5_game_stores_or_rows()
+        => AssertBoundary(InfrastructureAssembly, "Level5.Infrastructure.BloodMoney", [
+            "Level5.Domain.Competition", "Level5.Domain.Results", "Level5.Domain.Leaderboards",
+            "Level5.Application.Competition", "Level5.Application.Results", "Level5.Application.Leaderboards",
+            "Level5.Infrastructure.Competition", "Level5.Infrastructure.Leaderboards",
+            "Level5.Infrastructure.Persistence.Rows.VersusSeriesRow", "Level5.Infrastructure.Persistence.Rows.MatchResultRow",
+            "Level5.Application.Abstractions.IVersusSeriesStore", "Level5.Application.Abstractions.IRulesetCatalog",
+            "Level5.Application.Abstractions.IChallengeExpiryPolicy", "Level5.Application.Abstractions.IMatchResultStore",
+            "Level5.Application.Abstractions.ILeaderboardQuery", "Level5.Application.Abstractions.ILeaderboardPolicyCatalog",
+            "Level5.Domain.Ids.VersusSeriesId", "Level5.Domain.Ids.AttemptId", "Level5.Domain.Ids.MatchResultId",
+            "Level5.Domain.Ids.AccountId"]);
 
     private static void AssertBoundary(System.Reflection.Assembly assembly, string sourceNamespace, string[] forbidden)
     {
