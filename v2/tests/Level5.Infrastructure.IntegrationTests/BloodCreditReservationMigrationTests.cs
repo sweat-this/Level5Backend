@@ -43,7 +43,7 @@ public sealed class BloodCreditReservationMigrationTests
         var postings = await db.Set<BloodCreditPostingRow>().AsNoTracking().OrderBy(row => row.TransactionId).ThenBy(row => row.LineNumber).Select(row => new { row.TransactionId, row.LineNumber, row.PostingOwner, row.PlayerId, row.Amount }).ToListAsync();
         db.ChangeTracker.Clear();
         await db.Database.MigrateAsync();
-        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_credit_reservations" }, (await Tables(db)).Except(beforeTables).Order().ToArray());
+        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_chat_reports", "blood_money_credit_reservations" }, (await Tables(db)).Except(beforeTables).Order().ToArray());
         Assert.Empty(await db.Set<BloodCreditReservationRow>().ToListAsync());
         Assert.Equal(transactions, await db.Set<BloodCreditTransactionRow>().AsNoTracking().OrderBy(row => row.Id).Select(row => new { row.Id, row.Kind, row.SubjectPlayerId, row.PlayerDelta, row.ReferenceCode, row.CreatedAt }).ToListAsync());
         Assert.Equal(postings, await db.Set<BloodCreditPostingRow>().AsNoTracking().OrderBy(row => row.TransactionId).ThenBy(row => row.LineNumber).Select(row => new { row.TransactionId, row.LineNumber, row.PostingOwner, row.PlayerId, row.Amount }).ToListAsync());

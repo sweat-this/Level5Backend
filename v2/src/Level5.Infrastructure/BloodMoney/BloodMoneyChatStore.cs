@@ -9,9 +9,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Level5.Infrastructure.BloodMoney;
 
-/// <summary>All chat operations lock the canonical challenge before inspecting lifecycle or chat rows.
-/// Closure writers must use this same challenge-first order. Sends never lock financial rows.</summary>
-public sealed class BloodMoneyChatStore(Level5V2DbContext db, IClock clock) : IBloodMoneyChatStore
+/// <summary>Chat writes lock the canonical challenge before inspecting lifecycle or chat rows.
+/// Closure writers must use this same challenge-first order. Listing uses a read-only snapshot.</summary>
+public sealed partial class BloodMoneyChatStore(Level5V2DbContext db, IClock clock, IBloodMoneyChatCursorCodec cursors) : IBloodMoneyChatStore
 {
     public Task<SendBloodMoneyChallengeMessageResult> SendAsync(SendBloodMoneyChallengeMessageRequest request,
         BloodMoneyChatRatePolicy ratePolicy, CancellationToken cancellationToken)
@@ -75,7 +75,7 @@ public sealed class BloodMoneyChatStore(Level5V2DbContext db, IClock clock) : IB
         {
             var latest = await Messages(challengeId).MaxAsync(row => (long?)row.Sequence, cancellationToken) ?? 0;
             if (sequence < 0 || sequence > latest)
-                throw new BloodMoneyChatException("invalid_chat_read_sequence", "Read position is outside committed history.");
+                throw new BloodMoneyChatException("invalid_chat_read_position", "Read position is outside committed history.");
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO blood_money_chat_participant_state ("ChallengeId", "PlayerId", "LastReadSequence", "NotificationsMuted")
                 VALUES ({challengeId.Value}, {actor.Value}, {sequence}, false)
@@ -100,8 +100,7 @@ public sealed class BloodMoneyChatStore(Level5V2DbContext db, IClock clock) : IB
         Func<BloodMoneyChallenge, Task<T>> operation, CancellationToken cancellationToken)
     {
         // A chat commit must never flush another use case's staged challenge/financial work.
-        if (db.ChangeTracker.HasChanges() || db.Database.CurrentTransaction is not null || System.Transactions.Transaction.Current is not null)
-            throw new InvalidOperationException("Chat requires a clean scope with no caller-owned transaction.");
+        RequireCleanScope();
         return await db.Database.CreateExecutionStrategy().ExecuteAsync(async token =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, token);
@@ -110,15 +109,26 @@ public sealed class BloodMoneyChatStore(Level5V2DbContext db, IClock clock) : IB
                 """).ToListAsync(token);
             if (locked.Count == 0) throw Missing();
             // AsNoTracking is essential: a caller's earlier tracked lifecycle read must not win here.
-            var row = await db.Set<BloodMoneyChallengeRow>().AsNoTracking().Include(row => row.Participants).AsSingleQuery()
-                .SingleAsync(row => row.Id == id.Value, token);
-            var challenge = BloodMoneyChallengeStore.FromRow(row)!;
-            if (challenge.ActivatedAt is null || !challenge.Participants.Any(participant => participant.PlayerId == actor))
-                throw Missing();
+            var challenge = await Authorize(id, actor, token);
             var result = await operation(challenge);
             await transaction.CommitAsync(token);
             return result;
         }, cancellationToken);
+    }
+
+    private void RequireCleanScope()
+    {
+        if (db.ChangeTracker.HasChanges() || db.Database.CurrentTransaction is not null || System.Transactions.Transaction.Current is not null)
+            throw new InvalidOperationException("Chat requires a clean scope with no caller-owned transaction.");
+    }
+
+    private async Task<BloodMoneyChallenge> Authorize(BloodMoneyChallengeId id, PlayerId actor, CancellationToken token)
+    {
+        var row = await db.Set<BloodMoneyChallengeRow>().AsNoTracking().Include(row => row.Participants).AsSingleQuery()
+            .SingleOrDefaultAsync(row => row.Id == id.Value, token);
+        if (row is null || row.ActivatedAt is null || !row.Participants.Any(participant => participant.PlayerId == actor.Value))
+            throw Missing();
+        return BloodMoneyChallengeStore.FromRow(row)!;
     }
 
     private IQueryable<BloodMoneyChatMessageRow> Messages(BloodMoneyChallengeId id)

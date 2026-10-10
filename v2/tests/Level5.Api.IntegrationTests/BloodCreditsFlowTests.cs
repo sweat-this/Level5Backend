@@ -73,8 +73,7 @@ public sealed class BloodCreditsFlowTests(ApiFactory factory)
         var response = await factory.CreateClient().GetAsync("/swagger/v1/swagger.json");
         response.EnsureSuccessStatusCode();
         var document = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var path = Assert.Single(document.GetProperty("paths").EnumerateObject(),
-            item => item.Name.StartsWith("/api/v2/games/blood-money", StringComparison.Ordinal));
+        var path = Assert.Single(document.GetProperty("paths").EnumerateObject(), item => item.Name == Path);
         Assert.Equal(Path, path.Name);
         Assert.Equal("get", Assert.Single(path.Value.EnumerateObject()).Name);
         var schema = document.GetProperty("components").GetProperty("schemas").GetProperty("BloodCreditBalanceResponseDto");

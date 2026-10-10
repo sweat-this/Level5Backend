@@ -12,6 +12,22 @@ namespace Level5.Api.IntegrationTests;
 
 public sealed class ApiExceptionHandlerTests
 {
+    [Theory]
+    [InlineData("invalid_chat_message", 400)][InlineData("invalid_chat_cursor", 400)][InlineData("invalid_chat_limit", 400)]
+    [InlineData("invalid_chat_read_position", 400)][InlineData("invalid_chat_report", 400)]
+    [InlineData("chat_communication_restricted", 403)][InlineData("chat_read_only", 409)]
+    [InlineData("chat_message_conflict", 409)][InlineData("chat_report_already_exists", 409)]
+    [InlineData("chat_rate_limited", 429)][InlineData("unknown_chat_error", 500)]
+    public async Task Chat_errors_have_explicit_stable_statuses_and_rate_delay_is_rounded_up(string code, int status)
+    {
+        var (context, _) = await HandleAsync(new Level5.Application.BloodMoney.BloodMoneyChatException(code,
+            "Safe server message.", TimeSpan.FromMilliseconds(1101)));
+        Assert.Equal(status, context.Response.StatusCode);
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(status == 500 ? "internal_error" : code, body.GetProperty("code").GetString());
+        if (status == 429) Assert.Equal("2", context.Response.Headers.RetryAfter.ToString());
+        else Assert.False(context.Response.Headers.ContainsKey("Retry-After"));
+    }
     [Fact]
     public async Task A_translated_conflict_is_reported_as_409_without_leaking_database_details()
     {

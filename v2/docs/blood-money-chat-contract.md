@@ -6,6 +6,11 @@ behavior; it does not claim that chat storage, API, notification production or m
 is implemented. **Unrestricted persistent free text remains release-blocked on approved
 normal-message retention/account-erasure policy and operational report handling.**
 
+Implementation status: [MSG-002 persistence](blood-money-chat-persistence.md) and
+[MSG-003 authenticated API](blood-money-chat-api.md) now implement the scoped storage/HTTP
+capabilities. Notification production, protected operator handling and the production release
+gates below remain downstream work.
+
 ## Audited authority and scope
 
 All three `origin/dev` refs were re-fetched on 2026-10-10 (America/Chicago). Each repository's

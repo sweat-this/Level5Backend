@@ -45,6 +45,8 @@ public sealed class BloodMoneyChatTests
 
     private sealed class Store : IBloodMoneyChatStore
     {
+        public Task<BloodMoneyChatPage> ListAsync(ListBloodMoneyChallengeMessagesRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<BloodMoneyChatReportAcceptance> ReportAsync(ReportBloodMoneyChatMessageRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public SendBloodMoneyChallengeMessageRequest? Request { get; private set; }
         public BloodMoneyChatRatePolicy? Policy { get; private set; }
         public SendBloodMoneyChallengeMessageResult Result { get; } = new(new(Guid.NewGuid(), new(Guid.NewGuid()), 1,

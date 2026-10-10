@@ -48,7 +48,7 @@ public sealed class BloodCreditMigrationTests
         Assert.Equal(2, result.LevelId);
         Assert.Equal("{\"TotalPoints\": 90}", result.MetricsJson);
         Assert.Equal("upgrade-test", result.ClientVersion);
-        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_reservations", "blood_money_credit_transactions" },
+        Assert.Equal(new[] { "blood_money_challenge_participants", "blood_money_challenges", "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_chat_reports", "blood_money_credit_accounts", "blood_money_credit_postings", "blood_money_credit_reservations", "blood_money_credit_transactions" },
             (await Tables(db)).Except(beforeTables).Order().ToArray());
         Assert.Empty(await db.Set<BloodCreditAccountRow>().ToListAsync());
         Assert.Empty(await db.Set<BloodCreditTransactionRow>().ToListAsync());
