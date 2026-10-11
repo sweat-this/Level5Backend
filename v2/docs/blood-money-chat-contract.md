@@ -435,6 +435,10 @@ membership/reconnect/restriction revalidation. Arbitrary multiplayer free text r
 are met. Challenge membership is not multiplayer-session membership. #92 cannot infer trust
 from host assertions or this challenge contract. No WebSocket/realtime provider is selected.
 
+The [MSG-009 proposed trust ADR](blood-money-live-chat-trust-adr.md) and its isolated probe
+record the candidate verification path and unresolved live/consistency/liveness gates.
+They do not constitute approved or certified membership evidence and do not open MSG-010/011.
+
 ## Downstream ownership and required test matrix
 
 | Owner | Required handoff |
