@@ -20,6 +20,8 @@ algorithm, a host nonce substituted for a token,
 removed/different member, changed host, wrong room/environment, nonprivate/oversized lobby,
 duplicate member IDs, valid/different/disabled Backend account, duplicate JSON properties and
 Backend origin restrictions. A pass is offline evidence only.
+Failure-diagnostic regressions also distinguish disabled-account rejection from HTTP 403/503
+responses and check sanitized token, timeout and transport failures without network I/O.
 
 ## Live observation inputs
 
@@ -60,8 +62,20 @@ the returned private five-slot lobby's scope, original host and signed-subject m
 It sends no impersonation header, host proof, text or service-account credential.
 
 Exit 0 in live mode means **one successful observation**, not gate acceptance. Exit 2 means blocked
-configuration, rejected evidence or unavailable service; no raw diagnostics containing tokens are
-printed. Unknown claim representations must be investigated through protected provider evidence;
+configuration, rejected evidence or unavailable service. Failures print only a fixed stage/reason
+and the numeric HTTP status when a non-200 response was received, for example:
+
+```text
+BLOCKED: stage=BackendAccount; reason=ValidationRejected. No binding created.
+BLOCKED: stage=BackendRequest; reason=HttpStatusRejected; httpStatus=503. No binding created.
+```
+
+The stage identifies configuration, offline checks, Backend request/account validation, Unity
+keys/token validation, or Lobby request/membership validation. Reasons distinguish validation,
+HTTP rejection, transport failure, timeout, invalid JSON/token and unexpected failure. These labels
+locate the failure; an expected negative case still requires independently observed test setup.
+No credential, identity, URL, response body, reason phrase or exception text is printed.
+Unknown claim representations must be investigated through protected provider evidence;
 do not weaken validation until the exact profile is independently verified and reviewed.
 
 ## Required isolated live matrix
@@ -91,7 +105,7 @@ Real text delivery/moderation and gameplay isolation remain later Backend/Unity 
 
 | Check | Result |
 | --- | --- |
-| Release-mode offline probe | PASS, 32 assertions, including unsigned/missing-expiry/project-claim rejection |
+| Release-mode offline probe | PASS, 38 assertions, including cryptographic rejection and sanitized failure diagnostics |
 | Standalone Release build | PASS, zero warnings/errors |
 | Resolved transitive NuGet vulnerability check | No vulnerable packages reported by current configured sources |
 | Unconfigured `--live-local` attempt | Exit 2 / BLOCKED before HTTP calls; no credentials/configuration supplied |
@@ -102,8 +116,8 @@ Security review added final token-lifetime revalidation after the membership res
 unsigned/missing-expiry/mismatched-project-claim checks. It also retained provider-read/commit,
 unobserved membership changes and host liveness as unresolved acceptance gates. Scope review
 confirmed the spike is outside the production solution and changes no existing auth, transport,
-gameplay, chat, database or Platform implementation. The initial 22- and 29-check passes preceded
-the final additional checks; only the 32-check result describes the final probe source.
+gameplay, chat, database or Platform implementation. The initial 22-, 29- and 32-check passes preceded
+the diagnostic regressions; the 38-check result describes the current probe source.
 
 Docker inspection found `level5-postgres-local` running; no Backend API container exists in the
 current running/stopped container inventory. No hosted Backend is required or assumed.

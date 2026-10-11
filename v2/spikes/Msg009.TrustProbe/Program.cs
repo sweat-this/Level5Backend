@@ -14,11 +14,18 @@ internal static class Probe
     private const string Issuer = "https://player-auth.services.api.unity.com";
     private const int MaximumResponseBytes = 65_536;
 
+    private enum Stage { Configuration, OfflineChecks, BackendRequest, BackendAccount, UnityKeys, UnityToken, LobbyRequest, LobbyMembership }
+
     internal static async Task<int> RunAsync(string[] args)
     {
+        var stage = Stage.Configuration;
         try
         {
-            if (args.SequenceEqual(["--self-test"])) return SelfTest();
+            if (args.SequenceEqual(["--self-test"]))
+            {
+                stage = Stage.OfflineChecks;
+                return await SelfTestAsync();
+            }
             var localBackend = args.SequenceEqual(["--live-local"]);
             if (!localBackend && !args.SequenceEqual(["--live"]))
             {
@@ -41,26 +48,50 @@ internal static class Probe
             using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
             using var client = new HttpClient(handler);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            stage = Stage.BackendRequest;
             using var me = await GetJsonAsync(client, new Uri(origin, "api/v2/me"), backendToken, timeout.Token);
+            stage = Stage.BackendAccount;
             ValidateAccount(me.RootElement, backendPlayer);
+            stage = Stage.UnityKeys;
             using var jwks = await GetJsonAsync(client, new Uri(Issuer + "/.well-known/jwks.json"), null, timeout.Token);
             var keys = new JsonWebKeySet(jwks.RootElement.GetRawText()).GetSigningKeys();
+            stage = Stage.UnityToken;
             var subject = ValidateToken(unityToken, keys, project, environment);
+            stage = Stage.LobbyRequest;
             using var membership = await GetJsonAsync(client,
                 new Uri("https://lobby.services.api.unity.com/v1/" + lobby), unityToken, timeout.Token);
+            stage = Stage.LobbyMembership;
             ValidateMembership(membership.RootElement, lobby, project, environment, subject, host);
+            stage = Stage.UnityToken;
             Require(ValidateToken(unityToken, keys, project, environment) == subject);
             // The two remote reads are observations, not an atomic registration or authorization lease.
             Console.WriteLine("OBSERVED: authenticated Backend account and signed UGS subject in the requested private lobby.");
             Console.WriteLine("NOT CERTIFIED: durable binding, revocation races, host liveness, messaging and release gates.");
             return 0;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // IdentityModel/HTTP/JSON exception text can contain private values. No exception telemetry here.
-            Console.WriteLine("BLOCKED: probe rejected configuration, credentials, response or service availability. No binding created.");
+            Console.WriteLine(DescribeFailure(stage, exception));
             return 2;
         }
+    }
+
+    private static string DescribeFailure(Stage stage, Exception exception)
+    {
+        var reason = exception switch
+        {
+            OperationCanceledException => "Timeout",
+            HttpRequestException { StatusCode: not null } => "HttpStatusRejected",
+            HttpRequestException => "TransportFailure",
+            JsonException => "InvalidJson",
+            SecurityTokenException => "InvalidToken",
+            InvalidOperationException or FormatException or ArgumentException => "ValidationRejected",
+            _ => "UnexpectedFailure"
+        };
+        var status = exception is HttpRequestException { StatusCode: { } code }
+            ? $"; httpStatus={(int)code}" : "";
+        return $"BLOCKED: stage={stage}; reason={reason}{status}. No binding created.";
     }
 
     private static string Required(string name)
@@ -89,8 +120,9 @@ internal static class Probe
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
-        Require(response.StatusCode == HttpStatusCode.OK &&
-            response.Content.Headers.ContentType?.MediaType == "application/json");
+        if (response.StatusCode != HttpStatusCode.OK)
+            throw new HttpRequestException(null, null, response.StatusCode);
+        Require(response.Content.Headers.ContentType?.MediaType == "application/json");
         await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
         using var bytes = new MemoryStream();
         var buffer = new byte[4096];
@@ -162,7 +194,7 @@ internal static class Probe
             players.Contains(subject, StringComparer.Ordinal) && players.Contains(originalHost, StringComparer.Ordinal));
     }
 
-    private static int SelfTest()
+    private static async Task<int> SelfTestAsync()
     {
         var project = Guid.NewGuid();
         var environment = Guid.NewGuid();
@@ -243,7 +275,56 @@ internal static class Probe
         Reject(() => ValidateOrigin("http://backend.example", true));
         Reject(() => ValidateOrigin("https://backend.example/api", false));
         Reject(() => ValidateOrigin("https://user:password@backend.example", false));
+
+        // Exercise the actual account/HTTP failure paths without real credentials or network I/O.
+        string disabledFailure;
+        try
+        {
+            ValidateAccount(disabled.RootElement, account);
+            throw new Exception("Disabled account unexpectedly accepted.");
+        }
+        catch (InvalidOperationException exception)
+        {
+            disabledFailure = DescribeFailure(Stage.BackendAccount, exception);
+        }
+        Accept(() => Require(disabledFailure ==
+            "BLOCKED: stage=BackendAccount; reason=ValidationRejected. No binding created."));
+
+        const string privateFixture = "private-token-identity-response-fixture";
+        foreach (var status in new[] { HttpStatusCode.ServiceUnavailable, HttpStatusCode.Forbidden })
+        {
+            using var response = new HttpResponseMessage(status)
+            {
+                ReasonPhrase = privateFixture,
+                Content = new StringContent(privateFixture)
+            };
+            using var client = new HttpClient(new FixtureHandler(response));
+            try
+            {
+                using var unexpected = await GetJsonAsync(client, new Uri("https://fixture.invalid"),
+                    privateFixture, CancellationToken.None);
+                throw new Exception("Non-200 response unexpectedly accepted.");
+            }
+            catch (HttpRequestException exception)
+            {
+                var failure = DescribeFailure(Stage.BackendRequest, exception);
+                Accept(() => Require(failure ==
+                    $"BLOCKED: stage=BackendRequest; reason=HttpStatusRejected; httpStatus={(int)status}. No binding created."));
+            }
+        }
+        Accept(() => Require(DescribeFailure(Stage.UnityToken, new SecurityTokenException(privateFixture)) ==
+            "BLOCKED: stage=UnityToken; reason=InvalidToken. No binding created."));
+        Accept(() => Require(DescribeFailure(Stage.LobbyRequest, new OperationCanceledException(privateFixture)) ==
+            "BLOCKED: stage=LobbyRequest; reason=Timeout. No binding created."));
+        Accept(() => Require(DescribeFailure(Stage.UnityKeys, new HttpRequestException(privateFixture)) ==
+            "BLOCKED: stage=UnityKeys; reason=TransportFailure. No binding created."));
         Console.WriteLine($"PASS: {passed} offline cryptographic/response assertions. No provider or Backend contacted; no live certification.");
         return 0;
+    }
+
+    private sealed class FixtureHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(response);
     }
 }
