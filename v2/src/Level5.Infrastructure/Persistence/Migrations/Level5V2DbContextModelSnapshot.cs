@@ -493,6 +493,66 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.ToTable("auth_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.BugReportRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("category");
+
+                    b.Property<Guid>("ClientSubmissionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("client_submission_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("GameKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("game_key");
+
+                    b.Property<string>("GameVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("game_version");
+
+                    b.Property<Guid>("ReporterPlayerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reporter_player_id");
+
+                    b.Property<string>("StepsToReproduce")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)")
+                        .HasColumnName("steps_to_reproduce");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)")
+                        .HasColumnName("title");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReporterPlayerId", "ClientSubmissionId")
+                        .IsUnique();
+
+                    b.ToTable("bug_reports", (string)null);
+                });
+
             modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.EmailVerificationChallengeRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1026,6 +1086,15 @@ namespace Level5.Infrastructure.Persistence.Migrations
                     b.HasOne("Level5.Infrastructure.Persistence.Rows.AccountRow", null)
                         .WithMany()
                         .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Level5.Infrastructure.Persistence.Rows.BugReportRow", b =>
+                {
+                    b.HasOne("Level5.Infrastructure.Persistence.Rows.PlayerProfileRow", null)
+                        .WithMany()
+                        .HasForeignKey("ReporterPlayerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
