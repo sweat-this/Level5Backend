@@ -33,6 +33,13 @@ builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
     var fallback = options.InvalidModelStateResponseFactory;
     options.InvalidModelStateResponseFactory = context =>
     {
+        if (context.ActionDescriptor.RouteValues["controller"] == "BugReports")
+        {
+            var bugProblem = new ProblemDetails { Status = 400, Title = "Bug report request is invalid.", Type = "https://level5.game/errors/invalid_bug_report" };
+            bugProblem.Extensions["code"] = "invalid_bug_report";
+            bugProblem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+            return new BadRequestObjectResult(bugProblem);
+        }
         if (context.ActionDescriptor.RouteValues["controller"] != "BloodMoneyChat") return fallback(context);
         var action = context.ActionDescriptor.RouteValues["action"];
         var code = action switch
@@ -134,6 +141,7 @@ builder.Services.AddScoped<RevokeProductEntitlementUseCase>();
 builder.Services.AddScoped<INotificationWriter, NotificationWriter>();
 builder.Services.AddScoped<ListNotificationsUseCase>();
 builder.Services.AddScoped<SetNotificationReadStateUseCase>();
+builder.Services.AddScoped<SubmitBugReportUseCase>();
 builder.Services.AddScoped<SendFriendRequestUseCase>();
 builder.Services.AddScoped<AcceptFriendRequestUseCase>();
 builder.Services.AddScoped<DeclineFriendRequestUseCase>();
@@ -206,6 +214,20 @@ var securityRequestLimit = builder.Environment.IsProduction() ? 5 : 1000;
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    // Account identity comes from the verified JWT, never a submitted field. The same bounded
+    // policy applies in every environment; no waiting queue or automatic write retries.
+    options.AddPolicy("platform-bug-reports", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.User.FindFirst("sub")?.Value ?? "unauthenticated",
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.OnRejected = async (context, ct) =>
+    {
+        if (context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName != "platform-bug-reports") return;
+        context.HttpContext.Response.Headers.RetryAfter = "60";
+        var problem = new ProblemDetails { Status = 429, Title = "Too many bug report attempts. Please wait before retrying.", Type = "https://level5.game/errors/bug_report_rate_limited" };
+        problem.Extensions["code"] = "bug_report_rate_limited";
+        problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+        await context.HttpContext.Response.WriteAsJsonAsync(problem, ct);
+    };
     options.AddPolicy(AuthRateLimitPolicyNames.Register,
         httpContext => CreateSecurityRateLimitPartition(httpContext, securityRequestLimit));
     options.AddPolicy(AuthRateLimitPolicyNames.Login,

@@ -14,6 +14,7 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
     public DbSet<PlayerProfileRow> PlayerProfiles => Set<PlayerProfileRow>();
     public DbSet<ProductEntitlementRow> ProductEntitlements => Set<ProductEntitlementRow>();
     public DbSet<PlayerNotificationRow> PlayerNotifications => Set<PlayerNotificationRow>();
+    public DbSet<BugReportRow> BugReports => Set<BugReportRow>();
     public DbSet<FriendRequestRow> FriendRequests => Set<FriendRequestRow>();
     public DbSet<FriendshipRow> Friendships => Set<FriendshipRow>();
     public DbSet<VersusSeriesRow> VersusSeries => Set<VersusSeriesRow>();
@@ -21,6 +22,23 @@ public sealed class Level5V2DbContext(DbContextOptions<Level5V2DbContext> option
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<BugReportRow>(entity =>
+        {
+            entity.ToTable("bug_reports");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ReporterPlayerId).HasColumnName("reporter_player_id");
+            entity.Property(e => e.ClientSubmissionId).HasColumnName("client_submission_id");
+            entity.Property(e => e.GameKey).HasColumnName("game_key").HasMaxLength(32);
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(BugReportLimits.Title);
+            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(BugReportLimits.Description);
+            entity.Property(e => e.Category).HasColumnName("category").HasMaxLength(32);
+            entity.Property(e => e.StepsToReproduce).HasColumnName("steps_to_reproduce").HasMaxLength(BugReportLimits.StepsToReproduce);
+            entity.Property(e => e.GameVersion).HasColumnName("game_version").HasMaxLength(BugReportLimits.GameVersion);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(e => new { e.ReporterPlayerId, e.ClientSubmissionId }).IsUnique();
+            entity.HasOne<PlayerProfileRow>().WithMany().HasForeignKey(e => e.ReporterPlayerId).OnDelete(DeleteBehavior.Restrict);
+        });
         Level5.Infrastructure.BloodMoney.BloodCreditModel.Configure(modelBuilder);
         Level5.Infrastructure.BloodMoney.BloodMoneyChallengeModel.Configure(modelBuilder);
         Level5.Infrastructure.BloodMoney.BloodMoneyChatModel.Configure(modelBuilder);

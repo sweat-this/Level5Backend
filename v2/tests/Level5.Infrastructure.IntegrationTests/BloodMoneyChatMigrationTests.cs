@@ -42,7 +42,7 @@ public sealed class BloodMoneyChatMigrationTests
             Assert.Equal(PostgresErrorCodes.DuplicateTable, (await Assert.ThrowsAsync<PostgresException>(() => db.Database.MigrateAsync())).SqlState);
             Assert.Equal(chat, await ChatSnapshot(db)); Assert.Equal(authority, await Snapshot(db));
             Assert.False(await db.Database.SqlQueryRaw<bool>("SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'AK_blood_money_chat_messages_ChallengeId_Id') AS \"Value\"").SingleAsync());
-            Assert.Single(await db.Database.GetPendingMigrationsAsync());
+            Assert.Equal(db.Database.GetMigrations().SkipWhile(id => id != chatMigration).Skip(1), await db.Database.GetPendingMigrationsAsync());
             // Disposable test database sentinel only.
             await db.Database.ExecuteSqlRawAsync("DROP TABLE blood_money_chat_reports");
         }
@@ -76,7 +76,7 @@ public sealed class BloodMoneyChatMigrationTests
         var before = await Snapshot(db); var tables = await Tables(db); db.ChangeTracker.Clear();
         await db.Database.MigrateAsync();
         Assert.Equal(before, await Snapshot(db));
-        Assert.Equal(new[] { "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_chat_reports" }, (await Tables(db)).Except(tables).Order());
+        Assert.Equal(new[] { "blood_money_chat_messages", "blood_money_chat_participant_state", "blood_money_chat_reports", "bug_reports" }, (await Tables(db)).Except(tables).Order());
         Assert.Empty(await db.Set<BloodMoneyChatMessageRow>().ToListAsync());
         Assert.Empty(await db.Set<BloodMoneyChatParticipantStateRow>().ToListAsync());
         Assert.Empty(await db.Database.GetPendingMigrationsAsync()); Assert.False(db.Database.HasPendingModelChanges());
@@ -98,7 +98,7 @@ public sealed class BloodMoneyChatMigrationTests
         {
             Assert.Equal(before, await Snapshot(fresh)); Assert.Equal(history, await fresh.Database.GetAppliedMigrationsAsync());
             Assert.DoesNotContain("blood_money_chat_messages", await Tables(fresh));
-            Assert.Equal(2, (await fresh.Database.GetPendingMigrationsAsync()).Count());
+            Assert.Equal(fresh.Database.GetMigrations().SkipWhile(id => id != PreviousMigration).Skip(1), await fresh.Database.GetPendingMigrationsAsync());
         }
         // Only this test's sentinel in its dedicated disposable database is removed.
         await db.Database.ExecuteSqlRawAsync("DROP TABLE blood_money_chat_participant_state");
